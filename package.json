@@ -1,0 +1,27 @@
+{
+    "name": "postre-ordering-system",
+    "version": "1.0.0",
+    "description": "Postre Food Products - Messenger Ordering & Reservation System",
+    "main": "dist/server.js",
+    "scripts": {
+        "build": "tsc && xcopy public dist\\public /E /I /Y /Q",
+        "start": "node dist/server.js",
+        "dev": "tsc && node dist/server.js",
+        "seed": "node dist/db/seed.js"
+    },
+    "dependencies": {
+        "bcryptjs": "^2.4.3",
+        "dotenv": "^16.4.5",
+        "express": "^4.19.2",
+        "jsonwebtoken": "^9.0.2",
+        "multer": "^2.3.0"
+    },
+    "devDependencies": {
+        "@types/bcryptjs": "^2.4.6",
+        "@types/express": "^4.17.21",
+        "@types/jsonwebtoken": "^9.0.6",
+        "@types/multer": "^2.2.0",
+        "@types/node": "^22.5.0",
+        "typescript": "^5.5.4"
+    }
+}

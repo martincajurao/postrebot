@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Postre Admin</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --ink: #1a1d21; --muted: #6b7280;
+    --brand: #e0553f; --brand-dark: #c9442f; --ok: #16a34a; --warn: #d97706;
+    --bad: #dc2626; --info: #2563eb; --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--ink); min-height: 100vh; }
+  button { font: inherit; cursor: pointer; }
+  input, select, textarea { font: inherit; padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 10px; width: 100%; background: #fff; }
+  input:focus, select:focus { outline: 2px solid var(--brand); border-color: transparent; }
+
+  /* ---------- login ---------- */
+  #login-view { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .login-card { background: var(--card); border-radius: var(--radius); box-shadow: 0 10px 40px rgba(0,0,0,.08); padding: 40px; width: 360px; max-width: 92vw; }
+  .login-card h1 { font-size: 22px; margin-bottom: 4px; }
+  .login-card p { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  .brand-dot { color: var(--brand); }
+
+  /* ---------- layout ---------- */
+  #app { display: none; }
+  header.topbar { background: var(--card); box-shadow: 0 1px 4px rgba(0,0,0,.06); position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; }
+  header.topbar .logo { font-weight: 700; font-size: 17px; }
+  header.topbar .user { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+  .layout { display: flex; max-width: 1200px; margin: 0 auto; }
+  nav.sidebar { width: 200px; padding: 20px 12px; }
+  nav.sidebar a { display: block; padding: 11px 14px; border-radius: 10px; color: var(--ink); text-decoration: none; margin-bottom: 4px; font-size: 15px; }
+  nav.sidebar a.active { background: var(--brand); color: #fff; font-weight: 600; }
+  main.content { flex: 1; padding: 24px 20px 80px; min-width: 0; }
+
+  /* bottom nav on mobile */
+  nav.bottombar { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: var(--card);
+    box-shadow: 0 -2px 10px rgba(0,0,0,.08); z-index: 20; }
+  nav.bottombar a { flex: 1; text-align: center; padding: 10px 4px; font-size: 11px; color: var(--muted); text-decoration: none; }
+  nav.bottombar a.active { color: var(--brand); font-weight: 700; }
+  nav.bottombar a span { display: block; font-size: 18px; }
+  @media (max-width: 760px) {
+    nav.sidebar { display: none; }
+    nav.bottombar { display: flex; }
+    main.content { padding: 16px 14px 90px; }
+  }
+
+  /* ---------- components ---------- */
+  h2.page-title { margin-bottom: 18px; font-size: 22px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .stat { background: var(--card); border-radius: var(--radius); padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+  .stat .num { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .stat .lbl { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.05); margin-bottom: 16px; }
+  .card h3 { font-size: 15px; margin-bottom: 12px; }
+
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; }
+  .b-PENDING { background: #fef3c7; color: var(--warn); }
+  .b-CONFIRMED { background: #dbeafe; color: var(--info); }
+  .b-PREPARING { background: #ede9fe; color: #7c3aed; }
+  .b-READY { background: #d1fae5; color: var(--ok); }
+  .b-COMPLETED { background: #e5e7eb; color: var(--muted); }
+  .b-CANCELLED { background: #fee2e2; color: var(--bad); }
+  .b-UNPAID { background: #fee2e2; color: var(--bad); }
+  .b-PAID { background: #d1fae5; color: var(--ok); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 8px; }
+  td { padding: 10px 8px; border-top: 1px solid #f0f1f3; vertical-align: top; }
+  tr:hover td { background: #fafbfc; }
+  .table-wrap { overflow-x: auto; }
+
+  .btn { border: none; border-radius: 10px; padding: 9px 16px; font-weight: 600; background: var(--brand); color: #fff; }
+  .btn:hover { background: var(--brand-dark); }
+  .btn.ghost { background: #eef0f2; color: var(--ink); }
+  .btn.sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+  .btn.danger { background: var(--bad); }
+  .btn.ok { background: var(--ok); }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* modal */
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 50; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+  .overlay.show { display: flex; }
+  .modal { background: var(--card); border-radius: var(--radius); padding: 24px; width: 480px; max-width: 96vw; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+  .modal h3 { margin-bottom: 16px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .modal .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+  #toast { position: fixed; top: 18px; right: 18px; z-index: 99; display: flex; flex-direction: column; gap: 8px; }
+  .toast { background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.25); animation: fadein .2s; }
+  .toast.err { background: var(--bad); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(-6px);} to { opacity: 1; } }
+
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .slot-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f1f3; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-view">
+  <div class="login-card">
+    <h1>Postre <span class="brand-dot">Admin</span></h1>
+    <p>Messenger Ordering &amp; Reservation System</p>
+    <form id="login-form">
+      <div class="field"><label>Username</label><input id="login-user" autocomplete="username" required></div>
+      <div class="field"><label>Password</label><input id="login-pass" type="password" autocomplete="current-password" required></div>
+      <button class="btn" style="width:100%" type="submit">Sign in</button>
+    </form>
+    <p id="login-err" class="muted" style="color:var(--bad);margin-top:10px"></p>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app">
+  <header class="topbar">
+    <div class="logo">Postre <span class="brand-dot">Admin</span></div>
+    <div class="user"><span id="whoami"></span><button class="btn ghost sm" id="logout-btn">Log out</button></div>
+  </header>
+  <div class="layout">
+    <nav class="sidebar" id="side-nav">
+      <a href="#" data-view="dashboard" class="active">📊 Dashboard</a>
+      <a href="#" data-view="orders">🛒 Orders</a>
+      <a href="#" data-view="reservations">📅 Reservations</a>
+      <a href="#" data-view="menu">🍽️ Menu</a>
+      <a href="#" data-view="packages">🔥 Packages</a>
+      <a href="#" data-view="customers">👥 Customers</a>
+      <a href="#" data-view="delivery">🚚 Delivery</a>
+      <a href="#" data-view="settings">⚙️ Settings</a>
+    </nav>
+    <main class="content" id="main"></main>
+  </div>
+  <nav class="bottombar" id="bottom-nav">
+    <a href="#" data-view="dashboard" class="active"><span>📊</span>Home</a>
+    <a href="#" data-view="orders"><span>🛒</span>Orders</a>
+    <a href="#" data-view="reservations"><span>📅</span>Resv.</a>
+    <a href="#" data-view="menu"><span>🍽️</span>Menu</a>
+    <a href="#" data-view="settings"><span>⚙️</span>More</a>
+  </nav>
+</div>
+
+<div class="overlay" id="modal-overlay"><div class="modal" id="modal"></div></div>
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
