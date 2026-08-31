@@ -1,0 +1,3062 @@
+{
+  "Carousel": {
+    "1c4b82aa-5d59-48f0-ab22-3a0aff1b46ec": {
+      "description": "A feast for the eyes and the palate! Enjoy tender, flavorful seafood.",
+      "id": "1c4b82aa-5d59-48f0-ab22-3a0aff1b46ec",
+      "image": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/carousel_1770881755108_475909185_1106145444591182_6284497971800005791_n.jpg",
+      "name": "Seafood"
+    },
+    "cb8a1703-2847-4e1a-a5c1-05a565f0cc2c": {
+      "description": "Enjoy creamy, cheesy carbonara paired with our signature Mango Crepe for a sweet finish.",
+      "id": "cb8a1703-2847-4e1a-a5c1-05a565f0cc2c",
+      "image": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/carousel_1770887674912_received_2085041892317147.jpeg",
+      "name": "Food Packs 2D",
+      "price": "90"
+    },
+    "cd3c655d-6e6d-4f8e-b97b-224acc2e9b3a": {
+      "description": "Menu inclusion: Rice, Pork Steak, Chicken Buffalo and Mix Vegetables.",
+      "id": "cd3c655d-6e6d-4f8e-b97b-224acc2e9b3a",
+      "image": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/carousel_1770887082961_IMG_1910.JPG",
+      "name": "Food Packs 4D",
+      "price": "140"
+    },
+    "d44b5b6a-56fc-4ab1-aa34-0fc3698ae462": {
+      "description": "A satisfying pairing of premium meat and flavorful pasta, finished with our signature Mango Crepe for a sweet tropical touch.",
+      "id": "d44b5b6a-56fc-4ab1-aa34-0fc3698ae462",
+      "image": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/carousel_1770884969296_IMG_1463.JPG",
+      "name": "Comida Combo"
+    },
+    "ee67860d-4e23-4ddd-b64a-8681ce26baff": {
+      "description": "Delicate, crepes filled with fresh, juicy mangoes and smooth whipped cream, perfectly balanced.",
+      "id": "ee67860d-4e23-4ddd-b64a-8681ce26baff",
+      "image": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/carousel_1770884085899_476329443_1142042886921320_4539609462862979813_n.jpg",
+      "name": "Mango Crepe",
+      "price": ""
+    }
+  },
+  "Combo": {
+    "C1": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "desc": "Comida Combo #1",
+      "disc": 800,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/combo_1787887160135_83AB9AD6-D8BA-4793-AE95-E73584BFB8F7.jpeg",
+      "members": [
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/buffalo.jpg",
+          "isHot": true,
+          "menuCategory": "CH",
+          "menuCode": "775a153d-d821-47e1-8eb2-d10239906717",
+          "menuDesc": "lorem epsum",
+          "menuName": "Chicken Buffalo",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/palabok.jpg",
+          "isHot": true,
+          "menuCategory": "PA",
+          "menuCode": "aa4d8c6c-90ff-42a8-8248-a39b2dc2b9f6",
+          "menuDesc": "lorem epsum",
+          "menuName": "Palabok",
+          "menuPrices": {
+            "large": "900",
+            "medium": "600"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/rebozado.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "af6d8d50-6098-4ade-9f28-58d5afdd5bfa",
+          "menuDesc": "lorem epsum",
+          "menuName": "Pork Rebozdo",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+          "isHot": true,
+          "menuCategory": "MC",
+          "menuCode": "ffbb215e-727e-4830-92a9-09ab60ccdc52",
+          "menuDesc": "lorem epsum",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          }
+        }
+      ],
+      "name": "C1",
+      "price": 3100
+    },
+    "C1-3k": {
+      "branches": [
+        "Naga"
+      ],
+      "desc": "Comida Combo #1",
+      "disc": "700",
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/combo_1787887820469_3k.jpg",
+      "members": [
+        {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/ribs.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "2d19b937-320d-413c-8be8-abfada681a6c",
+          "menuDesc": "Pork PO Special",
+          "menuName": "Pork Spare Ribs",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1200"
+          }
+        },
+        {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/buffalo.jpg",
+          "isHot": true,
+          "menuCategory": "CH",
+          "menuCode": "775a153d-d821-47e1-8eb2-d10239906717",
+          "menuDesc": "Chicken CH Special",
+          "menuName": "Chicken Buffalo",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          }
+        },
+        {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/rebozado.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "af6d8d50-6098-4ade-9f28-58d5afdd5bfa",
+          "menuDesc": "Pork PO Special",
+          "menuName": "Pork Rebozdo",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          }
+        },
+        {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+          "isHot": true,
+          "menuCategory": "MC",
+          "menuCode": "ffbb215e-727e-4830-92a9-09ab60ccdc52",
+          "menuDesc": "Mango MC Special",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          }
+        }
+      ],
+      "name": "C1-3k",
+      "price": 3700
+    },
+    "C2": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "desc": "Comida Combo #2",
+      "disc": "1000",
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/combo_1787887395250_phonto.jpeg",
+      "members": [
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/ribs.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "2d19b937-320d-413c-8be8-abfada681a6c",
+          "menuDesc": "lorem epsum",
+          "menuName": "Pork Spare Ribs",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1200"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/buffalo.jpg",
+          "isHot": true,
+          "menuCategory": "CH",
+          "menuCode": "775a153d-d821-47e1-8eb2-d10239906717",
+          "menuDesc": "lorem epsum",
+          "menuName": "Chicken Buffalo",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/bami.jpg",
+          "isHot": true,
+          "menuCategory": "PA",
+          "menuCode": "77d4f3e1-0328-4b4d-9ada-6f377c1819bb",
+          "menuDesc": "lorem epsum",
+          "menuName": "Pancit Bam-i",
+          "menuPrices": {
+            "large": "900",
+            "medium": "600"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/rebozado.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "af6d8d50-6098-4ade-9f28-58d5afdd5bfa",
+          "menuDesc": "lorem epsum",
+          "menuName": "Pork Rebozdo",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+          "isHot": true,
+          "menuCategory": "MC",
+          "menuCode": "ffbb215e-727e-4830-92a9-09ab60ccdc52",
+          "menuDesc": "lorem epsum",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          }
+        }
+      ],
+      "name": "C2",
+      "price": 4300
+    },
+    "C3": {
+      "branches": [
+        "naga"
+      ],
+      "desc": "Comida Combo #3",
+      "disc": "1100",
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/combo_1787887461160_9E9C3A0F-A4E3-4239-BB65-F5B206AC96D0.jpeg",
+      "members": [
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/475702305_537082985365058_2451065097562530094_n.jpg",
+          "isHot": false,
+          "menuCategory": "CH",
+          "menuCode": "0b1470a0-6ef1-4902-a311-50474e51b616",
+          "menuDesc": "lorem epsum",
+          "menuName": "Buttered Chicken",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/ribs.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "2d19b937-320d-413c-8be8-abfada681a6c",
+          "menuDesc": "lorem epsum",
+          "menuName": "Pork Spare Ribs",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1200"
+          }
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/beef steak.jpg",
+          "isHot": true,
+          "menuCategory": "BF",
+          "menuCode": "75db39e1-5dc3-4e7f-979d-4402e7a7426e",
+          "menuDesc": "lorem epsum",
+          "menuName": "Beef Steak",
+          "menuPrices": {
+            "large": 1900,
+            "medium": "1300"
+          }
+        },
+        {
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/honey glazed.jpg",
+          "isHot": false,
+          "menuCategory": "PO",
+          "menuCode": "8b24da3b-f343-4238-af03-8593b6d17969",
+          "menuDesc": "lorem epsum",
+          "menuDisc": 250,
+          "menuName": "Pork Honey Glazed",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          },
+          "menuStatus": "Active"
+        },
+        {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+          "isHot": true,
+          "menuCategory": "MC",
+          "menuCode": "ffbb215e-727e-4830-92a9-09ab60ccdc52",
+          "menuDesc": "lorem epsum",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          }
+        }
+      ],
+      "name": "C3",
+      "price": 5000
+    },
+    "C3a": {
+      "branches": [
+        "Calbayog"
+      ],
+      "desc": "Comida Combo #3",
+      "disc": "1100",
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/combo_1751950438517_c3.2.jpg",
+      "members": {
+        "775a153d-d821-47e1-8eb2-d10239906717": {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/buffalo.jpg",
+          "isHot": true,
+          "menuCategory": "CH",
+          "menuCode": "775a153d-d821-47e1-8eb2-d10239906717",
+          "menuDesc": "Chicken CH Special",
+          "menuName": "Chicken Buffalo",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          }
+        },
+        "77d4f3e1-0328-4b4d-9ada-6f377c1819bb": {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/bami.jpg",
+          "isHot": true,
+          "menuCategory": "PA",
+          "menuCode": "77d4f3e1-0328-4b4d-9ada-6f377c1819bb",
+          "menuDesc": "Pancit PA Special",
+          "menuName": "Pancit Bam-i",
+          "menuPrices": {
+            "large": "900",
+            "medium": "600"
+          }
+        },
+        "9d1acebd-3831-4358-8184-85ae9c57aea5": {
+          "branches": [
+            "Calbayog"
+          ],
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/belly.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "9d1acebd-3831-4358-8184-85ae9c57aea5",
+          "menuDesc": "Lechon PO Special",
+          "menuDisc": 0,
+          "menuName": "Lechon Belly",
+          "menuPrices": {
+            "large": "3500",
+            "medium": "2300"
+          },
+          "menuStatus": "Active"
+        },
+        "af6d8d50-6098-4ade-9f28-58d5afdd5bfa": {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/rebozado.jpg",
+          "isHot": true,
+          "menuCategory": "PO",
+          "menuCode": "af6d8d50-6098-4ade-9f28-58d5afdd5bfa",
+          "menuDesc": "Pork PO Special",
+          "menuName": "Pork Rebozdo",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          }
+        },
+        "ffbb215e-727e-4830-92a9-09ab60ccdc52": {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+          "isHot": true,
+          "menuCategory": "MC",
+          "menuCode": "ffbb215e-727e-4830-92a9-09ab60ccdc52",
+          "menuDesc": "Mango MC Special",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          }
+        }
+      },
+      "name": "C3a",
+      "price": "4300"
+    },
+    "E1": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "desc": "El Piscado #1",
+      "disc": "1100",
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/E1.jpg",
+      "members": {
+        "4c613edb-2e5f-4de1-b023-69d79466cb65": {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/f fillet.jpg",
+          "isHot": true,
+          "menuCategory": "SF",
+          "menuCode": "4c613edb-2e5f-4de1-b023-69d79466cb65",
+          "menuDesc": "lorem epsum",
+          "menuName": "Fish Fillet",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          }
+        },
+        "54a4872b-a9e1-4d73-afee-720f760e0655": {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/kinilaw.jpg",
+          "isHot": false,
+          "menuCategory": "SF",
+          "menuCode": "54a4872b-a9e1-4d73-afee-720f760e0655",
+          "menuDesc": "lorem epsum",
+          "menuName": "Kinilaw",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          }
+        },
+        "6431af57-9208-4cfc-94ec-e13dc2799944": {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/chicken fillet.jpg",
+          "isHot": true,
+          "menuCategory": "CH",
+          "menuCode": "6431af57-9208-4cfc-94ec-e13dc2799944",
+          "menuDesc": "lorem epsum",
+          "menuName": "Chicken Fillet",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          }
+        },
+        "ce74d188-1df6-456a-b8d0-43969c9dfd54": {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/calamares.jpg",
+          "isHot": true,
+          "menuCategory": "SF",
+          "menuCode": "ce74d188-1df6-456a-b8d0-43969c9dfd54",
+          "menuDesc": "lorem epsum",
+          "menuName": "Calamares",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          }
+        },
+        "ffbb215e-727e-4830-92a9-09ab60ccdc52": {
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+          "isHot": true,
+          "menuCategory": "MC",
+          "menuCode": "ffbb215e-727e-4830-92a9-09ab60ccdc52",
+          "menuDesc": "lorem epsum",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          }
+        }
+      },
+      "name": "E1",
+      "price": "4400"
+    },
+    "E2": {
+      "branches": [
+        null,
+        "Calbayog"
+      ],
+      "desc": "El Pescado #2",
+      "disc": "2300",
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/e2 final.jpg",
+      "members": {
+        "03aca9d5-ec96-44e3-9f25-2ffe489a1035": {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/shrimp.jpg",
+          "isHot": false,
+          "menuCategory": "SF",
+          "menuCode": "03aca9d5-ec96-44e3-9f25-2ffe489a1035",
+          "menuDesc": "",
+          "menuDisc": 0,
+          "menuName": "Sweet & Sour Shrimp",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          },
+          "menuStatus": "Active"
+        },
+        "34c8bf82-2592-4b06-818c-1a15fea33246": {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/sweet&sour.jpg",
+          "isHot": false,
+          "menuCategory": "SF",
+          "menuCode": "34c8bf82-2592-4b06-818c-1a15fea33246",
+          "menuDesc": "",
+          "menuDisc": 0,
+          "menuName": "Sweet & Sour Fish",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          },
+          "menuStatus": "Active"
+        },
+        "4f45a66d-5739-40eb-8bc4-6a410ea1f108": {
+          "branches": [
+            "calbayog",
+            "naga"
+          ],
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/temp.jpg",
+          "isHot": false,
+          "menuCategory": "SF",
+          "menuCode": "4f45a66d-5739-40eb-8bc4-6a410ea1f108",
+          "menuDesc": "Crispy, light, fried. ",
+          "menuDisc": 0,
+          "menuName": "Tempura",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          },
+          "menuStatus": "Active"
+        },
+        "54a4872b-a9e1-4d73-afee-720f760e0655": {
+          "branches": [
+            "naga",
+            "calbayog"
+          ],
+          "buyQty": 1,
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/kinilaw.jpg",
+          "isHot": false,
+          "menuCategory": "SF",
+          "menuCode": "54a4872b-a9e1-4d73-afee-720f760e0655",
+          "menuDesc": "lorem epsum",
+          "menuName": "Kinilaw",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          }
+        },
+        "a6e79045-f5b2-4d56-ac91-ae11f1dd792a": {
+          "branches": [
+            "calbayog"
+          ],
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/scallops.jpg",
+          "isHot": true,
+          "menuCategory": "SF",
+          "menuCode": "a6e79045-f5b2-4d56-ac91-ae11f1dd792a",
+          "menuDesc": "",
+          "menuDisc": 0,
+          "menuName": "Scallops",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1300"
+          },
+          "menuStatus": "Active"
+        }
+      },
+      "name": "E2",
+      "price": "4200"
+    }
+  },
+  "Menu": {
+    "02c10f2b-9a1d-45ec-81c2-873a007b349a": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/menu_1787822901481_469346108_603168415513165_8086422763165238652_n.jpg",
+      "isHot": true,
+      "menuCategory": "MC",
+      "menuCode": "02c10f2b-9a1d-45ec-81c2-873a007b349a",
+      "menuDesc": "Light, Tropical, Creamy",
+      "menuName": "Mango Crepe (S)",
+      "menuPrice": "350",
+      "menuPrices": {
+        "medium": "350.0"
+      }
+    },
+    "03aca9d5-ec96-44e3-9f25-2ffe489a1035": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/shrimp.jpg",
+      "isHot": false,
+      "menuCategory": "SF",
+      "menuCode": "03aca9d5-ec96-44e3-9f25-2ffe489a1035",
+      "menuDesc": "Bright, Juicy, Bold",
+      "menuDisc": 0,
+      "menuName": "Sweet & Sour Shrimp",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      },
+      "menuStatus": "Active"
+    },
+    "0b1470a0-6ef1-4902-a311-50474e51b616": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/menu_1769740914111_FB_IMG_1716609277566(1).jpeg",
+      "isHot": true,
+      "menuCategory": "CH",
+      "menuCode": "0b1470a0-6ef1-4902-a311-50474e51b616",
+      "menuDesc": "Creamy, Mild, Comforting",
+      "menuName": "Buttered Chicken",
+      "menuPrice": "901",
+      "menuPrices": {
+        "large": "1400",
+        "medium": "900.0"
+      }
+    },
+    "2ca5e4d5-b5d1-4f99-a235-a45203363553": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/caldereta.jpg",
+      "isHot": true,
+      "menuCategory": "PO",
+      "menuCode": "2ca5e4d5-b5d1-4f99-a235-a45203363553",
+      "menuDesc": "Rich, Hearty, Spiced",
+      "menuName": "Pork Caldereta",
+      "menuPrice": "1200",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1200.0"
+      }
+    },
+    "2d19b937-320d-413c-8be8-abfada681a6c": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/ribs.jpg",
+      "isHot": true,
+      "menuCategory": "PO",
+      "menuCode": "2d19b937-320d-413c-8be8-abfada681a6c",
+      "menuDesc": "Meaty, Smoky, Saucy",
+      "menuName": "Pork Spare Ribs",
+      "menuPrice": "1200",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1200.0"
+      }
+    },
+    "2f8ba5f0-9a52-448d-9cac-f092e510410a": {
+      "branches": [
+        "naga"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/Sweet-and-Sour-Chicken-2-1.jpg",
+      "isHot": true,
+      "menuCategory": "CH",
+      "menuCode": "2f8ba5f0-9a52-448d-9cac-f092e510410a",
+      "menuDesc": "Tangy, crispy, sweet",
+      "menuDisc": 0,
+      "menuName": "Sweet & Sour Chicken",
+      "menuPrice": "1000",
+      "menuPrices": {
+        "large": "1500",
+        "medium": 1000
+      },
+      "menuStatus": "Active"
+    },
+    "34c8bf82-2592-4b06-818c-1a15fea33246": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/sweet&sour.jpg",
+      "isHot": false,
+      "menuCategory": "SF",
+      "menuCode": "34c8bf82-2592-4b06-818c-1a15fea33246",
+      "menuDesc": "Tangy, Crisp, Flavorful",
+      "menuDisc": 0,
+      "menuName": "Sweet & Sour Fish",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      },
+      "menuStatus": "Active"
+    },
+    "46690d7e-6480-47a1-b5e1-fe5310386e7b": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/teriyaki.jpg",
+      "isHot": false,
+      "menuCategory": "CH",
+      "menuCode": "46690d7e-6480-47a1-b5e1-fe5310386e7b",
+      "menuDesc": "Savory, sweet, glazed chicken",
+      "menuDisc": 0,
+      "menuName": "Chicken Teriyaki",
+      "menuPrice": "900",
+      "menuPrices": {
+        "large": "1400",
+        "medium": 900
+      },
+      "menuStatus": "Active"
+    },
+    "4c613edb-2e5f-4de1-b023-69d79466cb65": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/f fillet.jpg",
+      "isHot": true,
+      "menuCategory": "SF",
+      "menuCode": "4c613edb-2e5f-4de1-b023-69d79466cb65",
+      "menuDesc": "Light, Crispy, Delicate",
+      "menuName": "Fish Fillet",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      }
+    },
+    "4f45a66d-5739-40eb-8bc4-6a410ea1f108": {
+      "branches": [
+        "calbayog",
+        "naga"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/temp.jpg",
+      "isHot": false,
+      "menuCategory": "SF",
+      "menuCode": "4f45a66d-5739-40eb-8bc4-6a410ea1f108",
+      "menuDesc": "Light, Crispy, Elegant",
+      "menuDisc": 0,
+      "menuName": "Tempura",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      },
+      "menuStatus": "Active"
+    },
+    "54a4872b-a9e1-4d73-afee-720f760e0655": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/kinilaw.jpg",
+      "isHot": false,
+      "menuCategory": "SF",
+      "menuCode": "54a4872b-a9e1-4d73-afee-720f760e0655",
+      "menuDesc": "Fresh, Zesty, Chilled",
+      "menuName": "Kinilaw",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      }
+    },
+    "6431af57-9208-4cfc-94ec-e13dc2799944": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/chicken fillet.jpg",
+      "isHot": false,
+      "menuCategory": "CH",
+      "menuCode": "6431af57-9208-4cfc-94ec-e13dc2799944",
+      "menuDesc": "Lean, Crisp, Flavorful",
+      "menuName": "Chicken Fillet",
+      "menuPrice": "900",
+      "menuPrices": {
+        "large": "1500",
+        "medium": "1000.0"
+      }
+    },
+    "64f460bf-91df-4e23-ad55-6c233e6701a8": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/humba.jpg",
+      "isHot": true,
+      "menuCode": "64f460bf-91df-4e23-ad55-6c233e6701a8",
+      "menuDesc": "Sweet, savory, tender pork",
+      "menuDisc": 0,
+      "menuName": "Pork Humba",
+      "menuPrice": "1100",
+      "menuStatus": "Active"
+    },
+    "728f37b1-e16c-4944-ab5c-443b4c448891": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/salpicao ch.jpg",
+      "isHot": false,
+      "menuCategory": "CH",
+      "menuCode": "728f37b1-e16c-4944-ab5c-443b4c448891",
+      "menuDesc": "Garlicky, savory chicken",
+      "menuDisc": 0,
+      "menuName": "Chicken Salpicao",
+      "menuPrice": "900",
+      "menuStatus": "Active"
+    },
+    "75db39e1-5dc3-4e7f-979d-4402e7a7426e": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/beef steak.jpg",
+      "isHot": true,
+      "menuCategory": "BF",
+      "menuCode": "75db39e1-5dc3-4e7f-979d-4402e7a7426e",
+      "menuDesc": "Tender, Savory, Juicy",
+      "menuName": "Beef Steak",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      }
+    },
+    "775a153d-d821-47e1-8eb2-d10239906717": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/menu_1769688716392_IMG_1265.jpeg",
+      "isHot": true,
+      "menuCategory": "CH",
+      "menuCode": "775a153d-d821-47e1-8eb2-d10239906717",
+      "menuDesc": "Spicy, Tangy, Crunchy",
+      "menuName": "Chicken Buffalo",
+      "menuPrice": "900",
+      "menuPrices": {
+        "large": "1400",
+        "medium": "900.0"
+      }
+    },
+    "77d4f3e1-0328-4b4d-9ada-6f377c1819bb": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/bami.jpg",
+      "isHot": true,
+      "menuCategory": "PA",
+      "menuCode": "77d4f3e1-0328-4b4d-9ada-6f377c1819bb",
+      "menuDesc": "Noodly, Savory, Balanced",
+      "menuName": "Pancit Bam-i",
+      "menuPrice": "600",
+      "menuPrices": {
+        "large": "900",
+        "medium": "600.0"
+      }
+    },
+    "8b24da3b-f343-4238-af03-8593b6d17969": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/honey glazed.jpg",
+      "isHot": false,
+      "menuCategory": "PO",
+      "menuCode": "8b24da3b-f343-4238-af03-8593b6d17969",
+      "menuDesc": "Sweet, Tender, Glazed",
+      "menuDisc": 250,
+      "menuName": "Pork Honey Glazed",
+      "menuPrice": "1000",
+      "menuPrices": {
+        "large": "1500",
+        "medium": "1000.0"
+      },
+      "menuStatus": "Active"
+    },
+    "942815f4-f4b7-43c0-a967-ac82384f61a5": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/beef cal.jpg",
+      "isHot": false,
+      "menuCategory": "BF",
+      "menuCode": "942815f4-f4b7-43c0-a967-ac82384f61a5",
+      "menuDesc": "Tender, Juicy, Tasty",
+      "menuDisc": 0,
+      "menuName": "Beef Caldereta",
+      "menuPrice": "1300",
+      "menuStatus": "Active"
+    },
+    "9ae69b69-d90d-4780-9f4b-9ae4b679d9b2": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/f chicken.jpg",
+      "isHot": true,
+      "menuCategory": "CH",
+      "menuCode": "9ae69b69-d90d-4780-9f4b-9ae4b679d9b2",
+      "menuDesc": "Crispy, Juicy, Classic",
+      "menuName": "Fried Chicken",
+      "menuPrice": "900",
+      "menuPrices": {
+        "large": "1400",
+        "medium": "900.0"
+      }
+    },
+    "9d1acebd-3831-4358-8184-85ae9c57aea5": {
+      "branches": [
+        "Calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/belly.jpg",
+      "isHot": true,
+      "menuCategory": "PO",
+      "menuCode": "9d1acebd-3831-4358-8184-85ae9c57aea5",
+      "menuDesc": "Crispy, Savory, Succulent",
+      "menuDisc": 0,
+      "menuName": "Lechon Belly",
+      "menuPrice": "2300",
+      "menuPrices": {
+        "large": "3500",
+        "medium": "2300.0"
+      },
+      "menuStatus": "Active"
+    },
+    "a6e79045-f5b2-4d56-ac91-ae11f1dd792a": {
+      "branches": [
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/scallops.jpg",
+      "isHot": true,
+      "menuCategory": "SF",
+      "menuCode": "a6e79045-f5b2-4d56-ac91-ae11f1dd792a",
+      "menuDesc": "Buttery, Delicate, Seared",
+      "menuDisc": 0,
+      "menuName": "Scallops",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      },
+      "menuStatus": "Active"
+    },
+    "aa4d8c6c-90ff-42a8-8248-a39b2dc2b9f6": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/palabok.jpg",
+      "isHot": true,
+      "menuCategory": "PA",
+      "menuCode": "aa4d8c6c-90ff-42a8-8248-a39b2dc2b9f6",
+      "menuDesc": "Saucy, Garlicky, Hearty",
+      "menuName": "Palabok",
+      "menuPrice": "600",
+      "menuPrices": {
+        "large": "900",
+        "medium": "600.0"
+      }
+    },
+    "af6d8d50-6098-4ade-9f28-58d5afdd5bfa": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/rebozado.jpg",
+      "isHot": true,
+      "menuCategory": "PO",
+      "menuCode": "af6d8d50-6098-4ade-9f28-58d5afdd5bfa",
+      "menuDesc": "Crunchy, Zesty, Golden",
+      "menuName": "Pork Rebozdo",
+      "menuPrice": "1000",
+      "menuPrices": {
+        "large": "1500",
+        "medium": "1000.0"
+      }
+    },
+    "c1a951af-9d73-4d78-a71b-2bfe5871c265": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc large.jpg",
+      "isHot": true,
+      "menuCategory": "MC",
+      "menuCode": "c1a951af-9d73-4d78-a71b-2bfe5871c265",
+      "menuDesc": "Lush, Fruity, Indulgent",
+      "menuName": "Mango Crepe (L)",
+      "menuPrice": "700",
+      "menuPrices": {
+        "medium": "700.0"
+      }
+    },
+    "ce74d188-1df6-456a-b8d0-43969c9dfd54": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/calamares.jpg",
+      "isHot": true,
+      "menuCategory": "SF",
+      "menuCode": "ce74d188-1df6-456a-b8d0-43969c9dfd54",
+      "menuDesc": "Crispy, Golden, Ocean-fresh",
+      "menuName": "Calamares",
+      "menuPrice": "1300",
+      "menuPrices": {
+        "large": "1900",
+        "medium": "1300.0"
+      }
+    },
+    "d6c6c70c-4e7f-477b-8fc6-9e5213441d4b": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/chopsuey.jpg",
+      "isHot": false,
+      "menuCategory": "VE",
+      "menuCode": "d6c6c70c-4e7f-477b-8fc6-9e5213441d4b",
+      "menuDesc": "Colorful, Crunchy, Healthy",
+      "menuName": "Chopsuey",
+      "menuPrice": "500",
+      "menuPrices": {
+        "large": "800",
+        "medium": "500.0"
+      }
+    },
+    "e201e760-9774-4400-b074-ab99c87c9481": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/pork steak.jpg",
+      "isHot": false,
+      "menuCategory": "PO",
+      "menuCode": "e201e760-9774-4400-b074-ab99c87c9481",
+      "menuDesc": "Juicy, Bold, Umami",
+      "menuName": "Pork Steak",
+      "menuPrice": "1000",
+      "menuPrices": {
+        "large": "1500",
+        "medium": "1000.0"
+      }
+    },
+    "eb29b132-1cf4-47d8-8801-af1cf65d8ab0": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mix v.jpg",
+      "isHot": false,
+      "menuCategory": "VE",
+      "menuCode": "eb29b132-1cf4-47d8-8801-af1cf65d8ab0",
+      "menuDesc": "Fresh, Nutritious, Vibrant",
+      "menuName": "Mixed Vegetables",
+      "menuPrice": "500",
+      "menuPrices": {
+        "large": "800",
+        "medium": "500.0"
+      }
+    },
+    "ed328248-8ddf-4506-9034-2aed26fc8f4f": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/carbonara.jpg",
+      "isHot": true,
+      "menuCategory": "PA",
+      "menuCode": "ed328248-8ddf-4506-9034-2aed26fc8f4f",
+      "menuDesc": "Rich, Creamy, Smoky",
+      "menuName": "Carbonara",
+      "menuPrice": "700",
+      "menuPrices": {
+        "large": "1000",
+        "medium": "700.0"
+      }
+    },
+    "eee3b950-f5f3-4466-bd60-8beaf3ee5c0b": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/sag.jpg",
+      "isHot": true,
+      "menuCategory": "PA",
+      "menuCode": "eee3b950-f5f3-4466-bd60-8beaf3ee5c0b",
+      "menuDesc": "Saucy, Cheesy, Classic",
+      "menuName": "Spaghetti",
+      "menuPrice": "700",
+      "menuPrices": {
+        "large": "1000",
+        "medium": "700.0"
+      }
+    },
+    "f9a57e95-ccdc-4729-9669-9c2a4a2e3e07": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/salpicao.jpg",
+      "isHot": false,
+      "menuCategory": "BF",
+      "menuCode": "f9a57e95-ccdc-4729-9669-9c2a4a2e3e07",
+      "menuDesc": "Garlicky, savory, beefy",
+      "menuDisc": 0,
+      "menuName": "Beef Salpicao",
+      "menuPrice": "1300",
+      "menuStatus": "Active"
+    },
+    "ffbb215e-727e-4830-92a9-09ab60ccdc52": {
+      "branches": [
+        "naga",
+        "calbayog"
+      ],
+      "buyQty": 1,
+      "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+      "isHot": true,
+      "menuCategory": "MC",
+      "menuCode": "ffbb215e-727e-4830-92a9-09ab60ccdc52",
+      "menuDesc": "Sweet, Soft, Refreshing",
+      "menuName": "Mango Crepe (M)",
+      "menuPrice": "600",
+      "menuPrices": {
+        "medium": "600.0"
+      }
+    }
+  },
+  "reservations": {
+    "-OY-9zZj93Vjy4eWOKGx": {
+      "address": "B10 L17 Phase 1 Deca Homes Sabella Abella Naga City.",
+      "contact": "09985537956",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 85,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-01T16:00:00",
+      "resname": "ANNADHIL SADANG",
+      "status": "delivered",
+      "total": 685
+    },
+    "-OY-9zlXUkkFrGc8hyAo": {
+      "address": "Block7 Lot12 Marang St.,  San Francisco Village 1 Pacol Naga City",
+      "contact": "09477282821",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 110,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 85,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "BUTTERED CHICKEN (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN TERIYAKI (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-01T14:00:00",
+      "resname": "Elizah Clare",
+      "status": "delivered",
+      "total": 2410
+    },
+    "-OY-9zruA5_OqIiB2SwF": {
+      "address": "N/A",
+      "contact": "N/A",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 30,
+          "menuName": "FOOD PACK (RICE, SOTANGHON, PORK STEAK)",
+          "price": 135,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-01T15:00:00",
+      "resname": "Mam Muriel",
+      "status": "delivered",
+      "total": 4050
+    },
+    "-OY-9zxyc3kjd2rV_qdr": {
+      "address": "Z-1 Del Rosario Canaman (Violet House)",
+      "contact": "09763547348",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 85,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK SPARE RIBS (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-02T17:00:00",
+      "resname": "Angred Medrano",
+      "status": "delivered",
+      "total": 3080
+    },
+    "-OY-A-7sxIxAsSvTqHWd": {
+      "address": "University of Nueva Caceres, DHS Pink Building near Chapel",
+      "contact": "09515464225",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 80,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-02T13:00:00",
+      "resname": "Jenalyn Aycardo",
+      "status": "delivered",
+      "total": 430
+    },
+    "-OY-A-I3o6UG6Ci_iKNj": {
+      "address": "blk 28 lot 19 Acacia st villa grande homes, concepcion grande naga city",
+      "contact": "09950126660",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "FOOD PACK (MANGO CREPE, PANCIT PALABOK, PORK REBOZADO, CHICKEN BUFFALO)",
+          "price": 2400,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-02T09:00:00",
+      "resname": "anne borromeo",
+      "status": "delivered",
+      "total": 2400
+    },
+    "-OY-A-T2e2M3vzNOj8Vv": {
+      "address": "Block 5,Lot 6 cokeville San Felipe naga city (white house green/gray gate)",
+      "contact": "09761075955",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "FOOD PACK (SPARE RIBS, MANGO CREPE, PORK REBOZADO, CHICKEN BUFFALO)",
+          "price": 3080,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-03T10:00:00",
+      "resname": "Naning Santos",
+      "status": "delivered",
+      "total": 3080
+    },
+    "-OY-A-c1yS-zETpET2zy": {
+      "address": "San Miguel Beer, Concepcion Grande, Naga City",
+      "contact": "09175818194",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "SPAGHETTI (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-04T14:30:00",
+      "resname": "Danica Asis Ramos",
+      "status": "delivered",
+      "total": 3100
+    },
+    "-OY-A-n_55c4XqcxFfgD": {
+      "address": "Sto. Tomas Chapel Magarao",
+      "contact": "09913267859",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 600,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-06T06:00:00",
+      "resname": "Cristina F.Sayat",
+      "status": "delivered",
+      "total": 600
+    },
+    "-OY-A-xwMxVQn_Sh8viT": {
+      "address": "12-12 Grand Vale 1 Subd San Felipe [white house brown gate]",
+      "contact": "09382820697",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 50,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-06T08:00:00",
+      "resname": "Mam Donna Marilag Obias",
+      "status": "delivered",
+      "total": 1000
+    },
+    "-OY-A02hmNQYTuIgM-YD": {
+      "address": "San Fernando Municipal",
+      "contact": "09488318365",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 2,
+          "menuName": "MANGO CREPE (L)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-06T08:00:00",
+      "resname": "Daisy Bhel B Genova",
+      "status": "delivered",
+      "total": 0
+    },
+    "-OY-A0F9HTfdPjzM55c2": {
+      "address": "Unc  Main Entrance",
+      "contact": "09498265860",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 600,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-06T07:30:00",
+      "resname": "JEGIE ARROYO",
+      "status": "delivered",
+      "total": 685
+    },
+    "-OY-A0R-FZOGCDa-hj3t": {
+      "address": "RJ village Haring Canaman",
+      "contact": "09297070351",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 2,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-06T09:00:00",
+      "resname": "Merjay Ayab",
+      "status": "delivered",
+      "total": 770
+    },
+    "-OY-A0biN-aV_BUHPnu_": {
+      "address": "Malbong Gainza in front of Small Town Lottery Beside Abayon store",
+      "contact": "09615259496",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT BAM-I (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK SPARE RIBS (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-07T17:00:00",
+      "resname": "Julius Lindo",
+      "status": "delivered",
+      "total": 3450
+    },
+    "-OY-A0qFNeUYKrijIKSZ": {
+      "address": "Deca Homes Grandvale 3 Blk22 Lot78, San Felipe, Naga City",
+      "contact": "09756015102",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 60,
+          "menuName": "FOOD PACK (FRIED CHICKEN, SPAGHETTI)",
+          "price": 90,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-08T14:00:00",
+      "resname": "Nena Maria Crisol",
+      "status": "delivered",
+      "total": 5490
+    },
+    "-OY-A138GQHtlypw399l": {
+      "address": "Ateneo de Naga University - Bonoan Campus, Pacol",
+      "contact": "09760756774",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT BAM-I (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK CALDERETA (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-08T09:30:00",
+      "resname": "Alexis Joy Añonuevo",
+      "status": "delivered",
+      "total": 3420
+    },
+    "-OY-A1CgtNudAzUvpafF": {
+      "address": "Ateneo Pacol, Junior High School",
+      "contact": "09128146969",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PORK SPARE RIBS (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-08T10:00:00",
+      "resname": "GLADYS SAMOSA",
+      "status": "delivered",
+      "total": 3120
+    },
+    "-OY-A1PfXwdt-ljbLT7w": {
+      "address": "B15 L23 Decahomes Grandvale 2 San Felipe Naga City",
+      "contact": "09055326818",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 20,
+          "menuName": "FOOD PACK (CARBONARA, MANGO CREPE)",
+          "price": 90,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 22,
+          "menuName": "FOOD PACK (FRIED CHICKEN, SPAGHETTI)",
+          "price": 90,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-08T14:00:00",
+      "resname": "Arianneisa Belarmino",
+      "status": "delivered",
+      "total": 3870
+    },
+    "-OY-A1eFFjZnJSGALaqO": {
+      "address": "Ateneo De Naga Univ. Pacol, in front of Sports Complex",
+      "contact": "09453874734",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CALAMARIS (M)",
+          "price": 400,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "SISIG (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 50,
+          "menuName": "LUMPING SHANGHAI (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CARBONARA (L)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "RICE (L)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-08T10:30:00",
+      "resname": "Geneva Tamon",
+      "status": "delivered",
+      "total": 6120
+    },
+    "-OY-A1uz5zG2zThSMB6q": {
+      "address": "Block7 Lot12 Marang St.,  San Francisco Village 1 Pacol Naga City",
+      "contact": "09477282821",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-08T10:00:00",
+      "resname": "Elizah Clare",
+      "status": "delivered",
+      "total": 460
+    },
+    "-OY-A28s8jlihsGEVqX2": {
+      "address": "Sutherland Global Services (IT Park Cadlan Pili Camsur)",
+      "contact": "09056693006/09989690593",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT BAM-I (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-09T19:00:00",
+      "resname": "James Manzanero",
+      "status": "delivered",
+      "total": 2450
+    },
+    "-OY-A2ODuG7yXE5aSGRx": {
+      "address": "Block 2 Lot 8 Leticia Heights Subd Baras Canaman",
+      "contact": "09292938069 /09778492168",
+      "createdAt": "Aug 19, 2025, 10:32 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-09T15:00:00",
+      "resname": "Rochell Bernal",
+      "status": "delivered",
+      "total": 2330
+    },
+    "-OY-A2ekwWO2k8Pv4psN": {
+      "address": "San Felipe, Cokeville, Bagong Sirang",
+      "contact": "09925503935",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "CALAMARES (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "FISH FILLET (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "BUTTERED CHICKEN (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK SPARE RIBS (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-10T15:00:00",
+      "resname": "Jenneth Maravilla",
+      "status": "delivered",
+      "total": 4080
+    },
+    "-OY-A2uwMBP-zfN1Xi0J": {
+      "address": "Cresini apartment del Rosario Zone 1 Canaman Camarines",
+      "contact": "09070184267",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-10T14:00:00",
+      "resname": "Jane Rodriguez",
+      "status": "delivered",
+      "total": 2370
+    },
+    "-OY-A3AXw8J_41JVRRG2": {
+      "address": "block 20 lot7 Grandvalle 2 San Felipe Naga city",
+      "contact": "09919347175",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "SPARE RIBS (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT BAM-I (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CARBONARA (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-10T16:30:00",
+      "resname": "lerizza moises",
+      "status": "delivered",
+      "total": 3270
+    },
+    "-OY-A3S3WWyQ1LIHhfMx": {
+      "address": "Zone 5 San Francisco Magarao sa may padjakan ng San Francisco may  right side na pathway daretso lang pagkababa ng tulay unang kanto",
+      "contact": "09053181674",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 600,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-10T11:00:00",
+      "resname": "Niña Dreo",
+      "status": "delivered",
+      "total": 600
+    },
+    "-OY-A3irUkaV6fEoWq7a": {
+      "address": "Blk. 13 Lot 12 urban queborac, Bagumbayan Sur",
+      "contact": "09513142043",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-11T07:00:00",
+      "resname": "Karen Bonagua",
+      "status": "delivered",
+      "total": 425
+    },
+    "-OY-A3vcz8bLDWUAb4cY": {
+      "address": "Eternal Garden - extension sid",
+      "contact": "09060920552",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "BUTTERED CHICKEN (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-11T15:30:00",
+      "resname": "Janice Panambo",
+      "status": "delivered",
+      "total": 2395
+    },
+    "-OY-A4CIqocx0xAQxaku": {
+      "address": "Yashano Centro",
+      "contact": "09688520177",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "BUTTERED CHICKEN (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-12T10:30:00",
+      "resname": "lala imperial",
+      "status": "delivered",
+      "total": 2385
+    },
+    "-OY-A4TOlUgWsD85O7j-": {
+      "address": "Near Carangcang Elementary school",
+      "contact": "09913267859",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CALAMARIS (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-12T11:00:00",
+      "resname": "Cristina F.Sayat",
+      "status": "delivered",
+      "total": 3670
+    },
+    "-OY-A4maLbbh2gVQkSYZ": {
+      "address": "116 Abella St. Brgy. Abella, Naga City (Angels Burger Commissary)",
+      "contact": "+639177027639",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 35,
+          "menuName": "FOOD PACK (RICE, MIX VEGETABLES, PORK STEAK, CHICKEN BUFFALO)",
+          "price": 90,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-13T11:00:00",
+      "resname": "Louise Claire Badong",
+      "status": "delivered",
+      "total": 4990
+    },
+    "-OY-A55EvH-tjqXsHCoy": {
+      "address": "Zone 7 delas herras st.San Isidro Magarao Cam Sur",
+      "contact": "09304949724",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (L)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "BEEF STEAK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CALAMARIS (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-13T18:00:00",
+      "resname": "Katrina Marie J.Oropesa",
+      "status": "delivered",
+      "total": 2000
+    },
+    "-OY-A5SNPaZzngbEBs0j": {
+      "address": "116 Abella St. Brgy. Abella, Naga City (Angels Burger Commissary)",
+      "contact": "+639177027639",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 25,
+          "menuName": "FOOD PACK (RICE, MIX VEGETABLES, PORK STEAK, CHICKEN BUFFALO)",
+          "price": 90,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-14T11:00:00",
+      "resname": "Louise Claire Badong",
+      "status": "delivered",
+      "total": 3590
+    },
+    "-OY-A5ifVK4Y0R4FYjsJ": {
+      "address": "Sisterhood dorm Bagumbayan Sur Beside Palawan Pawnshop",
+      "contact": "09172550610",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 30,
+          "menuName": "FOOD PACK (RICE, RIBS, LEMON CHICKEN, MIX VEGETABLES)",
+          "price": 80,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-15T10:00:00",
+      "resname": "Xandy Dolor",
+      "status": "delivered",
+      "total": 6980
+    },
+    "-OY-A64Cdji6kf7jvWNq": {
+      "address": "N/A",
+      "contact": "09305195914",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-15T09:00:00",
+      "resname": "janet",
+      "status": "delivered",
+      "total": 300
+    },
+    "-OY-A6PzLQtHAvBhTt-E": {
+      "address": "Zone 5 San Francisco Magarao sa may padjakan pa right side daretso lang pagkababa ng tulay unang kanto katabi ng cream house papasok",
+      "contact": "09667702571",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-15T14:30:00",
+      "resname": "Dawn Abigail Autor",
+      "status": "delivered",
+      "total": 350
+    },
+    "-OY-A6kfFEiT_fyOvTc2": {
+      "address": "053 Zone 4 Bagumbayan Norte Naga City",
+      "contact": "09460250622",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT BAM-I (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK STEAK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "BUTTERED CHICKEN (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-15T14:00:00",
+      "resname": "Ma. Ella Ferrer",
+      "status": "delivered",
+      "total": 2380
+    },
+    "-OY-A76WeVwIqprW_sxT": {
+      "address": "Menestop Grocery, before Padri Pio Chruch, Zone 1, Dalipay , Milaor ( ang agi po kaini sa may Almeda Highway)",
+      "contact": "09190080659",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "SPAGHETTI (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK SPARE RIBS (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-15T18:30:00",
+      "resname": "Juvy Menes",
+      "status": "delivered",
+      "total": 3540
+    },
+    "-OY-A7R4aKyFUqgAS6Cf": {
+      "address": "CMA Studio, Unit 2, JY Brothers Building, Zone 6,Mabolo,Naga City",
+      "contact": "0919008659",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT BAM-I (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-16T15:00:00",
+      "resname": "Juvy Menes",
+      "status": "delivered",
+      "total": 2390
+    },
+    "-OY-A7mu33cAOSR25wrV": {
+      "address": "zone 2 san juan magarao- blue gate after ng southern rock construction/after speedway gasoline station",
+      "contact": "09925514281",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT CANTON (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-16T14:00:00",
+      "resname": "janet aspe",
+      "status": "delivered",
+      "total": 2330
+    },
+    "-OY-A88pNjKlyXMSrQD8": {
+      "address": "N/A",
+      "contact": "09305195914",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-17T10:00:00",
+      "resname": "janet",
+      "status": "delivered",
+      "total": 300
+    },
+    "-OY-A8TG8iUK2D7Rdabm": {
+      "address": "Villa Corazon Mercedes St.Del Rosario Naga City land mark villa corazon elementary school po",
+      "contact": "09126503045",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-17T15:00:00",
+      "resname": "BOOTS TAPEL",
+      "status": "delivered",
+      "total": 2420
+    },
+    "-OY-A8rV1rlK0mMmcUmi": {
+      "address": "Zone 3, Abella Naga City ifront of ARC Gas Station",
+      "contact": "09399047995",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-17T16:00:00",
+      "resname": "Grace Yanga",
+      "status": "delivered",
+      "total": 2375
+    },
+    "-OY-A9JlqFluh6SrbVjI": {
+      "address": "Zone 1 , Marupit ,Camaligan.Cam. Sur po",
+      "contact": "09187695197",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PORK REBOZADO (M)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "CHICKEN BUFFALO (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-18T13:00:00",
+      "resname": "Ellen B.Alisasa",
+      "status": "delivered",
+      "total": 2385
+    },
+    "-OY-A9j0pkv9CzrPcIbd": {
+      "address": "Upper Ground BMC,Office of Social Services (Please look Ms.Frecy or Carmel)",
+      "contact": "09616093347",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT (L)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (L)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-19T10:00:00",
+      "resname": "Ronald Lequin",
+      "status": "delivered",
+      "total": 0
+    },
+    "-OY-AA41i4wu85AuQyqF": {
+      "address": "spring valley resort Gumamela St. Zone 1 del Rosario Naga City",
+      "contact": "0918 7277 323",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-20T09:00:00",
+      "resname": "Erlinda Dayawon",
+      "status": "delivered",
+      "total": 480
+    },
+    "-OY-AATNSg1p2kvObdiL": {
+      "address": "Zone 5 San Francisco Magarao sa may padjakan pa right side daretso lang pagkababa ng tulay unang kanto katabi ng cream house papasok sa po",
+      "contact": "09985693240",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-20T11:00:00",
+      "resname": "Desiree Del Rosario",
+      "status": "delivered",
+      "total": 350
+    },
+    "-OY-AAuBupakq2mqLv_t": {
+      "address": "MAGARAO CENTRAL SCHOOL CAMPUS A sa likod lng po kan stage Ang classroom ko",
+      "contact": "09061180236",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 55,
+          "menuName": "FOOD PACK (CARBONARA, MANGO CREPE, FRIED CHICKEN)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-22T09:00:00",
+      "resname": "JOREEN SAMBO",
+      "status": "delivered",
+      "total": 6875
+    },
+    "-OY-ABM8WJ-x25eCcvlo": {
+      "address": "San Jose Milaor Cam Sur, beside San Jose Elementary School (grey gate)",
+      "contact": "09054206702",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "FOOD PACK (SPAGHETTI, SPARE RIBS, PORK REBOZADO, CHICKEN BUFFALO, MANGO CREPE)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-26T17:00:00",
+      "resname": "Erben Hanna Reyes",
+      "status": "delivered",
+      "total": 3520
+    },
+    "-OY-ABokwN1nInIhW1CA": {
+      "address": "RVMES (Maramba Elem.School) San felipe",
+      "contact": "09756015102",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "SPAGHETTI (M)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-28T08:00:00",
+      "resname": "Nena Maria Crisol",
+      "status": "delivered",
+      "total": 780
+    },
+    "-OY-ACACyKRfUB2VDPU2": {
+      "address": "Naga College Foundation at MT Villanueva bldg. 6th floor",
+      "contact": "09099604215/09206912450",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 10,
+          "menuName": "FOOD PACK (RICE W/MAIS TOPPING, PORK STEAK, MIX VEGETABLES, CHICKEN BUFFALO)",
+          "price": 85,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-28T10:00:00",
+      "resname": "Angeleah B Margallo",
+      "status": "delivered",
+      "total": 1485
+    },
+    "-OY-ACc5liQrXiN14F2p": {
+      "address": "Zone 3, Anayan, Diversion Road, Pili (beside Papa Tantan near bicol petroleum)",
+      "contact": "09499260372",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 35,
+          "menuName": "FOOD PACK (SPAGHETTI, CHICKEN)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (L)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-29T10:00:00",
+      "resname": "Joy Ramos",
+      "status": "delivered",
+      "total": 4030
+    },
+    "-OY-AD1-h3b1QZ74pR9M": {
+      "address": "Dahilig Gainza Camarines Sur Zone 1 bahay na color green po",
+      "contact": "09317630050",
+      "createdAt": "Aug 19, 2025, 10:33 AM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-29T10:00:00",
+      "resname": "Queen Angeles",
+      "status": "delivered",
+      "total": 465
+    },
+    "-OYKF6MDh5my9esu7edL": {
+      "address": "Blessed Lights International Christian Academy 10X10 Doña Clara Village Concepcion Pequeña Naga City",
+      "contact": "09175055655",
+      "createdAt": "Aug 23, 2025, 12:47 PM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (L)",
+          "price": 90,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-24T10:00:00",
+      "resname": "Aiza Grace N. Barbara",
+      "status": "delivered",
+      "total": 990
+    },
+    "-OYKF6QN8TR2gvrzwJGp": {
+      "address": "Zone 1 putong comp. Gogon camaligan cam sur",
+      "contact": "N/A",
+      "createdAt": "Aug 23, 2025, 12:47 PM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 2,
+          "menuName": "MCDONALD'S (S)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-27T19:00:00",
+      "resname": "Marefe Delos Reyes",
+      "status": "delivered",
+      "total": 0
+    },
+    "-OYKF6UFdSiOBwx-mxls": {
+      "address": "Zone 3, Anayan, Diversion Road, Pili (beside Papa Tantan near bicol petroleum)",
+      "contact": "09499260372",
+      "createdAt": "Aug 23, 2025, 12:47 PM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 35,
+          "menuName": "FOOD PACK (SPAGHETTI & CHICKEN)",
+          "price": 4030,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 1,
+          "menuName": "MANGO CREPE (L)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-29T00:00:00",
+      "resname": "Joy Ramos",
+      "status": "delivered",
+      "total": 4030
+    },
+    "-OYKF6Y27saW9ay2fCxg": {
+      "address": "MCJ Pool, Summit Resort and Sports Hub, Dating Daan Road, San Vicente, Canaman",
+      "contact": "09173143952",
+      "createdAt": "Aug 23, 2025, 12:47 PM",
+      "location": "N/A",
+      "order": [
+        {
+          "buyQty": 20,
+          "menuName": "FOOD PACK (SPAGHETTI, CREPE, FRIED CHICKEN)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 10,
+          "menuName": "FOOD PACK (CARBONARA, CREPE, FRIED CHICKEN)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 10,
+          "menuName": "FOOD PACK (PANSIT, CREPE, FRIED CHICKEN)",
+          "price": 0,
+          "selectedSize": ""
+        },
+        {
+          "buyQty": 10,
+          "menuName": "FOOD PACK (PALABOK, CREPE, FRIED CHICKEN)",
+          "price": 0,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "2025-08-30T14:00:00",
+      "resname": "Karen P. Sadia",
+      "status": "delivered",
+      "total": 6340
+    },
+    "-OkxblXZEf6y62trgPM3": {
+      "address": "sadsdgsf",
+      "contact": "213123",
+      "createdAt": "2026-02-08T14:19:22.199Z",
+      "order": [
+        {
+          "buyQty": 1,
+          "id": "item_0_1770560362199",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fribs.jpg?alt=media&token=e21f7410-b613-4019-9f4c-7545a8c610c3",
+          "menuName": "Pork Spare Ribs",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1200"
+          },
+          "price": 1200,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_1_1770560362199",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fbuffalo.jpg?alt=media&token=697f80d5-186f-48f4-bd02-50d451c8581c",
+          "menuName": "Chicken Buffalo",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          },
+          "price": 900,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_2_1770560362199",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fbami.jpg?alt=media&token=73a98a5b-e55d-4a65-870c-cf37679806c5",
+          "menuName": "Pancit Bam-i",
+          "menuPrices": {
+            "large": "900",
+            "medium": "600"
+          },
+          "price": 600,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_3_1770560362199",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Frebozado.jpg?alt=media&token=7e3c45f4-b2aa-4313-bfbf-a5c8c17f7d8f",
+          "menuName": "Pork Rebozdo",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          },
+          "price": 1000,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_4_1770560362199",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fmc%20M.jpg?alt=media&token=aa44c87c-f32c-4310-b3a6-2c563650ef8a",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          },
+          "price": 600,
+          "selectedSize": "medium"
+        }
+      ],
+      "resdate": "2026-02-26 14:30:00",
+      "resname": "asdasd",
+      "status": "active",
+      "total": 3300
+    },
+    "-Okxcog6Dztn9fBMKEHH": {
+      "address": "qweqweqwe",
+      "contact": "qwe",
+      "createdAt": "2026-02-08T14:23:57.243Z",
+      "order": [
+        {
+          "buyQty": 1,
+          "id": "item_0_1770560637243",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fribs.jpg?alt=media&token=e21f7410-b613-4019-9f4c-7545a8c610c3",
+          "menuName": "Pork Spare Ribs",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1200"
+          },
+          "price": 1200,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_1_1770560637243",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fbuffalo.jpg?alt=media&token=697f80d5-186f-48f4-bd02-50d451c8581c",
+          "menuName": "Chicken Buffalo",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          },
+          "price": 900,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_2_1770560637243",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fbami.jpg?alt=media&token=73a98a5b-e55d-4a65-870c-cf37679806c5",
+          "menuName": "Pancit Bam-i",
+          "menuPrices": {
+            "large": "900",
+            "medium": "600"
+          },
+          "price": 600,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_3_1770560637243",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Frebozado.jpg?alt=media&token=7e3c45f4-b2aa-4313-bfbf-a5c8c17f7d8f",
+          "menuName": "Pork Rebozdo",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          },
+          "price": 1000,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_4_1770560637243",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fmc%20M.jpg?alt=media&token=aa44c87c-f32c-4310-b3a6-2c563650ef8a",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          },
+          "price": 600,
+          "selectedSize": "medium"
+        }
+      ],
+      "resdate": "2026-02-26 06:25:00",
+      "resname": "qwe",
+      "status": "active",
+      "total": 3300
+    },
+    "-OkxdDlKAYfiIm0ORwQz": {
+      "address": "qweqwe",
+      "contact": "qwe",
+      "createdAt": "2026-02-08T14:25:44.087Z",
+      "order": [
+        {
+          "buyQty": 1,
+          "id": "item_0_1770560744087",
+          "img": "https://firebasestorage.googleapis.com/v0/b/postres-c30e4.appspot.com/o/img%2Fhoney%20glazed.jpg?alt=media&token=7741f3b4-e657-4311-af1f-3d730ea3ebbc",
+          "menuName": "Pork Honey Glazed",
+          "menuPrices": {
+            "large": "1500",
+            "medium": "1000.0"
+          },
+          "price": 1000,
+          "selectedSize": "medium"
+        }
+      ],
+      "resdate": "2026-02-26 06:26:00",
+      "resname": "qwe",
+      "status": "active",
+      "total": 1000
+    },
+    "-Ouh8MO9gh9nw1wotGw5": {
+      "address": "123 Main St, Anytown, USA",
+      "contact": "123-456-7890",
+      "createdAt": "Jun 10, 2026, 12:09 AM",
+      "location": "Anytown",
+      "order": [
+        {
+          "buyQty": 2,
+          "menuName": "PANCIT BAM-I (M)",
+          "price": 15,
+          "selectedSize": "M"
+        },
+        {
+          "buyQty": 1,
+          "menuName": "PANCIT PALABOK",
+          "price": 12.5,
+          "selectedSize": "M"
+        }
+      ],
+      "resdate": "Jun 10, 2026, 12:09 AM",
+      "resname": "John Doe",
+      "status": "active",
+      "total": 42.5
+    },
+    "-Ouh8MfKS0v1ngmBtwxl": {
+      "address": "456 Oak Ave, Anytown, USA",
+      "contact": "098-765-4321",
+      "createdAt": "Jun 10, 2026, 12:09 AM",
+      "location": "Anytown",
+      "order": [
+        {
+          "buyQty": 1,
+          "menuName": "PORK SPARE RIBS",
+          "price": 25,
+          "selectedSize": "L"
+        }
+      ],
+      "resdate": "Jun 11, 2026, 12:09 AM",
+      "resname": "Jane Smith",
+      "status": "active",
+      "total": 25
+    },
+    "-Ouh8Mk0MzYtFjtVYQWu": {
+      "address": "789 Pine Ln, Anytown, USA",
+      "contact": "555-555-5555",
+      "createdAt": "Jun 09, 2026, 12:09 AM",
+      "location": "Anytown",
+      "order": [
+        {
+          "buyQty": 3,
+          "menuName": "MANGO CREPE",
+          "price": 7.5,
+          "selectedSize": ""
+        }
+      ],
+      "resdate": "Jun 09, 2026, 12:09 AM",
+      "resname": "Peter Jones",
+      "status": "delivered",
+      "total": 22.5
+    },
+    "-P06CaS1Af9Vgs3_oFAY": {
+      "address": "Jose Perez Street Calauag Naga City Camarines Sur ",
+      "contact": "9317397790",
+      "createdAt": "2026-08-28T07:12:22.781Z",
+      "order": [
+        {
+          "buyQty": 1,
+          "id": "item_0_1787901142781",
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/ribs.jpg",
+          "menuName": "Pork Spare Ribs",
+          "menuPrices": {
+            "large": "1900",
+            "medium": "1200"
+          },
+          "price": 1200,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_1_1787901142781",
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/buffalo.jpg",
+          "menuName": "Chicken Buffalo",
+          "menuPrices": {
+            "large": "1400",
+            "medium": "900"
+          },
+          "price": 900,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_2_1787901142781",
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/bami.jpg",
+          "menuName": "Pancit Bam-i",
+          "menuPrices": {
+            "large": "900",
+            "medium": "600"
+          },
+          "price": 600,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_3_1787901142781",
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/rebozado.jpg",
+          "menuName": "Pork Rebozdo",
+          "menuPrices": {
+            "large": "1600",
+            "medium": "1000"
+          },
+          "price": 1000,
+          "selectedSize": "medium"
+        },
+        {
+          "buyQty": 1,
+          "id": "item_4_1787901142781",
+          "img": "https://npftxbstixrhuiaqpmap.supabase.co/storage/v1/object/public/postre/img/mc M.jpg",
+          "menuName": "Mango Crepe (M)",
+          "menuPrices": {
+            "medium": "600"
+          },
+          "price": 600,
+          "selectedSize": "medium"
+        }
+      ],
+      "resdate": "2026-08-31 10:00:00",
+      "resname": "Sam Sanchez ",
+      "status": "active",
+      "total": 3300
+    }
+  }
+}

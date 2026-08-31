@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loginHandler = loginHandler;
 exports.authMiddleware = authMiddleware;
+exports.requireRole = requireRole;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../db/database");
@@ -17,8 +18,9 @@ function loginHandler(req, res) {
     if (!admin || !bcryptjs_1.default.compareSync(password, admin.password_hash)) {
         return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jsonwebtoken_1.default.sign({ sub: admin.id, username: admin.username }, JWT_SECRET, { expiresIn: '12h' });
-    res.json({ token });
+    const role = admin.role || 'ADMIN';
+    const token = jsonwebtoken_1.default.sign({ sub: admin.id, username: admin.username, role }, JWT_SECRET, { expiresIn: '12h' });
+    res.json({ token, id: admin.id, username: admin.username, role });
 }
 function authMiddleware(req, res, next) {
     const header = req.headers.authorization;
@@ -31,4 +33,15 @@ function authMiddleware(req, res, next) {
     catch {
         res.status(401).json({ error: 'Unauthorized' });
     }
+}
+/** Restrict a route to a specific admin role (e.g. only full ADMINs may manage staff accounts). */
+function requireRole(role) {
+    return (req, res, next) => {
+        const admin = req.admin;
+        // Tokens issued before roles existed belong to the original owner account → treat as ADMIN.
+        if (!admin || (admin.role || 'ADMIN') !== role) {
+            return res.status(403).json({ error: 'Forbidden: admin role required' });
+        }
+        next();
+    };
 }

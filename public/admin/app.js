@@ -2,6 +2,8 @@
 const API = '/api/admin';
 let TOKEN = sessionStorage.getItem('token') || '';
 let ME = sessionStorage.getItem('me') || '';
+let ME_ID = Number(sessionStorage.getItem('me_id')) || 0;
+let ROLE = sessionStorage.getItem('role') || 'ADMIN';
 let currentView = 'dashboard';
 
 // ---------- helpers ----------
@@ -31,7 +33,7 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => { if (
 
 // ---------- auth ----------
 function logout() {
-  TOKEN = ''; ME = '';
+  TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
   sessionStorage.clear();
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-view').style.display = 'flex';
@@ -41,7 +43,8 @@ if (TOKEN) showApp();
 function showApp() {
   document.getElementById('login-view').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  document.getElementById('whoami').textContent = ME;
+  document.getElementById('whoami').textContent = ME + (ROLE === 'ADMIN' ? ' · Admin' : ' · Staff');
+  document.querySelectorAll('[data-view="admins"]').forEach((a) => { a.style.display = ROLE === 'ADMIN' ? '' : 'none'; });
   navigate('dashboard');
 }
 
@@ -54,8 +57,10 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Login failed');
-    TOKEN = data.token; ME = document.getElementById('login-user').value;
+    TOKEN = data.token; ME = data.username || document.getElementById('login-user').value;
+    ME_ID = Number(data.id) || 0; ROLE = data.role || 'ADMIN';
     sessionStorage.setItem('token', TOKEN); sessionStorage.setItem('me', ME);
+    sessionStorage.setItem('me_id', String(ME_ID)); sessionStorage.setItem('role', ROLE);
     document.getElementById('login-err').textContent = '';
     showApp();
   } catch (err) { document.getElementById('login-err').textContent = err.message; }
@@ -114,6 +119,11 @@ function bindPhotoField(id) {
     } catch (err) { toast(err.message, true); }
   });
 }
+window.imgFail = (el) => { const s = document.createElement('span'); s.className = 'thumb noimg'; s.textContent = '🖼️'; el.replaceWith(s); };
+/** Thumbnail with graceful fallback when there is no photo or it fails to load. */
+const imgTag = (url, title = '') => url
+  ? `<img class="thumb" src="${esc(url)}" alt="" title="${esc(title)}" onerror="imgFail(this)">`
+  : '<span class="thumb noimg" title="No photo">🖼️</span>';
 /* ================= DASHBOARD ================= */
 views.dashboard = async (main) => {
   const d = await api('/dashboard');
@@ -300,10 +310,11 @@ views.menu = async (main) => {
         <button class="btn ghost sm" id="cat-new">＋ Add Category</button>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Product</th><th>Category</th><th>Variants (M/L)</th><th>Availability</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Photo</th><th>Product</th><th>Category</th><th>Variants (M/L)</th><th>Availability</th><th>Actions</th></tr></thead>
         <tbody>
         ${products.map((p) => `
           <tr>
+            <td>${imgTag(p.photo_url, p.name)}</td>
             <td><b>${esc(p.name)}</b><br><span class="muted">${esc(p.description || '')}</span></td>
             <td>${esc((cats.find((c) => c.id === p.category_id) || {}).name || '—')}</td>
             <td>${(p.variants || []).map((v) => `${esc(v.size)} ${peso(v.price)}`).join(' • ') || '<span class="muted">none</span>'}</td>
@@ -313,7 +324,7 @@ views.menu = async (main) => {
               <button class="btn ghost sm" data-variants="${p.id}">Prices</button>
               <button class="btn danger sm" data-deact="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
             </div></td>
-          </tr>`).join('') || '<tr><td colspan="5" class="muted">No products.</td></tr>'}
+          </tr>`).join('') || '<tr><td colspan="6" class="muted">No products.</td></tr>'}
         </tbody></table></div>
     </div>`;
 
@@ -388,13 +399,15 @@ views.packages = async (main) => {
     ${packages.map((p) => `
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div><b>${esc(p.name)}</b> — ${peso(p.base_price)}, choose ${p.selections} dishes
+          <div style="display:flex;align-items:center;gap:12px">
+            ${imgTag(p.photo_url, p.name)}
+            <div><b>${esc(p.name)}</b> — ${peso(p.base_price)}, choose ${p.selections} dishes
             ${p.is_fixed ? ' <span class="badge b-COMPLETED">fixed</span>' : ''}
             ${p.is_custom ? ' <span class="badge b-CONFIRMED">custom</span>' : ''}
             ${p.active ? '' : ' <span class="badge b-CANCELLED">inactive</span>'}</div>
+          </div>
           <div class="row-actions">
             <button class="btn ghost sm" data-pkg-edit="${p.id}">Edit</button>
-            <button class="btn ghost sm" data-pkg-slots="${p.id}">Build Slots</button>
             <button class="btn danger sm" data-pkg-toggle="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
           </div>
         </div>
@@ -403,77 +416,37 @@ views.packages = async (main) => {
         </div>
       </div>`).join('')}`;
 
-  main.querySelector('#pkg-new').addEventListener('click', () => {
-    modal(`<h3>New Package</h3>
-      <div class="field"><label>Name</label><input id="pn-name"></div>
-      <div class="field"><label>Description</label><input id="pn-desc"></div>
-      <div class="row2">
-        <div class="field"><label>Base price (₱)</label><input type="number" id="pn-price"></div>
-        <div class="field"><label>Selections</label><input type="number" id="pn-sel" value="4"></div>
-      </div>
-      ${photoField('pn-photo', null)}
-      <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
-        <input type="checkbox" id="pn-fixed" style="width:auto"> Fixed package (dishes pre-set — customers cannot change them)</label></div>
-      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pn-save">Create</button></div>`);
-    bindPhotoField('pn-photo');
-    document.getElementById('pn-save').addEventListener('click', async () => {
-      try {
-        await api('/packages', { method: 'POST', body: {
-          name: document.getElementById('pn-name').value,
-          description: document.getElementById('pn-desc').value,
-          base_price: Number(document.getElementById('pn-price').value),
-          selections: Number(document.getElementById('pn-sel').value),
-          photo_url: document.getElementById('pn-photo').value,
-          is_fixed: document.getElementById('pn-fixed').checked ? 1 : 0,
-        }});
-        closeModal(); toast('Package created — now build its slots'); navigate('packages');
-      } catch (err) { toast(err.message, true); }
-    });
+  // ---- slot rows helpers ----
+  const slotRowsOf = (p, count) => Array.from({ length: count }, (_, i) => {
+    const n = i + 1;
+    const s = (p.slots || []).find((x) => x.slot_number === n);
+    const def = (s?.options || []).find((o) => o.is_default);
+    return { n, default_product_id: def ? def.product_id : null, options: (s?.options || []).map((o) => ({ product_id: o.product_id, upgrade_price: o.upgrade_price || 0, size_upgrade_price: o.size_upgrade_price || 0 })) };
   });
-  main.querySelectorAll('[data-pkg-edit]').forEach((b) => b.addEventListener('click', () => {
-    const p = packages.find((x) => x.id == b.dataset.pkgEdit);
-    modal(`<h3>Edit Package</h3>
-      <div class="field"><label>Name</label><input id="pn-name" value="${esc(p.name)}"></div>
-      <div class="field"><label>Description</label><input id="pn-desc" value="${esc(p.description || '')}"></div>
+  const optRowHtml = (o) => `<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+      <select style="flex:2" class="opt-prod">${products.map((x) => `<option value="${x.id}" ${x.id === o.product_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      <input type="number" style="flex:1" placeholder="upgrade ₱" class="opt-up" value="${o.upgrade_price}">
+      <input type="number" style="flex:1" placeholder="L +₱" class="opt-lup" value="${o.size_upgrade_price}">
+      <button class="btn danger sm" onclick="this.closest('div').remove()">✕</button>
+    </div>`;
+  /** Full package editor: profile + photo + fixed flag + all slots, saved together. */
+  function openPackageEditor(p, draft = null) {
+    const info = draft?.info || { name: p.name, description: p.description || '', base_price: p.base_price, selections: p.selections, photo_url: p.photo_url || '', is_fixed: !!p.is_fixed };
+    const slots = draft?.slots || slotRowsOf(p, info.selections);
+    const render = () => modal(`<h3>Edit Package — ${esc(p.name)}</h3>
+      <div class="field"><label>Name</label><input id="pn-name" value="${esc(info.name)}"></div>
+      <div class="field"><label>Description</label><input id="pn-desc" value="${esc(info.description)}"></div>
       <div class="row2">
-        <div class="field"><label>Base price (₱)</label><input type="number" id="pn-price" value="${p.base_price}"></div>
-        <div class="field"><label>Selections</label><input type="number" id="pn-sel" value="${p.selections}"></div>
+        <div class="field"><label>Base price (₱)</label><input type="number" id="pn-price" value="${info.base_price}"></div>
+        <div class="field"><label>Selections (slots)</label><input type="number" id="pn-sel" value="${info.selections}" min="1" max="10"></div>
       </div>
-      ${photoField('pn-photo', p.photo_url)}
+      ${photoField('pn-photo', info.photo_url)}
       <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
-        <input type="checkbox" id="pn-fixed" style="width:auto" ${p.is_fixed ? 'checked' : ''}> Fixed package (dishes pre-set — customers cannot change them)</label></div>
-      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pn-save">Save</button></div>`);
-    bindPhotoField('pn-photo');
-    document.getElementById('pn-save').addEventListener('click', async () => {
-      await api(`/packages/${p.id}`, { method: 'PUT', body: {
-        name: document.getElementById('pn-name').value,
-        description: document.getElementById('pn-desc').value,
-        base_price: Number(document.getElementById('pn-price').value),
-        selections: Number(document.getElementById('pn-sel').value),
-        photo_url: document.getElementById('pn-photo').value,
-        is_fixed: document.getElementById('pn-fixed').checked ? 1 : 0,
-      }});
-      closeModal(); toast('Saved'); navigate('packages');
-    });
-  }));
-  main.querySelectorAll('[data-pkg-toggle]').forEach((b) => b.addEventListener('click', async () => {
-    const p = packages.find((x) => x.id == b.dataset.pkgToggle);
-    await api(`/packages/${p.id}`, { method: 'PUT', body: { active: p.active ? 0 : 1 } });
-    navigate('packages');
-  }));
-  // ---- slot builder ----
-  main.querySelectorAll('[data-pkg-slots]').forEach((b) => b.addEventListener('click', () => {
-    const p = packages.find((x) => x.id == b.dataset.pkgSlots);
-    const rows = Array.from({ length: p.selections }, (_, i) => i + 1);
-    const slotState = rows.map((n) => {
-      const s = (p.slots || []).find((x) => x.slot_number === n);
-      const def = (s?.options || []).find((o) => o.is_default);
-      return { n, default_product_id: def ? def.product_id : null, options: (s?.options || []).map((o) => ({ product_id: o.product_id, upgrade_price: o.upgrade_price || 0, size_upgrade_price: o.size_upgrade_price || 0 })) };
-    });
-    const render = () => modal(`<h3>Package Builder — ${esc(p.name)}</h3>
-      ${p.is_custom ? '<p class="muted" style="margin-bottom:10px">Custom package: every slot accepts <b>all menu dishes</b> automatically. Add options only to set upgrade prices or a preferred default.</p>' : ''}
-      ${slotState.map((s) => `
-        <div class="card" style="box-shadow:none;border:1px solid #eee;padding:12px">
+        <input type="checkbox" id="pn-fixed" style="width:auto" ${info.is_fixed ? 'checked' : ''}> Fixed package (dishes pre-set — customers cannot change them)</label></div>
+      ${p.is_custom ? '<p class="muted">Custom package: every slot accepts <b>all menu dishes</b> automatically. Options below only set upgrade prices / defaults.</p>' : ''}
+      <h3 style="margin:6px 0 10px">Slots &amp; dish options</h3>
+      ${slots.map((s) => `
+        <div class="card" style="box-shadow:none;border:1px solid #eee;padding:12px;margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
             <b>Slot ${s.n}</b>
             <select style="max-width:55%" class="slot-def" data-n="${s.n}" title="Pre-selected dish (★). Used as-is for fixed packages.">
@@ -481,23 +454,12 @@ views.packages = async (main) => {
               ${products.map((x) => `<option value="${x.id}" ${x.id === s.default_product_id ? 'selected' : ''}>★ ${esc(x.name)}</option>`).join('')}
             </select>
           </div>
-          <div id="slot-opts-${s.n}" style="margin-top:8px">
-            ${s.options.map((o, idx) => {
-              const prod = products.find((x) => x.id === o.product_id);
-              return `<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
-                <select style="flex:2" data-s="${s.n}" data-i="${idx}" class="opt-prod">
-                  ${products.map((x) => `<option value="${x.id}" ${x.id === o.product_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
-                </select>
-                <input type="number" style="flex:1" placeholder="upgrade ₱" value="${o.upgrade_price}" data-s="${s.n}" data-i="${idx}" class="opt-up">
-                <input type="number" style="flex:1" placeholder="L +₱" value="${o.size_upgrade_price}" data-s="${s.n}" data-i="${idx}" class="opt-lup">
-                <button class="btn danger sm" onclick="this.closest('div').remove()">✕</button>
-              </div>`;
-            }).join('')}
-          </div>
-          <button class="btn ghost sm" onclick="addOptRow(${s.n})">＋ Add dish option</button>
+          <div id="slot-opts-${s.n}" style="margin-top:8px">${s.options.map((o) => optRowHtml(o)).join('')}</div>
+          <button type="button" class="btn ghost sm" onclick="addOptRow(${s.n})">＋ Add dish option</button>
         </div>`).join('')}
-      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="slots-save">Save Slots</button></div>`);
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pn-save">Save Package</button></div>`);
     render();
+    bindPhotoField('pn-photo');
     window.addOptRow = (n) => {
       const div = document.createElement('div');
       div.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
@@ -507,38 +469,105 @@ views.packages = async (main) => {
         <button class="btn danger sm" onclick="this.closest('div').remove()">✕</button>`;
       document.getElementById('slot-opts-' + n).appendChild(div);
     };
-    document.getElementById('slots-save').addEventListener('click', async () => {
+    const readInfo = () => ({
+      name: document.getElementById('pn-name').value,
+      description: document.getElementById('pn-desc').value,
+      base_price: Number(document.getElementById('pn-price').value),
+      selections: Number(document.getElementById('pn-sel').value),
+      photo_url: document.getElementById('pn-photo').value,
+      is_fixed: document.getElementById('pn-fixed').checked ? 1 : 0,
+    });
+    const readSlots = (count) => {
       const modalEl = document.getElementById('modal');
+      return Array.from({ length: count }, (_, i) => {
+        const n = i + 1;
+        const opts = Array.from(modalEl.querySelectorAll(`#slot-opts-${n} > div`)).map((row) => ({
+          product_id: Number(row.querySelector('.opt-prod').value),
+          upgrade_price: Number(row.querySelector('.opt-up').value) || 0,
+          size_upgrade_price: Number(row.querySelector('.opt-lup').value) || 0,
+        }));
+        const defSel = modalEl.querySelector(`.slot-def[data-n="${n}"]`);
+        return { n, default_product_id: defSel && defSel.value ? Number(defSel.value) : null, options: opts };
+      });
+    };
+    // Changing the selections count rebuilds the slot section, keeping entered values.
+    document.getElementById('pn-sel').addEventListener('change', () => {
+      const count = Math.max(1, Math.min(10, Number(document.getElementById('pn-sel').value) || 1));
+      document.getElementById('pn-sel').value = count;
+      openPackageEditor(p, { info: readInfo(), slots: readSlots(info.selections) });
+    });
+    document.getElementById('pn-save').addEventListener('click', async () => {
+      const infoBody = readInfo();
       try {
-        const slots = rows.map((n) => {
-          const opts = Array.from(modalEl.querySelectorAll(`#slot-opts-${n} > div`)).map((row) => ({
-            product_id: Number(row.querySelector('.opt-prod').value),
-            upgrade_price: Number(row.querySelector('.opt-up').value) || 0,
-            size_upgrade_price: Number(row.querySelector('.opt-lup').value) || 0,
-          }));
+        if (!infoBody.name.trim()) throw new Error('Package name is required.');
+        const slotsPayload = readSlots(infoBody.selections).map((s) => {
           const upgrade_prices = {}, size_upgrade_prices = {};
-          opts.forEach((o) => { upgrade_prices[o.product_id] = o.upgrade_price; size_upgrade_prices[o.product_id] = o.size_upgrade_price; });
-          const defSel = modalEl.querySelector(`.slot-def[data-n="${n}"]`);
-          const default_product_id = defSel && defSel.value ? Number(defSel.value) : undefined;
-          if (default_product_id && !opts.some((o) => o.product_id === default_product_id)) {
-            throw new Error(`Slot ${n}: the default dish must be one of the slot's dish options.`);
+          s.options.forEach((o) => { upgrade_prices[o.product_id] = o.upgrade_price; size_upgrade_prices[o.product_id] = o.size_upgrade_price; });
+          if (s.default_product_id && !s.options.some((o) => o.product_id === s.default_product_id)) {
+            throw new Error(`Slot ${s.n}: the default dish must be one of the slot's dish options.`);
           }
-          return { slot_number: n, product_ids: opts.map((o) => o.product_id), upgrade_prices, size_upgrade_prices, default_product_id };
+          if (!p.is_custom && s.options.length === 0) {
+            throw new Error(`Slot ${s.n}: add at least one dish option (or mark the package as custom).`);
+          }
+          return { slot_number: s.n, product_ids: s.options.map((o) => o.product_id), upgrade_prices, size_upgrade_prices, default_product_id: s.default_product_id ?? undefined };
         });
-        await api(`/packages/${p.id}/slots`, { method: 'PUT', body: { slots } });
-        closeModal(); toast('Slots saved'); navigate('packages');
+        await api(`/packages/${p.id}`, { method: 'PUT', body: infoBody });
+        await api(`/packages/${p.id}/slots`, { method: 'PUT', body: { slots: slotsPayload } });
+        closeModal(); toast('Package saved'); navigate('packages');
       } catch (err) { toast(err.message, true); }
     });
+  }
+
+  main.querySelector('#pkg-new').addEventListener('click', () => {
+    modal(`<h3>New Package</h3>
+      <div class="field"><label>Name</label><input id="np-name"></div>
+      <div class="field"><label>Description</label><input id="np-desc"></div>
+      <div class="row2">
+        <div class="field"><label>Base price (₱)</label><input type="number" id="np-price"></div>
+        <div class="field"><label>Selections (slots)</label><input type="number" id="np-sel" value="4" min="1" max="10"></div>
+      </div>
+      ${photoField('np-photo', null)}
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
+        <input type="checkbox" id="np-fixed" style="width:auto"> Fixed package (dishes pre-set — customers cannot change them)</label></div>
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="np-save">Create &amp; Add Dishes</button></div>`);
+    bindPhotoField('np-photo');
+    document.getElementById('np-save').addEventListener('click', async () => {
+      try {
+        const name = document.getElementById('np-name').value.trim();
+        if (!name) throw new Error('Package name is required.');
+        const created = await api('/packages', { method: 'POST', body: {
+          name,
+          description: document.getElementById('np-desc').value,
+          base_price: Number(document.getElementById('np-price').value),
+          selections: Number(document.getElementById('np-sel').value),
+          photo_url: document.getElementById('np-photo').value,
+          is_fixed: document.getElementById('np-fixed').checked ? 1 : 0,
+        }});
+        toast('Package created — now add its dishes');
+        const fresh = await api('/packages');
+        const p = fresh.find((x) => x.id === created.id);
+        if (p) openPackageEditor(p); else navigate('packages');
+      } catch (err) { toast(err.message, true); }
+    });
+  });
+  main.querySelectorAll('[data-pkg-edit]').forEach((b) => b.addEventListener('click', () => {
+    const p = packages.find((x) => x.id == b.dataset.pkgEdit);
+    openPackageEditor(p);
+  }));
+  main.querySelectorAll('[data-pkg-toggle]').forEach((b) => b.addEventListener('click', async () => {
+    const p = packages.find((x) => x.id == b.dataset.pkgToggle);
+    await api(`/packages/${p.id}`, { method: 'PUT', body: { active: p.active ? 0 : 1 } });
+    navigate('packages');
   }));
 };
 
-/* ================= CUSTOMERS ================= */
+/* ================= CUSTOMERS (members) ================= */
 views.customers = async (main) => {
   const customers = await api('/customers');
   main.innerHTML = `
     <h2 class="page-title">Customers</h2>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Messenger ID</th><th>Phone</th><th>Address</th><th>Orders</th><th>Total Spent</th></tr></thead>
+      <thead><tr><th>Name</th><th>Messenger ID</th><th>Phone</th><th>Address</th><th>Orders</th><th>Total Spent</th><th>Actions</th></tr></thead>
       <tbody>${customers.map((c) => `
         <tr>
           <td><b>${esc(c.name || 'Unnamed')}</b></td>
@@ -547,8 +576,60 @@ views.customers = async (main) => {
           <td>${esc(c.address || '—')}</td>
           <td>${c.total_orders}</td>
           <td>${peso(c.total_spent)}</td>
-        </tr>`).join('') || '<tr><td colspan="6" class="muted">No customers yet.</td></tr>'}
+          <td><div class="row-actions">
+            <button class="btn ghost sm" data-c-edit="${c.id}">Edit</button>
+            <button class="btn ghost sm" data-c-history="${c.id}">History</button>
+            <button class="btn danger sm" data-c-del="${c.id}">Delete</button>
+          </div></td>
+        </tr>`).join('') || '<tr><td colspan="7" class="muted">No customers yet.</td></tr>'}
       </tbody></table></div></div>`;
+
+  main.querySelectorAll('[data-c-edit]').forEach((b) => b.addEventListener('click', () => {
+    const c = customers.find((x) => x.id == b.dataset.cEdit);
+    modal(`<h3>Edit Member</h3>
+      <div class="field"><label>Name</label><input id="ce-name" value="${esc(c.name || '')}"></div>
+      <div class="row2">
+        <div class="field"><label>Phone</label><input id="ce-phone" value="${esc(c.phone || '')}"></div>
+        <div class="field"><label>Messenger ID</label><input value="${esc(c.psid)}" disabled></div>
+      </div>
+      <div class="field"><label>Address</label><input id="ce-address" value="${esc(c.address || '')}"></div>
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="ce-save">Save</button></div>`);
+    document.getElementById('ce-save').addEventListener('click', async () => {
+      try {
+        await api(`/customers/${c.id}`, { method: 'PUT', body: {
+          name: document.getElementById('ce-name').value,
+          phone: document.getElementById('ce-phone').value,
+          address: document.getElementById('ce-address').value,
+        }});
+        closeModal(); toast('Member updated'); navigate('customers');
+      } catch (err) { toast(err.message, true); }
+    });
+  }));
+
+  main.querySelectorAll('[data-c-history]').forEach((b) => b.addEventListener('click', async () => {
+    const c = customers.find((x) => x.id == b.dataset.cHistory);
+    modal(`<h3>Order History — ${esc(c.name || 'Unnamed')}</h3>
+      <div id="ch-list" class="muted">Loading…</div>
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
+    try {
+      const orders = await api(`/customers/${c.id}/orders`);
+      document.getElementById('ch-list').innerHTML = orders.map((o) => `
+        <div class="slot-row"><span><b>${esc(o.order_number)}</b> — ${esc(o.order_type)}<br>
+          <span class="muted">${esc((o.created_at || '').slice(0, 16))}${o.fulfillment_date ? ' · ' + esc(o.fulfillment_date) + ' ' + esc(o.time_slot || '') : ''}</span></span>
+          <span><span class="badge b-${esc(o.status)}">${esc(o.status)}</span> ${peso(o.total)}</span>
+        </div>`).join('') || '<p class="muted">No orders yet.</p>';
+    } catch (err) { document.getElementById('ch-list').textContent = err.message; }
+  }));
+
+  main.querySelectorAll('[data-c-del]').forEach((b) => b.addEventListener('click', async () => {
+    const c = customers.find((x) => x.id == b.dataset.cDel);
+    if (!confirm(`Delete member "${c.name || c.psid}"? This cannot be undone.`)) return;
+    try {
+      await api(`/customers/${c.id}`, { method: 'DELETE' });
+      toast('Member deleted'); navigate('customers');
+    } catch (err) { toast(err.message, true); }
+  }));
 };
 
 /* ================= DELIVERY ================= */
@@ -699,5 +780,74 @@ views.settings = async (main) => {
       await api(`/time-slots/${s.id}`, { method: 'PUT', body: { label: document.getElementById('tsl').value, max_capacity: Number(document.getElementById('tsc').value) } });
       closeModal(); toast('Saved'); navigate('settings');
     });
+  }));
+};
+
+/* ================= ADMINS (staff accounts) ================= */
+views.admins = async (main) => {
+  const admins = await api('/admins');
+  main.innerHTML = `
+    <h2 class="page-title">Admin Accounts</h2>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <span class="muted">Admins have full access including account management. Staff can manage daily operations only.</span>
+        <button class="btn sm" id="adm-new">＋ Add Admin</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>${admins.map((a) => `
+          <tr>
+            <td><b>${esc(a.username)}</b>${a.id === ME_ID ? ' <span class="badge b-CONFIRMED">you</span>' : ''}</td>
+            <td>${a.role === 'ADMIN' ? '<span class="badge b-COMPLETED">Admin</span>' : '<span class="badge b-PENDING">Staff</span>'}</td>
+            <td class="muted">${esc((a.created_at || '').slice(0, 16))}</td>
+            <td><div class="row-actions">
+              <button class="btn ghost sm" data-a-edit="${a.id}">Edit</button>
+              ${a.id === ME_ID ? '' : `<button class="btn danger sm" data-a-del="${a.id}">Delete</button>`}
+            </div></td>
+          </tr>`).join('')}
+        </tbody></table></div>
+    </div>`;
+
+  const adminForm = (a) => modal(`<h3>${a ? 'Edit' : 'New'} Admin Account</h3>
+    <div class="field"><label>Username</label><input id="af-user" value="${esc(a?.username || '')}"></div>
+    <div class="field"><label>${a ? 'New password (leave blank to keep current)' : 'Password'}</label>
+      <input id="af-pass" type="password" autocomplete="new-password"></div>
+    <div class="field"><label>Role</label><select id="af-role">
+      <option value="ADMIN" ${a?.role === 'ADMIN' ? 'selected' : ''}>Admin — full access incl. account management</option>
+      <option value="STAFF" ${a && a.role !== 'ADMIN' ? 'selected' : ''}>Staff — daily operations only</option>
+    </select></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn" id="af-save">Save</button></div>`);
+  const saveAdmin = async (a) => {
+    const body = {
+      username: document.getElementById('af-user').value.trim(),
+      role: document.getElementById('af-role').value,
+    };
+    const pass = document.getElementById('af-pass').value;
+    if (!body.username) return toast('Username required', true);
+    if (!a && !pass) return toast('Password required', true);
+    if (pass) body.password = pass;
+    try {
+      if (a) await api(`/admins/${a.id}`, { method: 'PUT', body });
+      else await api('/admins', { method: 'POST', body });
+      closeModal(); toast('Saved'); navigate('admins');
+    } catch (err) { toast(err.message, true); }
+  };
+  main.querySelector('#adm-new').addEventListener('click', () => {
+    adminForm(null);
+    document.getElementById('af-save').addEventListener('click', () => saveAdmin(null));
+  });
+  main.querySelectorAll('[data-a-edit]').forEach((b) => b.addEventListener('click', () => {
+    const a = admins.find((x) => x.id == b.dataset.aEdit);
+    adminForm(a);
+    document.getElementById('af-save').addEventListener('click', () => saveAdmin(a));
+  }));
+  main.querySelectorAll('[data-a-del]').forEach((b) => b.addEventListener('click', async () => {
+    const a = admins.find((x) => x.id == b.dataset.aDel);
+    if (!confirm(`Delete admin account "${a.username}"?`)) return;
+    try {
+      await api(`/admins/${a.id}`, { method: 'DELETE' });
+      toast('Account deleted'); navigate('admins');
+    } catch (err) { toast(err.message, true); }
   }));
 };

@@ -218,10 +218,15 @@ function migrate() {
   );
   `);
     const adminCount = exports.db.prepare('SELECT COUNT(*) c FROM admins').get().c;
+    // v3: admin account management — role column (ADMIN | STAFF)
+    const adminCols = exports.db.prepare('PRAGMA table_info(admins)').all().map((c) => c.name);
+    if (!adminCols.includes('role')) {
+        exports.db.exec(`ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'ADMIN';`);
+    }
     if (adminCount === 0) {
         const hash = bcryptjs_1.default.hashSync(process.env.ADMIN_PASSWORD || 'change-me', 10);
-        exports.db.prepare('INSERT INTO admins (username, password_hash) VALUES (?, ?)')
-            .run(process.env.ADMIN_USER || 'admin', hash);
+        exports.db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)')
+            .run(process.env.ADMIN_USER || 'admin', hash, 'ADMIN');
     }
     const slotCount = exports.db.prepare('SELECT COUNT(*) c FROM time_slots').get().c;
     if (slotCount === 0) {

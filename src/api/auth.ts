@@ -12,8 +12,9 @@ export function loginHandler(req: Request, res: Response) {
   if (!admin || !bcrypt.compareSync(password, admin.password_hash)) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
-  const token = jwt.sign({ sub: admin.id, username: admin.username }, JWT_SECRET, { expiresIn: '12h' });
-  res.json({ token });
+  const role = admin.role || 'ADMIN';
+  const token = jwt.sign({ sub: admin.id, username: admin.username, role }, JWT_SECRET, { expiresIn: '12h' });
+  res.json({ token, id: admin.id, username: admin.username, role });
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -25,4 +26,16 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   } catch {
     res.status(401).json({ error: 'Unauthorized' });
   }
+}
+
+/** Restrict a route to a specific admin role (e.g. only full ADMINs may manage staff accounts). */
+export function requireRole(role: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const admin = (req as any).admin;
+    // Tokens issued before roles existed belong to the original owner account → treat as ADMIN.
+    if (!admin || (admin.role || 'ADMIN') !== role) {
+      return res.status(403).json({ error: 'Forbidden: admin role required' });
+    }
+    next();
+  };
 }

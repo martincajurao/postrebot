@@ -220,10 +220,16 @@ export function migrate(): void {
   `);
 
   const adminCount = (db.prepare('SELECT COUNT(*) c FROM admins').get() as any).c;
+  // v3: admin account management — role column (ADMIN | STAFF)
+  const adminCols = (db.prepare('PRAGMA table_info(admins)').all() as any[]).map((c: any) => c.name);
+  if (!adminCols.includes('role')) {
+    db.exec(`ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'ADMIN';`);
+  }
+
   if (adminCount === 0) {
     const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'change-me', 10);
-    db.prepare('INSERT INTO admins (username, password_hash) VALUES (?, ?)')
-      .run(process.env.ADMIN_USER || 'admin', hash);
+    db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)')
+      .run(process.env.ADMIN_USER || 'admin', hash, 'ADMIN');
   }
 
   const slotCount = (db.prepare('SELECT COUNT(*) c FROM time_slots').get() as any).c;

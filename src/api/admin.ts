@@ -1,6 +1,7 @@
 ﻿import { Router } from 'express';
+import bcrypt from 'bcryptjs';
 import { db } from '../db/database';
-import { authMiddleware } from './auth';
+import { authMiddleware, requireRole } from './auth';
 import { updateOrderStatus, updatePaymentStatus } from '../services/orders';
 import {
   createReservation, cancelReservation, updateReservationStatus,
@@ -106,11 +107,11 @@ r.post('/packages', (req, res) => {
   res.json({ id: Number(out.lastInsertRowid) });
 });
 r.put('/packages/:id', (req, res) => {
-  const { name, description, base_price, selections, active, is_fixed, is_custom } = req.body;
+  const { name, description, photo_url, base_price, selections, active, is_fixed, is_custom } = req.body;
   db.prepare(`UPDATE packages SET name = COALESCE(?, name), description = COALESCE(?, description),
-    base_price = COALESCE(?, base_price), selections = COALESCE(?, selections),
+    photo_url = COALESCE(?, photo_url), base_price = COALESCE(?, base_price), selections = COALESCE(?, selections),
     active = COALESCE(?, active), is_fixed = COALESCE(?, is_fixed), is_custom = COALESCE(?, is_custom) WHERE id = ?`)
-    .run(name ?? null, description ?? null, base_price ?? null, selections ?? null, active ?? null,
+    .run(name ?? null, description ?? null, photo_url ?? null, base_price ?? null, selections ?? null, active ?? null,
       is_fixed == null ? null : (is_fixed ? 1 : 0), is_custom == null ? null : (is_custom ? 1 : 0), req.params.id);
   res.json({ ok: true });
 });
@@ -191,12 +192,38 @@ r.put('/reservations/:id/cancel', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---- Customers ----
+// ---- Customers (members) ----
 r.get('/customers', (_req, res) => {
   res.json(db.prepare(`SELECT c.*,
     (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS total_orders,
     (SELECT COALESCE(SUM(total),0) FROM orders o WHERE o.customer_id = c.id AND o.status != 'CANCELLED') AS total_spent
     FROM customers c ORDER BY c.id DESC`).all());
+});
+
+r.put('/customers/:id', (req, res) => {
+  const { name, phone, address } = req.body || {};
+  db.prepare(`UPDATE customers SET name = COALESCE(?, name), phone = COALESCE(?, phone),
+    address = COALESCE(?, address) WHERE id = ?`)
+    .run(name ?? null, phone ?? null, address ?? null, req.params.id);
+  res.json({ ok: true });
+});
+
+r.get('/customers/:id/orders', (req, res) => {
+  res.json(db.prepare('SELECT * FROM orders WHERE customer_id = ? ORDER BY id DESC').all(req.params.id));
+});
+
+r.delete('/customers/:id', (req, res) => {
+  const cust = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id) as any;
+  if (!cust) return res.status(404).json({ error: 'Member not found' });
+  const orderCount = (db.prepare('SELECT COUNT(*) c FROM orders WHERE customer_id = ?').get(cust.id) as any).c;
+  if (orderCount > 0) {
+    return res.status(409).json({ error: 'This member has orders on record and cannot be deleted. Edit their details instead.' });
+  }
+  db.transaction(() => {
+    db.prepare('DELETE FROM carts WHERE psid = ?').run(cust.psid);
+    db.prepare('DELETE FROM customers WHERE id = ?').run(cust.id);
+  })();
+  res.json({ ok: true });
 });
 
 // ---- Delivery areas ----
@@ -250,6 +277,70 @@ r.post('/pricing/preview', (req, res) => {
   try {
     res.json(computeCartTotals(req.body.items || [], req.body.delivery_fee || 0));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ---- Admin accounts (only full ADMINs manage these) ----
+const requireAdmin = requireRole('ADMIN');
+
+r.get('/admins', requireAdmin, (_req, res) => {
+  res.json(db.prepare('SELECT id, username, role, created_at FROM admins ORDER BY id').all());
+});
+
+r.post('/admins', requireAdmin, (req, res) => {
+  const { username, password, role } = req.body || {};
+  if (!username || !username.trim() || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+  if (String(password).length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+  const name = String(username).trim();
+  if (db.prepare('SELECT id FROM admins WHERE username = ?').get(name)) {
+    return res.status(409).json({ error: 'That username is already taken' });
+  }
+  const hash = bcrypt.hashSync(password, 10);
+  const out = db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)')
+    .run(name, hash, role === 'ADMIN' ? 'ADMIN' : 'STAFF');
+  res.json({ id: Number(out.lastInsertRowid) });
+});
+
+r.put('/admins/:id', requireAdmin, (req, res) => {
+  const target = db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id) as any;
+  if (!target) return res.status(404).json({ error: 'Admin not found' });
+  const { username, password, role } = req.body || {};
+  const name = username != null ? String(username).trim() : null;
+  if (name && name !== target.username &&
+      db.prepare('SELECT id FROM admins WHERE username = ?').get(name)) {
+    return res.status(409).json({ error: 'That username is already taken' });
+  }
+  if (password != null && password !== '' && String(password).length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+  // Never leave the system without a full admin.
+  const nextRole = role != null ? (role === 'ADMIN' ? 'ADMIN' : 'STAFF') : (target.role || 'ADMIN');
+  const adminCount = (db.prepare("SELECT COUNT(*) c FROM admins WHERE role = 'ADMIN'").get() as any).c;
+  if ((target.role || 'ADMIN') === 'ADMIN' && nextRole !== 'ADMIN' && adminCount <= 1) {
+    return res.status(400).json({ error: 'Cannot remove the last admin account' });
+  }
+  const hash = password != null && password !== '' ? bcrypt.hashSync(password, 10) : null;
+  db.prepare(`UPDATE admins SET username = COALESCE(?, username),
+    password_hash = COALESCE(?, password_hash), role = ? WHERE id = ?`)
+    .run(name, hash, nextRole, req.params.id);
+  res.json({ ok: true });
+});
+
+r.delete('/admins/:id', requireAdmin, (req, res) => {
+  const target = db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id) as any;
+  if (!target) return res.status(404).json({ error: 'Admin not found' });
+  if (Number((req as any).admin?.sub) === target.id) {
+    return res.status(400).json({ error: 'You cannot delete your own account' });
+  }
+  if ((target.role || 'ADMIN') === 'ADMIN') {
+    const adminCount = (db.prepare("SELECT COUNT(*) c FROM admins WHERE role = 'ADMIN'").get() as any).c;
+    if (adminCount <= 1) return res.status(400).json({ error: 'Cannot remove the last admin account' });
+  }
+  db.prepare('DELETE FROM admins WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
 });
 
 export default r;
