@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CUSTOM_DEFAULT_SIZE_UPGRADE = void 0;
+exports.netPackagePrice = netPackagePrice;
 exports.priceProduct = priceProduct;
 exports.normalizeChoices = normalizeChoices;
 exports.packageDefaults = packageDefaults;
@@ -10,6 +11,10 @@ exports.computeCartTotals = computeCartTotals;
 const database_1 = require("../db/database");
 /** Size upgrade charged per dish for custom-package slots without an explicit option row. */
 exports.CUSTOM_DEFAULT_SIZE_UPGRADE = 100;
+/** Charged package price: base minus any combo discount (never below zero). */
+function netPackagePrice(pkg) {
+    return Math.max(0, (pkg.base_price || 0) - (pkg.discount || 0));
+}
 /**
  * Server-side authoritative pricing. Never trusts client prices.
  * Prices stored as integer pesos (or centavos — consistent usage).
@@ -76,7 +81,9 @@ function pricePackage(packageId, slotChoices, packageSize) {
     if (!pkg)
         throw new Error('Invalid package');
     const breakdown = [{ label: `${pkg.name} base`, amount: pkg.base_price }];
-    let total = pkg.base_price;
+    if ((pkg.discount || 0) > 0)
+        breakdown.push({ label: `${pkg.name} discount`, amount: -(pkg.discount) });
+    let total = netPackagePrice(pkg);
     const slots = database_1.db.prepare('SELECT * FROM package_slots WHERE package_id = ?').all(packageId);
     const choices = normalizeChoices(slotChoices);
     if (choices.length !== pkg.selections)

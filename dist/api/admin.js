@@ -99,17 +99,17 @@ r.get('/packages', (_req, res) => {
     })));
 });
 r.post('/packages', (req, res) => {
-    const { name, description, photo_url, base_price, selections, is_fixed, is_custom } = req.body;
-    const out = database_1.db.prepare('INSERT INTO packages (name, description, photo_url, base_price, selections, is_fixed, is_custom) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(name, description ?? null, photo_url ?? null, base_price, selections, is_fixed ? 1 : 0, is_custom ? 1 : 0);
+    const { name, description, photo_url, base_price, discount = 0, selections, is_fixed, is_custom } = req.body;
+    const out = database_1.db.prepare('INSERT INTO packages (name, description, photo_url, base_price, discount, selections, is_fixed, is_custom) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(name, description ?? null, photo_url ?? null, base_price, Math.max(0, Number(discount) || 0), selections, is_fixed ? 1 : 0, is_custom ? 1 : 0);
     res.json({ id: Number(out.lastInsertRowid) });
 });
 r.put('/packages/:id', (req, res) => {
-    const { name, description, photo_url, base_price, selections, active, is_fixed, is_custom } = req.body;
+    const { name, description, photo_url, base_price, discount, selections, active, is_fixed, is_custom } = req.body;
     database_1.db.prepare(`UPDATE packages SET name = COALESCE(?, name), description = COALESCE(?, description),
-    photo_url = COALESCE(?, photo_url), base_price = COALESCE(?, base_price), selections = COALESCE(?, selections),
+    photo_url = COALESCE(?, photo_url), base_price = COALESCE(?, base_price), discount = COALESCE(?, discount), selections = COALESCE(?, selections),
     active = COALESCE(?, active), is_fixed = COALESCE(?, is_fixed), is_custom = COALESCE(?, is_custom) WHERE id = ?`)
-        .run(name ?? null, description ?? null, photo_url ?? null, base_price ?? null, selections ?? null, active ?? null, is_fixed == null ? null : (is_fixed ? 1 : 0), is_custom == null ? null : (is_custom ? 1 : 0), req.params.id);
+        .run(name ?? null, description ?? null, photo_url ?? null, base_price ?? null, discount == null ? null : Math.max(0, Number(discount) || 0), selections ?? null, active ?? null, is_fixed == null ? null : (is_fixed ? 1 : 0), is_custom == null ? null : (is_custom ? 1 : 0), req.params.id);
     res.json({ ok: true });
 });
 // Set slots: { slots: [{ slot_number: 1, product_ids: [1,2,3], upgrade_prices: {productId: 0}, default_product_id: 1 }] }

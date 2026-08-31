@@ -11,8 +11,9 @@ const database_1 = require("./database");
  * One-time import: replaces the current menu (categories/products/variants) and
  * packages with the "Menu" and "Combo" collections from a backup JSON export
  * (mydb.json). Only attributes that exist in the current schema are used;
- * backup-only fields (branches, isHot, menuDisc, menuStatus, buyQty, disc) are
- * intentionally ignored.
+ * backup-only fields (branches, isHot, menuDisc, menuStatus, buyQty) are
+ * intentionally ignored. The combo "disc" amount is imported as the package
+ * discount and subtracted from base_price at checkout.
  *
  * Usage: node dist/db/import-backup.js [path/to/mydb.json]
  */
@@ -113,13 +114,13 @@ const tx = database_1.db.transaction(() => {
         }
     }
     // Combos -> fixed packages (one dish per slot; backup has no upgrade data)
-    const insPkg = database_1.db.prepare('INSERT INTO packages (name, description, photo_url, base_price, selections, active, is_fixed, is_custom) VALUES (?, ?, ?, ?, ?, 1, 1, 0)');
+    const insPkg = database_1.db.prepare('INSERT INTO packages (name, description, photo_url, base_price, discount, selections, active, is_fixed, is_custom) VALUES (?, ?, ?, ?, ?, ?, 1, 1, 0)');
     const insSlot = database_1.db.prepare('INSERT INTO package_slots (package_id, slot_number) VALUES (?, ?)');
     const insOpt = database_1.db.prepare('INSERT INTO package_options (slot_id, product_id, upgrade_price, size_upgrade_price, is_default) VALUES (?, ?, 0, 0, 1)');
     const missing = [];
     for (const [code, c] of Object.entries(combos)) {
         const members = Array.isArray(c.members) ? c.members : Object.values(c.members || {});
-        const out = insPkg.run(code, cleanText(c.desc), cleanText(c.img), toInt(c.price), members.length);
+        const out = insPkg.run(code, cleanText(c.desc), cleanText(c.img), toInt(c.price), toInt(c.disc) ?? 0, members.length);
         const pkgId = Number(out.lastInsertRowid);
         let slotNo = 1;
         for (const mem of members) {
@@ -143,9 +144,10 @@ try {
     console.log('Import complete.', JSON.stringify(stats));
     console.log(`categories=${count('categories')} products=${count('products')} variants=${count('product_variants')} ` +
         `packages=${count('packages')} slots=${count('package_slots')} options=${count('package_options')}`);
-    for (const p of database_1.db.prepare('SELECT id, name, base_price, selections FROM packages ORDER BY id').all()) {
+    for (const p of database_1.db.prepare('SELECT id, name, base_price, discount, selections FROM packages ORDER BY id').all()) {
         const slots = database_1.db.prepare('SELECT COUNT(*) c FROM package_slots WHERE package_id = ?').get(p.id).c;
-        console.log(`  package ${p.name}: base ₱${p.base_price}, ${p.selections} selections, ${slots} slots`);
+        const net = Math.max(0, p.base_price - (p.discount || 0));
+        console.log(`  package ${p.name}: ₱${net}${p.discount ? ` (was ₱${p.base_price}, save ₱${p.discount})` : ''}, ${p.selections} selections, ${slots} slots`);
     }
 }
 catch (e) {

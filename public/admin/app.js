@@ -401,7 +401,7 @@ views.packages = async (main) => {
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div style="display:flex;align-items:center;gap:12px">
             ${imgTag(p.photo_url, p.name)}
-            <div><b>${esc(p.name)}</b> — ${peso(p.base_price)}, choose ${p.selections} dishes
+            <div><b>${esc(p.name)}</b> — ${p.discount > 0 ? `<s class="muted">${peso(p.base_price)}</s> ${peso(p.base_price - p.discount)} <span class="badge b-CONFIRMED">Save ${peso(p.discount)}</span>` : peso(p.base_price)}, choose ${p.selections} dishes
             ${p.is_fixed ? ' <span class="badge b-COMPLETED">fixed</span>' : ''}
             ${p.is_custom ? ' <span class="badge b-CONFIRMED">custom</span>' : ''}
             ${p.active ? '' : ' <span class="badge b-CANCELLED">inactive</span>'}</div>
@@ -431,13 +431,14 @@ views.packages = async (main) => {
     </div>`;
   /** Full package editor: profile + photo + fixed flag + all slots, saved together. */
   function openPackageEditor(p, draft = null) {
-    const info = draft?.info || { name: p.name, description: p.description || '', base_price: p.base_price, selections: p.selections, photo_url: p.photo_url || '', is_fixed: !!p.is_fixed };
+    const info = draft?.info || { name: p.name, description: p.description || '', base_price: p.base_price, discount: p.discount || 0, selections: p.selections, photo_url: p.photo_url || '', is_fixed: !!p.is_fixed };
     const slots = draft?.slots || slotRowsOf(p, info.selections);
     const render = () => modal(`<h3>Edit Package — ${esc(p.name)}</h3>
       <div class="field"><label>Name</label><input id="pn-name" value="${esc(info.name)}"></div>
       <div class="field"><label>Description</label><input id="pn-desc" value="${esc(info.description)}"></div>
-      <div class="row2">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="field"><label>Base price (₱)</label><input type="number" id="pn-price" value="${info.base_price}"></div>
+        <div class="field"><label>Discount (₱)</label><input type="number" id="pn-disc" value="${info.discount || 0}" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="pn-sel" value="${info.selections}" min="1" max="10"></div>
       </div>
       ${photoField('pn-photo', info.photo_url)}
@@ -473,6 +474,7 @@ views.packages = async (main) => {
       name: document.getElementById('pn-name').value,
       description: document.getElementById('pn-desc').value,
       base_price: Number(document.getElementById('pn-price').value),
+      discount: Math.max(0, Number(document.getElementById('pn-disc').value) || 0),
       selections: Number(document.getElementById('pn-sel').value),
       photo_url: document.getElementById('pn-photo').value,
       is_fixed: document.getElementById('pn-fixed').checked ? 1 : 0,
@@ -522,8 +524,9 @@ views.packages = async (main) => {
     modal(`<h3>New Package</h3>
       <div class="field"><label>Name</label><input id="np-name"></div>
       <div class="field"><label>Description</label><input id="np-desc"></div>
-      <div class="row2">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="field"><label>Base price (₱)</label><input type="number" id="np-price"></div>
+        <div class="field"><label>Discount (₱)</label><input type="number" id="np-disc" value="0" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="np-sel" value="4" min="1" max="10"></div>
       </div>
       ${photoField('np-photo', null)}
@@ -539,6 +542,7 @@ views.packages = async (main) => {
           name,
           description: document.getElementById('np-desc').value,
           base_price: Number(document.getElementById('np-price').value),
+          discount: Math.max(0, Number(document.getElementById('np-disc').value) || 0),
           selections: Number(document.getElementById('np-sel').value),
           photo_url: document.getElementById('np-photo').value,
           is_fixed: document.getElementById('np-fixed').checked ? 1 : 0,

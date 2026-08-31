@@ -10,6 +10,11 @@ export interface SlotChoice { slot_number: number; product_id: number; size?: st
 /** Size upgrade charged per dish for custom-package slots without an explicit option row. */
 export const CUSTOM_DEFAULT_SIZE_UPGRADE = 100;
 
+/** Charged package price: base minus any combo discount (never below zero). */
+export function netPackagePrice(pkg: { base_price: number; discount?: number | null }): number {
+  return Math.max(0, (pkg.base_price || 0) - (pkg.discount || 0));
+}
+
 /**
  * Server-side authoritative pricing. Never trusts client prices.
  * Prices stored as integer pesos (or centavos — consistent usage).
@@ -78,7 +83,8 @@ export function pricePackage(packageId: number, slotChoices: any, packageSize?: 
   const pkg = db.prepare('SELECT * FROM packages WHERE id = ? AND active = 1').get(packageId) as any;
   if (!pkg) throw new Error('Invalid package');
   const breakdown: { label: string; amount: number }[] = [{ label: `${pkg.name} base`, amount: pkg.base_price }];
-  let total = pkg.base_price;
+  if ((pkg.discount || 0) > 0) breakdown.push({ label: `${pkg.name} discount`, amount: -(pkg.discount) });
+  let total = netPackagePrice(pkg);
 
   const slots = db.prepare('SELECT * FROM package_slots WHERE package_id = ?').all(packageId) as any[];
   const choices = normalizeChoices(slotChoices);

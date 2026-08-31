@@ -4,7 +4,7 @@ import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarous
 import { getCart, addItem, removeItem, updateQuantity, cartTotals } from '../services/cart';
 import { createOrderFromCart } from '../services/orders';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
-import { pricePackage, packageDefaults, computeCartTotals } from '../services/pricing';
+import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
 
 const r = Router();
 
@@ -146,7 +146,7 @@ function showPackages(psid: string) {
     buttons: [{ title: 'Start Building', payload: `PKG:${p.id}` }],
   } : {
     title: p.name,
-    subtitle: `${money(p.base_price)} — ${p.is_fixed ? `Fixed: ${p.selections} dishes, ready to order` : `Choose ${p.selections} dishes`}`,
+    subtitle: `${money(netPackagePrice(p))}${p.discount > 0 ? ` — Save ${money(p.discount)}` : ''} — ${p.is_fixed ? `Fixed: ${p.selections} dishes, ready to order` : `Choose ${p.selections} dishes`}`,
     image_url: absUrl(p.photo_url),
     buttons: [{ title: 'View Package', payload: `PKG:${p.id}` }],
   });
@@ -189,9 +189,10 @@ function showPackageDetails(psid: string, packageId: number, ctx?: any) {
   setState(psid, 'PACKAGE_DETAILS', { package_id: packageId, choices });
 
   if (pkg.is_fixed) {
-    const mTotal = packageTotal(packageId, choices, 'M') ?? pkg.base_price;
-    const lTotal = packageTotal(packageId, choices, 'L') ?? pkg.base_price;
-    return sendText(psid, `${pkg.name}\n${money(mTotal)}\n\n${packageLines(packageId, choices)}`)
+    const mTotal = packageTotal(packageId, choices, 'M') ?? netPackagePrice(pkg);
+    const lTotal = packageTotal(packageId, choices, 'L') ?? netPackagePrice(pkg);
+    const saveNote = pkg.discount > 0 ? ` (was ${money(pkg.base_price)} — Save ${money(pkg.discount)})` : '';
+    return sendText(psid, `${pkg.name}\n${money(mTotal)}${saveNote}\n\n${packageLines(packageId, choices)}`)
       .then(() => sendQuickReplies(psid, 'This package is ready to order:', [
         { title: `Add M ${money(mTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:M:1` },
         { title: `Add L ${money(lTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:L:1` },
@@ -203,7 +204,7 @@ function showPackageDetails(psid: string, packageId: number, ctx?: any) {
   const filled = Object.keys(choices).length;
   const header = pkg.is_custom
     ? `${pkg.name}\n${money(pkg.base_price)} base\n\nPick any ${pkg.selections} dishes (${filled}/${pkg.selections} chosen):\n\n${packageLines(packageId, choices)}`
-    : `${pkg.name}\n${money(pkg.base_price)}\n\n${packageLines(packageId, choices)}`;
+    : `${pkg.name}\n${money(netPackagePrice(pkg))}${pkg.discount > 0 ? ` — Save ${money(pkg.discount)}` : ''}\n\n${packageLines(packageId, choices)}`;
   const verb = pkg.is_custom ? 'Pick' : 'Change';
   const replies: { title: string; payload: string }[] = slots.slice(0, 11).map((s: any) => ({
     title: `${verb} #${s.slot_number}`.slice(0, 20),
@@ -270,7 +271,7 @@ function showPackageSize(psid: string, packageId: number, ctx?: any) {
   const pkg = getPackage(packageId);
   const m = packageTotal(packageId, choices, 'M');
   const l = packageTotal(packageId, choices, 'L');
-  const priceLine = m != null ? `\n\nTotal M: ${money(m)} | Total L: ${money(l ?? pkg?.base_price ?? 0)}` : '';
+  const priceLine = m != null ? `\n\nTotal M: ${money(m)} | Total L: ${money(l ?? (pkg ? netPackagePrice(pkg) : 0))}` : '';
   return sendQuickReplies(psid, `Package dish size? (L may add an upgrade fee)${priceLine}`, [
     { title: 'M - Included', payload: `PKGADD:${packageId}:M:1` },
     { title: 'L + Upgrade', payload: `PKGADD:${packageId}:L:1` },
@@ -304,7 +305,7 @@ function addPackageToCart(psid: string, packageId: number, size: string, qty: nu
     return showPackageDetails(psid, packageId, { package_id: packageId, choices });
   }
   const arr = Object.entries(choices).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
-  let total = pkg.base_price;
+  let total = netPackagePrice(pkg);
   try { total = pricePackage(packageId, arr, chosenSize).total; } catch { /* fall back to base price */ }
   addItem(psid, { package_id: packageId, variant_size: chosenSize, quantity: qty, slot_choices: arr });
   return sendText(psid, `Added ${qty}x ${pkg.name} (${chosenSize}) to your cart.\n\n${packageLines(packageId, choices)}\nPrice: ${money(total)}`)

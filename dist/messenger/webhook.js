@@ -142,7 +142,7 @@ function showPackages(psid) {
         buttons: [{ title: 'Start Building', payload: `PKG:${p.id}` }],
     } : {
         title: p.name,
-        subtitle: `${money(p.base_price)} — ${p.is_fixed ? `Fixed: ${p.selections} dishes, ready to order` : `Choose ${p.selections} dishes`}`,
+        subtitle: `${money((0, pricing_1.netPackagePrice)(p))}${p.discount > 0 ? ` — Save ${money(p.discount)}` : ''} — ${p.is_fixed ? `Fixed: ${p.selections} dishes, ready to order` : `Choose ${p.selections} dishes`}`,
         image_url: absUrl(p.photo_url),
         buttons: [{ title: 'View Package', payload: `PKG:${p.id}` }],
     });
@@ -187,9 +187,10 @@ function showPackageDetails(psid, packageId, ctx) {
     const choices = pkg.is_custom ? { ...saved } : { ...defaults, ...saved };
     (0, send_1.setState)(psid, 'PACKAGE_DETAILS', { package_id: packageId, choices });
     if (pkg.is_fixed) {
-        const mTotal = packageTotal(packageId, choices, 'M') ?? pkg.base_price;
-        const lTotal = packageTotal(packageId, choices, 'L') ?? pkg.base_price;
-        return (0, send_1.sendText)(psid, `${pkg.name}\n${money(mTotal)}\n\n${packageLines(packageId, choices)}`)
+        const mTotal = packageTotal(packageId, choices, 'M') ?? (0, pricing_1.netPackagePrice)(pkg);
+        const lTotal = packageTotal(packageId, choices, 'L') ?? (0, pricing_1.netPackagePrice)(pkg);
+        const saveNote = pkg.discount > 0 ? ` (was ${money(pkg.base_price)} — Save ${money(pkg.discount)})` : '';
+        return (0, send_1.sendText)(psid, `${pkg.name}\n${money(mTotal)}${saveNote}\n\n${packageLines(packageId, choices)}`)
             .then(() => (0, send_1.sendQuickReplies)(psid, 'This package is ready to order:', [
             { title: `Add M ${money(mTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:M:1` },
             { title: `Add L ${money(lTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:L:1` },
@@ -200,7 +201,7 @@ function showPackageDetails(psid, packageId, ctx) {
     const filled = Object.keys(choices).length;
     const header = pkg.is_custom
         ? `${pkg.name}\n${money(pkg.base_price)} base\n\nPick any ${pkg.selections} dishes (${filled}/${pkg.selections} chosen):\n\n${packageLines(packageId, choices)}`
-        : `${pkg.name}\n${money(pkg.base_price)}\n\n${packageLines(packageId, choices)}`;
+        : `${pkg.name}\n${money((0, pricing_1.netPackagePrice)(pkg))}${pkg.discount > 0 ? ` — Save ${money(pkg.discount)}` : ''}\n\n${packageLines(packageId, choices)}`;
     const verb = pkg.is_custom ? 'Pick' : 'Change';
     const replies = slots.slice(0, 11).map((s) => ({
         title: `${verb} #${s.slot_number}`.slice(0, 20),
@@ -271,7 +272,7 @@ function showPackageSize(psid, packageId, ctx) {
     const pkg = getPackage(packageId);
     const m = packageTotal(packageId, choices, 'M');
     const l = packageTotal(packageId, choices, 'L');
-    const priceLine = m != null ? `\n\nTotal M: ${money(m)} | Total L: ${money(l ?? pkg?.base_price ?? 0)}` : '';
+    const priceLine = m != null ? `\n\nTotal M: ${money(m)} | Total L: ${money(l ?? (pkg ? (0, pricing_1.netPackagePrice)(pkg) : 0))}` : '';
     return (0, send_1.sendQuickReplies)(psid, `Package dish size? (L may add an upgrade fee)${priceLine}`, [
         { title: 'M - Included', payload: `PKGADD:${packageId}:M:1` },
         { title: 'L + Upgrade', payload: `PKGADD:${packageId}:L:1` },
@@ -307,7 +308,7 @@ function addPackageToCart(psid, packageId, size, qty) {
         return showPackageDetails(psid, packageId, { package_id: packageId, choices });
     }
     const arr = Object.entries(choices).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
-    let total = pkg.base_price;
+    let total = (0, pricing_1.netPackagePrice)(pkg);
     try {
         total = (0, pricing_1.pricePackage)(packageId, arr, chosenSize).total;
     }

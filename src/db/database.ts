@@ -226,6 +226,13 @@ export function migrate(): void {
     db.exec(`ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'ADMIN';`);
   }
 
+  // v4: package discounts — imported combos carry a `disc` amount that is
+  // subtracted from base_price at checkout (never below zero).
+  const pkgCols = (db.prepare('PRAGMA table_info(packages)').all() as any[]).map((c: any) => c.name);
+  if (!pkgCols.includes('discount')) {
+    db.exec(`ALTER TABLE packages ADD COLUMN discount INTEGER NOT NULL DEFAULT 0;`);
+  }
+
   if (adminCount === 0) {
     const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'change-me', 10);
     db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)')
