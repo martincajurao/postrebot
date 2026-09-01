@@ -142,11 +142,37 @@ async function showCart(psid: string) {
   ]);
 }
 
+// ---------- category icons ----------
+// Emojis are written as \u{...} escapes, keeping this file pure ASCII — literal
+// non-ASCII bytes previously got mangled by editor encoding changes and sent
+// garbage to Messenger (see patch-webhook.cjs / fix-encoding.cjs history, and
+// money()'s \u20b1). Matched by keyword so new categories get a sensible icon
+// automatically; anything unmatched falls back to cutlery.
+const CATEGORY_ICONS: [RegExp, string][] = [
+  [/chicken|manok/i, '\u{1F357}'],                                                    // poultry leg
+  [/pork|lechon|baboy|ham/i, '\u{1F416}'],                                            // pig
+  [/beef|steak|karne/i, '\u{1F969}'],                                                 // cut of meat
+  [/seafood|fish|shrimp|crab|scallop|kinilaw|salmon|tilapia/i, '\u{1F990}'],          // shrimp
+  [/noodle|pancit|palabok|pasta|carbonara|spaghetti|bam-i|lomi|mami/i, '\u{1F35C}'],  // steaming bowl
+  [/vegetable|veggie|chopsuey|salad/i, '\u{1F96C}'],                                  // leafy green
+  [/dessert|cake|crepe|sweet|leche|halo|ice/i, '\u{1F370}'],                          // shortcake
+  [/rice/i, '\u{1F35A}'],                                                             // cooked rice
+  [/drink|beverage|juice|soda|tea|coffee/i, '\u{1F964}'],                             // cup with straw
+  [/bilao|platter|combo|package|party/i, '\u{1F958}'],                                // shallow pan of food
+];
+const DEFAULT_CATEGORY_ICON = '\u{1F374}';                                            // fork and knife
+
+/** Icon shown before a category name in the Messenger category list. */
+function categoryIcon(name: string): string {
+  for (const [re, icon] of CATEGORY_ICONS) if (re.test(name)) return icon;
+  return DEFAULT_CATEGORY_ICON;
+}
+
 function showCategories(psid: string, backPayload = 'MAIN_MENU_BACK') {
   const cats = db.prepare('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order').all() as any[];
   setState(psid, 'ORDER_CATEGORY', { back: backPayload });
   sendQuickReplies(psid, 'Choose a category:', [
-    ...cats.map((c) => ({ title: c.name, payload: `CAT:${c.id}` })),
+    ...cats.map((c) => ({ title: `${categoryIcon(c.name)} ${c.name}`, payload: `CAT:${c.id}` })),
     { title: 'Back', payload: backPayload },
   ]);
 }

@@ -95,6 +95,15 @@ function check(name, cond, extra = '') {
     await waitFor('Start Building');
     check('packages carousel lists fixed + custom entries', true);
 
+    await postback('MENU_ORDER');
+    await waitFor('Choose a category');
+    const ic = (hex) => String.fromCodePoint(hex);
+    check('category quick replies show icons',
+      out.includes(ic(0x1F357) + ' Chicken') && out.includes(ic(0x1F416) + ' Pork') && out.includes(ic(0x1F958) + ' Bilao'),
+      'expected icon-prefixed titles (poultry/pig/shallow-pan) in category quick replies');
+    check('every seeded category got an icon',
+      out.includes(ic(0x1F969) + ' Beef') && out.includes(ic(0x1F35C) + ' Noodles') && out.includes(ic(0x1F370) + ' Desserts'));
+
     await postback(`PKG:${fixed.id}`);
     await waitFor('This package is ready to order');
     await waitFor(`Add M ₱${fixed.base_price.toLocaleString('en-PH')}`);
