@@ -428,7 +428,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       const cats = db.prepare('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order').all() as any[];
       setState(psid, 'BROWSE_CATEGORY');
       return sendQuickReplies(psid, 'Browse our menu:', [
-        ...cats.map((c) => ({ title: c.name, payload: `BROWSE:${c.id}` })),
+        ...cats.map((c) => ({ title: `${categoryIcon(c.name)} ${c.name}`, payload: `BROWSE:${c.id}` })),
         { title: 'Back', payload: 'MAIN_MENU_BACK' },
       ]);
     }
