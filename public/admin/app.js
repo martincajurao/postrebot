@@ -111,20 +111,122 @@ function photoField(id, value) {
 }
 function bindPhotoField(id) {
   const input = document.getElementById(id + '-file');
-  input.addEventListener('change', async () => {
+  input.addEventListener('change', () => {
     const file = input.files[0];
     if (!file) return;
-    try {
-      toast('Uploading image…');
-      const url = await uploadImage(file);
-      document.getElementById(id).value = url;
-      document.getElementById(id + '-url').textContent = url;
-      const prev = document.getElementById(id + '-prev');
-      prev.src = url; prev.style.display = 'block';
-      toast('Image uploaded');
-    } catch (err) { toast(err.message, true); }
+    openCropper(file, async (croppedBlob) => {
+      try {
+        toast('Uploading image…');
+        const url = await uploadImage(new File([croppedBlob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }));
+        document.getElementById(id).value = url;
+        document.getElementById(id + '-url').textContent = url;
+        const prev = document.getElementById(id + '-prev');
+        prev.src = url; prev.style.display = 'block';
+        toast('Image uploaded');
+      } catch (err) { toast(err.message, true); }
+    });
+    input.value = ''; // allow picking the same file again
   });
 }
+
+/* ================= IMAGE CROPPER =================
+ * Square crop: drag to pan, slider to zoom. Exports a 800x800 JPEG blob.
+ * Images are always output square (Messenger carousels crop 1:1 anyway). */
+let cropCtx = null;
+function openCropper(file, onDone) {
+  const overlay = document.getElementById('crop-overlay');
+  const img = document.getElementById('crop-img');
+  const stage = document.getElementById('crop-stage');
+  const zoomInput = document.getElementById('crop-zoom');
+  const url = URL.createObjectURL(file);
+
+  cropCtx = { onDone, objUrl: url };
+  const onImgReady = () => {
+    cropCtx.natW = img.naturalWidth;
+    cropCtx.natH = img.naturalHeight;
+    if (!cropCtx.natW) { toast('Could not read image', true); closeCropper(); return; }
+    zoomInput.value = '1';
+    cropCtx.zoom = 1;
+    cropCtx.x = 0; cropCtx.y = 0;
+    applyCropTransform();
+    overlay.classList.add('show');
+  };
+  img.onload = onImgReady;
+  img.onerror = () => { toast('Could not load image', true); closeCropper(); };
+  img.src = url;
+  // if the image finished loading before this handler ran (cache), fire now
+  if (img.complete && img.naturalWidth) onImgReady();
+
+  function applyCropTransform() {
+    // base scale: smallest side fills the stage (cover)
+    const s0 = Math.max(stage.clientWidth / cropCtx.natW, stage.clientHeight / cropCtx.natH);
+    cropCtx.scale = s0 * cropCtx.zoom;
+    img.style.width = cropCtx.natW + 'px';
+    img.style.height = cropCtx.natH + 'px';
+    img.style.transform = `translate(calc(-50% + ${cropCtx.x}px), calc(-50% + ${cropCtx.y}px)) scale(${cropCtx.scale})`;
+  }
+  cropCtx.apply = applyCropTransform;
+
+  // --- drag to pan ---
+  let dragging = null;
+  const start = (e) => {
+    const t = e.touches ? e.touches[0] : e;
+    dragging = { sx: t.clientX, sy: t.clientY, ox: cropCtx.x, oy: cropCtx.y };
+    e.preventDefault();
+  };
+  const move = (e) => {
+    if (!dragging) return;
+    const t = e.touches ? e.touches[0] : e;
+    cropCtx.x = dragging.ox + (t.clientX - dragging.sx);
+    cropCtx.y = dragging.oy + (t.clientY - dragging.sy);
+    applyCropTransform();
+    e.preventDefault();
+  };
+  const end = () => { dragging = null; };
+  stage.onmousedown = start; stage.onmousemove = move; stage.onmouseup = end; stage.onmouseleave = end;
+  stage.ontouchstart = start; stage.ontouchmove = move; stage.ontouchend = end;
+
+  // --- wheel zoom ---
+  stage.onwheel = (e) => {
+    e.preventDefault();
+    zoomInput.value = Math.min(3, Math.max(1, cropCtx.zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
+    cropCtx.zoom = parseFloat(zoomInput.value);
+    applyCropTransform();
+  };
+  zoomInput.oninput = () => { cropCtx.zoom = parseFloat(zoomInput.value); applyCropTransform(); };
+}
+
+function closeCropper() {
+  document.getElementById('crop-overlay').classList.remove('show');
+  if (cropCtx?.objUrl) URL.revokeObjectURL(cropCtx.objUrl);
+  cropCtx = null;
+}
+
+document.getElementById('crop-cancel').addEventListener('click', closeCropper);
+document.getElementById('crop-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'crop-overlay') closeCropper();
+});
+document.getElementById('crop-apply').addEventListener('click', () => {
+  if (!cropCtx) return;
+  const OUT = 800; // output resolution (square)
+  const img = document.getElementById('crop-img');
+  const stage = document.getElementById('crop-stage');
+  const canvas = document.createElement('canvas');
+  canvas.width = OUT; canvas.height = OUT;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  // crop window in natural image coords: stage center + pan offset, scaled
+  const cw = stage.clientWidth / cropCtx.scale, ch = stage.clientHeight / cropCtx.scale;
+  const cx = cropCtx.natW / 2 - cropCtx.x / cropCtx.scale;
+  const cy = cropCtx.natH / 2 - cropCtx.y / cropCtx.scale;
+  const side = Math.min(cw, ch);
+  ctx.drawImage(img, cx - side / 2, cy - side / 2, side, side, 0, 0, OUT, OUT);
+  canvas.toBlob((blob) => {
+    const done = cropCtx.onDone;
+    closeCropper();
+    if (blob) done(blob); else toast('Crop failed', true);
+  }, 'image/jpeg', 0.9);
+});
 window.imgFail = (el) => { const s = document.createElement('span'); s.className = 'thumb noimg'; s.textContent = '🖼️'; el.replaceWith(s); };
 /** Thumbnail with graceful fallback when there is no photo or it fails to load. */
 const imgTag = (url, title = '') => url

@@ -76,9 +76,22 @@ async function imageUrlOk(url) {
     try {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 5000);
-        const res = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: ctrl.signal });
+        // Supabase Storage rejects HEAD (400) on public objects in some configs,
+        // and spaces in keys must be encoded — use a ranged GET, which is what
+        // Messenger itself does. Only fetch the first byte to keep it cheap.
+        const res = await fetch(url, {
+            method: 'GET',
+            redirect: 'follow',
+            signal: ctrl.signal,
+            headers: { Range: 'bytes=0-0' },
+        });
         clearTimeout(timer);
-        if (!res.ok)
+        // drain & close immediately
+        try {
+            await res.arrayBuffer();
+        }
+        catch { /* ignore */ }
+        if (!res.ok && res.status !== 206)
             return false;
         const ct = res.headers.get('content-type') || '';
         return ct === '' || ct.startsWith('image/');

@@ -95,6 +95,24 @@
   .toast.err { background: var(--bad); }
   @keyframes fadein { from { opacity: 0; transform: translateY(-6px);} to { opacity: 1; } }
 
+  /* ---------- image cropper ---------- */
+  #crop-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 80; display: none;
+    align-items: center; justify-content: center; padding: 16px; }
+  #crop-overlay.show { display: flex; }
+  .crop-box { background: var(--card); border-radius: var(--radius); padding: 18px; width: 420px; max-width: 96vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+  .crop-box h3 { margin-bottom: 12px; font-size: 16px; }
+  #crop-stage { position: relative; width: 100%; aspect-ratio: 1 / 1; background: #1a1d21; border-radius: 10px;
+    overflow: hidden; touch-action: none; user-select: none; cursor: grab; }
+  #crop-stage:active { cursor: grabbing; }
+  #crop-img { position: absolute; top: 50%; left: 50%; transform-origin: center; will-change: transform; max-width: none; }
+  #crop-mask { position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(circle at center, transparent 0, transparent calc(70.7% - 1px), rgba(0,0,0,.55) 70.7%); }
+  #crop-mask::after { content: ''; position: absolute; inset: 14.65%; border: 2px solid rgba(255,255,255,.85); border-radius: 12px; }
+  .crop-controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .crop-controls input[type=range] { flex: 1; padding: 0; border: none; accent-color: var(--brand); }
+  .crop-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
   .hidden { display: none !important; }
   .muted { color: var(--muted); font-size: 13px; }
   .slot-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f1f3; font-size: 14px; }
@@ -148,6 +166,27 @@
 </div>
 
 <div class="overlay" id="modal-overlay"><div class="modal" id="modal"></div></div>
+
+<!-- ============ IMAGE CROPPER ============ -->
+<div id="crop-overlay">
+  <div class="crop-box">
+    <h3>Crop image</h3>
+    <div id="crop-stage">
+      <img id="crop-img" alt="">
+      <div id="crop-mask"></div>
+    </div>
+    <div class="crop-controls">
+      <span title="Zoom out">➖</span>
+      <input type="range" id="crop-zoom" min="1" max="3" step="0.01" value="1">
+      <span title="Zoom in">➕</span>
+    </div>
+    <div class="crop-actions">
+      <button class="btn ghost" id="crop-cancel">Cancel</button>
+      <button class="btn" id="crop-apply">Crop &amp; upload</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script src="app.js"></script>

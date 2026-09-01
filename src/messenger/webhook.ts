@@ -25,7 +25,12 @@ function absUrl(url?: string | null): string | undefined {
  */
 function imageUrl(url?: string | null): string | undefined {
   const abs = absUrl(url);
-  if (!abs || !/^https?:\/\//.test(abs) || /\/uploads\//.test(abs)) return abs;
+  if (!abs) return abs;
+  if (/\/uploads\//.test(abs)) {
+    // Local files: strip any stale cache-buster, keep the clean unique URL.
+    return abs.split('?')[0];
+  }
+  if (!/^https?:\/\//.test(abs)) return abs;
   return `${abs}${abs.includes('?') ? '&' : '?'}v=${Date.now()}`;
 }
 
