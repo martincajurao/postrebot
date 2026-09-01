@@ -8,6 +8,9 @@ import messengerWebhook from './messenger/webhook';
 import path from 'path';
 
 const app = express();
+// Behind Render's proxy: makes req.protocol honor X-Forwarded-Proto (https),
+// which the webhook uses to build absolute image URLs.
+app.set('trust proxy', 1);
 app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
 
 migrate();

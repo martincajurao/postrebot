@@ -75,7 +75,7 @@ function sendButtons(psid, text, buttons) {
 async function imageUrlOk(url) {
     try {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 5000);
+        const timer = setTimeout(() => ctrl.abort(), 8000);
         // Supabase Storage rejects HEAD (400) on public objects in some configs,
         // and spaces in keys must be encoded — use a ranged GET, which is what
         // Messenger itself does. Only fetch the first byte to keep it cheap.
@@ -91,12 +91,15 @@ async function imageUrlOk(url) {
             await res.arrayBuffer();
         }
         catch { /* ignore */ }
-        if (!res.ok && res.status !== 206)
+        if (!res.ok && res.status !== 206) {
+            console.warn(`[messenger] image pre-flight ${res.status} (${res.headers.get('content-type') || 'no content-type'}): ${url}`);
             return false;
+        }
         const ct = res.headers.get('content-type') || '';
         return ct === '' || ct.startsWith('image/');
     }
-    catch {
+    catch (e) {
+        console.warn(`[messenger] image pre-flight error: ${url} — ${e?.message || e}`);
         return false;
     }
 }

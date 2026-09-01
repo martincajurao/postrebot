@@ -8,13 +8,67 @@ import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } fro
 
 const r = Router();
 
-const BASE_URL = process.env.BASE_URL || '';
+// ---------- public base URL for image links ----------
+// Messenger requires absolute https URLs for images. Resolution order:
+//   1. BASE_URL env var (explicit override, e.g. a custom domain)
+//   2. The origin of the incoming webhook request itself. Meta always calls the
+//      webhook over https, so on Render the Host header IS the public URL —
+//      images work with zero extra configuration (no BASE_URL needed).
+// A BASE_URL pointing at localhost or an ngrok tunnel is ignored (with a
+// warning) — those hosts are unreachable from Messenger and would silently
+// break every image.
+function envBaseUrl(): string {
+  const raw = (process.env.BASE_URL || '').replace(/\/+$/, '');
+  if (!raw) return '';
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(raw) || /(^|\.)ngrok/i.test(raw)) {
+    console.warn(`[webhook] ignoring BASE_URL="${raw}" (localhost/tunnel host, unreachable from Messenger) — using the webhook request origin instead`);
+    return '';
+  }
+  return raw;
+}
+const ENV_BASE_URL = envBaseUrl();
+let requestBaseUrl = '';
+
+/** Capture the public origin from each webhook request (call before handling). */
+export function setRequestOrigin(req: any): void {
+  try {
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || '').split(',')[0].trim();
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+    if (host && proto === 'https') requestBaseUrl = `https://${host}`;
+  } catch { /* keep last good value */ }
+}
+
+/**
+ * Encode unsafe characters in the path portion of a URL (space, &, parens,
+ * '+', '%', ...). Storage keys like "sweet&sour.jpg" or "chicken fillet.jpg"
+ * break URLs otherwise: a raw '&' starts the query string (so appending
+ * "?v=..." later would cut the filename in half) and spaces are invalid.
+ * Segments that already contain escapes are decoded first to avoid
+ * double-encoding. The query string is left untouched.
+ */
+function encodeUrlPath(url: string): string {
+  const qIndex = url.indexOf('?');
+  const base = qIndex === -1 ? url : url.slice(0, qIndex);
+  const query = qIndex === -1 ? '' : url.slice(qIndex);
+  const schemeEnd = base.indexOf('://');
+  const pathStart = schemeEnd === -1 ? 0 : base.indexOf('/', schemeEnd + 3);
+  const prefix = pathStart === -1 ? base : base.slice(0, pathStart);
+  const rawPath = pathStart === -1 ? '' : base.slice(pathStart);
+  const encoded = rawPath.split('/').map((seg) => {
+    if (!seg) return seg;
+    try { seg = decodeURIComponent(seg); } catch { /* raw '%' in name — keep and escape below */ }
+    return encodeURIComponent(seg);
+  }).join('/');
+  return prefix + encoded + query;
+}
+
 /** Messenger requires absolute https URLs for images. */
 function absUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
-  if (/^https?:\/\//.test(url)) return url;
-  if (!BASE_URL) return undefined; // no public URL configured -> skip image
-  return BASE_URL.replace(/\/$/, '') + url;
+  if (/^https?:\/\//i.test(url)) return encodeUrlPath(url);
+  const base = ENV_BASE_URL || requestBaseUrl;
+  if (!base) return undefined; // no public URL known -> skip image
+  return encodeUrlPath(base + url);
 }
 
 /**
@@ -30,7 +84,7 @@ function imageUrl(url?: string | null): string | undefined {
     // Local files: strip any stale cache-buster, keep the clean unique URL.
     return abs.split('?')[0];
   }
-  if (!/^https?:\/\//.test(abs)) return abs;
+  if (!/^https?:\/\//i.test(abs)) return abs;
   return `${abs}${abs.includes('?') ? '&' : '?'}v=${Date.now()}`;
 }
 
@@ -578,6 +632,10 @@ r.get('/', (req, res) => {
 
 // ---------- Meta webhook events (POST) ----------
 r.post('/', (req, res) => {
+  // Remember the public origin of this request so relative /uploads/... image
+  // URLs can be turned into absolute https URLs for Messenger (see
+  // setRequestOrigin). Must run before any handler sends a carousel.
+  setRequestOrigin(req);
   const body = req.body;
   if (body?.object === 'page') {
     for (const entry of body.entry || []) {

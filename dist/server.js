@@ -12,6 +12,9 @@ const auth_1 = require("./api/auth");
 const webhook_1 = __importDefault(require("./messenger/webhook"));
 const path_1 = __importDefault(require("path"));
 const app = (0, express_1.default)();
+// Behind Render's proxy: makes req.protocol honor X-Forwarded-Proto (https),
+// which the webhook uses to build absolute image URLs.
+app.set('trust proxy', 1);
 app.use(express_1.default.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 (0, database_1.migrate)();
 // Messenger webhook (verification + events) â€” must be before JSON-only routes matter
