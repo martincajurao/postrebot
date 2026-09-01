@@ -289,7 +289,8 @@ function showPackageDetails(psid, packageId, ctx) {
         defaults[d.slot_number] = d.product_id;
     const choices = pkg.is_custom ? { ...saved } : { ...defaults, ...saved };
     (0, send_1.setState)(psid, 'PACKAGE_DETAILS', { package_id: packageId, choices });
-    if (pkg.is_fixed) {
+    // Fixed packages stay on the quick "Add M/L" view unless the user asked to customize.
+    if (pkg.is_fixed && !(prev && prev.customize)) {
         const mTotal = packageTotal(packageId, choices, 'M') ?? (0, pricing_1.netPackagePrice)(pkg);
         const lTotal = packageTotal(packageId, choices, 'L') ?? (0, pricing_1.netPackagePrice)(pkg);
         const saveNote = pkg.discount > 0 ? ` (was ${money(pkg.base_price)} — Save ${money(pkg.discount)})` : '';
@@ -297,6 +298,7 @@ function showPackageDetails(psid, packageId, ctx) {
             .then(() => (0, send_1.sendQuickReplies)(psid, 'This package is ready to order:', [
             { title: `Add M ${money(mTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:M:1` },
             { title: `Add L ${money(lTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:L:1` },
+            { title: 'Customize', payload: `PKGCUST:${packageId}` },
             { title: 'Packages', payload: 'MENU_PACKAGES' },
         ]));
     }
@@ -539,6 +541,8 @@ async function handlePayload(psid, payload) {
             return showPackageDetails(psid, Number(rest[0]));
         case 'SLOT':
             return showSlotOptions(psid, Number(rest[0]), Number(rest[1]));
+        case 'PKGCUST':
+            return showPackageDetails(psid, Number(rest[0]), { package_id: Number(rest[0]), customize: true, choices: {} });
         case 'SLOTPG':
             return showSlotOptions(psid, Number(rest[0]), Number(rest[1]), Number(rest[2] || 0));
         case 'CHOICE':
