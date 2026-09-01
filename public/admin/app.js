@@ -38,7 +38,8 @@ function logout() {
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-view').style.display = 'flex';
 }
-if (TOKEN) showApp();
+// NOTE: showApp() is invoked further down, after the navigation bindings are set up
+// (navigate() touches the More-sheet elements, which are `const`s below).
 
 function showApp() {
   document.getElementById('login-view').style.display = 'none';
@@ -47,7 +48,6 @@ function showApp() {
   document.querySelectorAll('[data-view="admins"]').forEach((a) => { a.style.display = ROLE === 'ADMIN' ? '' : 'none'; });
   navigate('dashboard');
 }
-
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
@@ -71,13 +71,26 @@ document.getElementById('logout-btn').addEventListener('click', logout);
 document.querySelectorAll('[data-view]').forEach((a) =>
   a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.view); }));
 
+// mobile "More" bottom sheet — holds the tabs that don't fit the bottom bar
+// (Packages, Customers, Admins, Delivery, Settings)
+const MORE_VIEWS = ['packages', 'customers', 'admins', 'delivery', 'settings'];
+const moreBtn = document.getElementById('more-btn');
+const moreSheet = document.getElementById('moresheet-overlay');
+moreBtn.addEventListener('click', (e) => { e.preventDefault(); moreSheet.classList.toggle('hidden'); });
+moreSheet.addEventListener('click', (e) => { if (e.target === moreSheet) moreSheet.classList.add('hidden'); });
+
 function navigate(view) {
   currentView = view;
+  moreSheet.classList.add('hidden');
   document.querySelectorAll('[data-view]').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
+  // keep the More tab highlighted while a sheet-only view is open
+  moreBtn.classList.toggle('active', MORE_VIEWS.includes(view));
   const main = document.getElementById('main');
   main.innerHTML = '<p class="muted">Loading…</p>';
   views[view](main).catch((err) => { main.innerHTML = ''; toast(err.message, true); });
 }
+
+if (TOKEN) showApp();
 
 const views = {};
 

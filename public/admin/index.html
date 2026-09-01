@@ -47,6 +47,20 @@
     main.content { padding: 16px 14px 90px; }
   }
 
+  /* "More" bottom sheet — holds the tabs that don't fit the mobile bottom bar */
+  .moresheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 30; }
+  .moresheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--card);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.25);
+    padding: 8px 14px calc(16px + env(safe-area-inset-bottom)); animation: sheetup .18s ease-out; }
+  @keyframes sheetup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .moresheet-title { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; padding: 8px 10px 6px; }
+  .moresheet a { display: flex; align-items: center; gap: 12px; padding: 13px 10px; border-radius: 10px;
+    color: var(--ink); text-decoration: none; font-size: 15px; }
+  .moresheet a span { font-size: 20px; width: 26px; text-align: center; }
+  .moresheet a.active { background: var(--brand); color: #fff; font-weight: 600; }
+  #more-btn.active { color: var(--brand); font-weight: 700; }
+
   /* ---------- components ---------- */
   h2.page-title { margin-bottom: 18px; font-size: 22px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 24px; }
@@ -161,8 +175,20 @@
     <a href="#" data-view="orders"><span>🛒</span>Orders</a>
     <a href="#" data-view="reservations"><span>📅</span>Resv.</a>
     <a href="#" data-view="menu"><span>🍽️</span>Menu</a>
-    <a href="#" data-view="settings"><span>⚙️</span>More</a>
+    <a href="#" id="more-btn"><span>⋯</span>More</a>
   </nav>
+
+  <!-- mobile "More" sheet: tabs that don't fit the bottom bar -->
+  <div class="moresheet-overlay hidden" id="moresheet-overlay">
+    <div class="moresheet">
+      <div class="moresheet-title">More</div>
+      <a href="#" data-view="packages"><span>🔥</span>Packages</a>
+      <a href="#" data-view="customers"><span>👥</span>Customers</a>
+      <a href="#" data-view="admins"><span>🛡️</span>Admins</a>
+      <a href="#" data-view="delivery"><span>🚚</span>Delivery</a>
+      <a href="#" data-view="settings"><span>⚙️</span>Settings</a>
+    </div>
+  </div>
 </div>
 
 <div class="overlay" id="modal-overlay"><div class="modal" id="modal"></div></div>
