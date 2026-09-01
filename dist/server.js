@@ -19,7 +19,11 @@ app.use('/webhook', webhook_1.default);
 // Auth
 app.post('/api/login', auth_1.loginHandler);
 // Admin panel static files
-app.use('/admin', express_1.default.static(path_1.default.join(__dirname, 'public', 'admin')));
+// no-cache: browser must revalidate on every load so app.js/UI updates apply
+// immediately instead of serving a stale cached copy (which caused broken saves).
+app.use('/admin', express_1.default.static(path_1.default.join(__dirname, 'public', 'admin'), {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 // Admin API (JWT protected)
 app.use('/api/admin', admin_1.default);
 app.use('/uploads', express_1.default.static(path_1.default.join(process.cwd(), (process.env.UPLOAD_DIR || './data/uploads').replace('./', ''))));

@@ -19,7 +19,11 @@ app.use('/webhook', messengerWebhook);
 app.post('/api/login', loginHandler);
 
 // Admin panel static files
-app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
+// no-cache: browser must revalidate on every load so app.js/UI updates apply
+// immediately instead of serving a stale cached copy (which caused broken saves).
+app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 
 // Admin API (JWT protected)
 app.use('/api/admin', adminRoutes);

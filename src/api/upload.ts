@@ -36,7 +36,9 @@ r.use(authMiddleware);
 r.post('/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name must be "image")' });
   const baseUrl = process.env.BASE_URL || '';
-  res.json({ url: `${baseUrl}/uploads/${req.file.filename}` });
+  // Relative URL: same-origin for the admin panel; absUrl() adds BASE_URL when
+  // sending to Messenger. Keeps stored links valid even if the domain changes.
+  res.json({ url: `/uploads/${req.file.filename}`, baseUrl });
 });
 
 /** GET /list — uploaded images (for picker) */

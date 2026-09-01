@@ -92,12 +92,18 @@ async function uploadImage(file) {
   if (!res.ok) throw new Error(data.error || 'Upload failed');
   return data.url;
 }
+/** Browser cache-buster for remote images — Supabase/etc keep the same address
+ *  when a file is replaced in place; local /uploads files have unique names. */
+const bustImg = (url) => {
+  if (!url || !/^https?:\/\//i.test(url) || url.includes('/uploads/')) return url || '';
+  return url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
+};
 function photoField(id, value) {
   return `
     <div class="field"><label>Photo</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input type="file" id="${id}-file" accept="image/*" style="flex:1;min-width:150px">
-        <img id="${id}-prev" src="${esc(value || '')}" style="height:44px;width:44px;object-fit:cover;border-radius:8px;display:${value ? 'block' : 'none'}">
+        <img id="${id}-prev" src="${esc(bustImg(value))}" style="height:44px;width:44px;object-fit:cover;border-radius:8px;display:${value ? 'block' : 'none'}">
       </div>
       <input type="hidden" id="${id}" value="${esc(value || '')}">
       <p class="muted" id="${id}-url" style="margin-top:4px;word-break:break-all">${esc(value || 'No photo')}</p>
@@ -122,7 +128,7 @@ function bindPhotoField(id) {
 window.imgFail = (el) => { const s = document.createElement('span'); s.className = 'thumb noimg'; s.textContent = '🖼️'; el.replaceWith(s); };
 /** Thumbnail with graceful fallback when there is no photo or it fails to load. */
 const imgTag = (url, title = '') => url
-  ? `<img class="thumb" src="${esc(url)}" alt="" title="${esc(title)}" onerror="imgFail(this)">`
+  ? `<img class="thumb" src="${esc(bustImg(url))}" alt="" title="${esc(title)}" onerror="imgFail(this)">`
   : '<span class="thumb noimg" title="No photo">🖼️</span>';
 /* ================= DASHBOARD ================= */
 views.dashboard = async (main) => {

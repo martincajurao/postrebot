@@ -17,6 +17,18 @@ function absUrl(url?: string | null): string | undefined {
   return BASE_URL.replace(/\/$/, '') + url;
 }
 
+/**
+ * Messenger caches images by URL, and so does the storage CDN (e.g. Supabase):
+ * replacing a file in place keeps the same URL, so the old image keeps showing.
+ * Append a fresh cache-buster to remote URLs on every send so updates reflect
+ * immediately. Local /uploads files already have unique filenames -> no busting.
+ */
+function imageUrl(url?: string | null): string | undefined {
+  const abs = absUrl(url);
+  if (!abs || !/^https?:\/\//.test(abs) || /\/uploads\//.test(abs)) return abs;
+  return `${abs}${abs.includes('?') ? '&' : '?'}v=${Date.now()}`;
+}
+
 // ---------- helpers ----------
 function ensureCustomer(psid: string) {
   let c = db.prepare('SELECT * FROM customers WHERE psid = ?').get(psid) as any;
@@ -94,7 +106,7 @@ function showProducts(psid: string, categoryId: number) {
     return {
       title: p.name,
       subtitle: `${p.description || ''}\n${subtitle}`.trim(),
-      image_url: absUrl(p.photo_url),
+      image_url: imageUrl(p.photo_url),
       buttons: [{ title: 'Order', payload: `PROD:${p.id}` }],
     };
   })).then(() =>
@@ -142,12 +154,12 @@ function showPackages(psid: string) {
   const elements = packages.map((p: any) => p.is_custom ? {
     title: p.name,
     subtitle: `${money(p.base_price)} base — Pick any ${p.selections} dishes you like`,
-    image_url: absUrl(p.photo_url),
+    image_url: imageUrl(p.photo_url),
     buttons: [{ title: 'Start Building', payload: `PKG:${p.id}` }],
   } : {
     title: p.name,
     subtitle: `${money(netPackagePrice(p))}${p.discount > 0 ? ` — Save ${money(p.discount)}` : ''} — ${p.is_fixed ? `Fixed: ${p.selections} dishes, ready to order` : `Choose ${p.selections} dishes`}`,
-    image_url: absUrl(p.photo_url),
+    image_url: imageUrl(p.photo_url),
     buttons: [{ title: 'View Package', payload: `PKG:${p.id}` }],
   });
   return sendCarousel(psid, elements);
