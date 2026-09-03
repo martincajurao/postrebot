@@ -30,11 +30,29 @@ app.use('/admin', express_1.default.static(path_1.default.join(__dirname, 'publi
 }));
 // Admin API (JWT protected)
 app.use('/api/admin', admin_1.default);
-// Serve uploaded images. Prefers ./data/uploads (persistent disk); falls back
-// to the build-mirrored ./dist/data/uploads so images survive fresh deploys.
-const uploadDirCandidates = ['./data/uploads', './dist/data/uploads'];
-const uploadsDir = uploadDirCandidates.map((d) => path_1.default.resolve(process.cwd(), d)).find((d) => fs_1.default.existsSync(d)) || path_1.default.resolve(process.cwd(), './data/uploads');
-app.use('/uploads', express_1.default.static(uploadsDir, { maxAge: '30d' }));
+// Serve uploaded images. Each file is stored INSIDE the SQLite DB (uploads
+// table) at upload time, so it survives redeploys that wipe local disk. The
+// on-disk copy (./data/uploads, then ./dist/data/uploads) is served when it
+// exists; otherwise the bytes come straight from the DB.
+const uploadsDirs = ['./data/uploads', './dist/data/uploads'].map((d) => path_1.default.resolve(process.cwd(), d));
+app.get('/uploads/:file', (req, res) => {
+    const file = String(req.params.file);
+    if (!/^[-\w.]+$/.test(file))
+        return res.status(400).end();
+    for (const dir of uploadsDirs) {
+        const p = path_1.default.join(dir, file);
+        if (fs_1.default.existsSync(p)) {
+            res.setHeader('Cache-Control', 'public, max-age=2592000');
+            return res.sendFile(p);
+        }
+    }
+    const row = database_1.db.prepare('SELECT mime, bytes FROM uploads WHERE name = ?').get(file);
+    if (!row)
+        return res.status(404).end();
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('Cache-Control', 'public, max-age=2592000');
+    res.end(Buffer.from(row.bytes));
+});
 app.use('/api/admin', upload_1.default);
 app.get('/health', (_req, res) => res.json({ ok: true }));
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

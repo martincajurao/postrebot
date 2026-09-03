@@ -1,6 +1,6 @@
 ﻿import express from 'express';
 import 'dotenv/config';
-import { migrate } from './db/database';
+import { migrate, db } from './db/database';
 import adminRoutes from './api/admin';
 import uploadRoutes from './api/upload';
 import { loginHandler } from './api/auth';
@@ -31,11 +31,27 @@ app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
 
 // Admin API (JWT protected)
 app.use('/api/admin', adminRoutes);
-// Serve uploaded images. Prefers ./data/uploads (persistent disk); falls back
-// to the build-mirrored ./dist/data/uploads so images survive fresh deploys.
-const uploadDirCandidates = ['./data/uploads', './dist/data/uploads'];
-const uploadsDir = uploadDirCandidates.map((d) => path.resolve(process.cwd(), d)).find((d) => fs.existsSync(d)) || path.resolve(process.cwd(), './data/uploads');
-app.use('/uploads', express.static(uploadsDir, { maxAge: '30d' }));
+// Serve uploaded images. Each file is stored INSIDE the SQLite DB (uploads
+// table) at upload time, so it survives redeploys that wipe local disk. The
+// on-disk copy (./data/uploads, then ./dist/data/uploads) is served when it
+// exists; otherwise the bytes come straight from the DB.
+const uploadsDirs = ['./data/uploads', './dist/data/uploads'].map((d) => path.resolve(process.cwd(), d));
+app.get('/uploads/:file', (req, res) => {
+  const file = String(req.params.file);
+  if (!/^[-\w.]+$/.test(file)) return res.status(400).end();
+  for (const dir of uploadsDirs) {
+    const p = path.join(dir, file);
+    if (fs.existsSync(p)) {
+      res.setHeader('Cache-Control', 'public, max-age=2592000');
+      return res.sendFile(p);
+    }
+  }
+  const row = db.prepare('SELECT mime, bytes FROM uploads WHERE name = ?').get(file) as any;
+  if (!row) return res.status(404).end();
+  res.setHeader('Content-Type', row.mime);
+  res.setHeader('Cache-Control', 'public, max-age=2592000');
+  res.end(Buffer.from(row.bytes));
+});
 app.use('/api/admin', uploadRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -210,6 +210,13 @@ function migrate() {
     recorded_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS uploads (
+    name TEXT PRIMARY KEY,
+    mime TEXT NOT NULL,
+    bytes BLOB NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS conversation_states (
     psid TEXT PRIMARY KEY,
     state TEXT NOT NULL,
@@ -281,6 +288,34 @@ function migrate() {
     addCol('packages', 'is_fixed', 'DEFAULT 0');
     addCol('packages', 'is_custom', 'DEFAULT 0');
     addCol('package_options', 'is_default', 'DEFAULT 0');
+    // v6: images live INSIDE the database (see src/api/upload.ts) so they travel
+    // with data/postre.db through git and survive every redeploy. On boot, any
+    // legacy files sitting in data/uploads that the DB does not know about are
+    // imported into it — so pre-existing uploads are kept too.
+    // v7: images live in Supabase Storage (src/api/upload.ts + supabase-storage.ts).
+    // The uploads table only tracks metadata now (bytes kept for old rows).
+    const upCols = exports.db.prepare('PRAGMA table_info(uploads)').all().map((c) => c.name);
+    if (!upCols.includes('public_url')) {
+        exports.db.exec(`ALTER TABLE uploads ADD COLUMN public_url TEXT;`);
+    }
+    const importable = exports.db.prepare('SELECT name FROM uploads').all().map((r) => r.name);
+    const legacyDirs = ['./data/uploads', './dist/data/uploads'];
+    const seen = new Set(importable);
+    const insUp = exports.db.prepare('INSERT OR IGNORE INTO uploads (name, mime, bytes) VALUES (?, ?, ?)');
+    const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' };
+    for (const dir of legacyDirs) {
+        const abs = path_1.default.resolve(process.cwd(), dir);
+        if (!fs_1.default.existsSync(abs))
+            continue;
+        for (const f of fs_1.default.readdirSync(abs)) {
+            const ext = path_1.default.extname(f).toLowerCase();
+            if (!MIME[ext] || seen.has(f))
+                continue;
+            seen.add(f);
+            insUp.run(f, MIME[ext], fs_1.default.readFileSync(path_1.default.join(abs, f)));
+            console.log(`[migrate] imported legacy upload into DB: ${f}`);
+        }
+    }
     // v5 (one-time cleanup, kept for old DB copies): remove dead Supabase Storage
     // URLs from before the Supabase project was deleted. Harmless when no such
     // URLs remain — it only touches rows that literally contain "supabase.co".

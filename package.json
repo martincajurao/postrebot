@@ -12,6 +12,7 @@
         "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\""
     },
     "dependencies": {
+        "@supabase/supabase-js": "^2.114.0",
         "bcryptjs": "^2.4.3",
         "dotenv": "^16.4.5",
         "express": "^4.19.2",

@@ -1,4 +1,4 @@
-﻿/* Postre Admin SPA */
+﻿﻿/* Postre Admin SPA */
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('token') || '';
 let ME = localStorage.getItem('me') || '';
@@ -77,6 +77,7 @@ const NAV = [
   { view: 'admins',       icon: '🛡️', label: 'Admins',       bottom: 'Admins', role: 'ADMIN' },
   { view: 'delivery',     icon: '🚚', label: 'Delivery',     bottom: 'Deliv.' },
   { view: 'settings',     icon: '⚙️', label: 'Settings',     bottom: 'Settings' },
+  { view: 'images',       icon: '🖼️', label: 'Images',       bottom: 'Images', role: 'ADMIN' },
 ];
 
 function buildNav() {
@@ -1000,6 +1001,58 @@ views.admins = async (main) => {
     try {
       await api(`/admins/${a.id}`, { method: 'DELETE' });
       toast('Account deleted'); navigate('admins');
+    } catch (err) { toast(err.message, true); }
+  }));
+};
+
+/* ================= IMAGES (Supabase Storage CRUD) ================= */
+views.images = async (main) => {
+  let files = [];
+  try { files = await api('/uploads-list'); }
+  catch (err) { toast(err.message, true); }
+  main.innerHTML = `
+    <h2 class="page-title">Images</h2>
+    <p class="muted" style="margin-bottom:14px">Stored in Supabase Storage bucket. Upload, replace and delete images — URLs stay public for Messenger.</p>
+    <div class="card">
+      <h3>⬆️ Upload new image</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="img-file" accept="image/*" style="flex:1;min-width:180px">
+        <button class="btn sm" id="img-upload">Upload</button>
+      </div>
+      <p class="muted" style="margin-top:6px">JPG, PNG, WebP or GIF · max 5 MB. Cropping available when used via Menu/Packages photo fields.</p>
+    </div>
+    <div class="card"><h3>🖼️ Library (${files.length})</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px" id="img-grid">
+        ${files.map((f) => `
+          <div style="background:#fafbfc;border-radius:12px;padding:10px;text-align:center">
+            <img src="${esc(f.url)}" style="width:100%;height:100px;object-fit:cover;border-radius:8px" loading="lazy">
+            <p class="muted" style="margin:6px 0 4px;word-break:break-all;font-size:11px">${esc(f.name)}</p>
+            <div class="row-actions" style="justify-content:center">
+              <button class="btn ghost sm" data-img-copy="${esc(f.url)}">Copy URL</button>
+              <button class="btn danger sm" data-img-del="${esc(f.name)}">Delete</button>
+            </div>
+          </div>`).join('') || '<p class="muted">No images yet.</p>'}
+      </div>
+    </div>`;
+  main.querySelector('#img-upload').addEventListener('click', async () => {
+    const file = main.querySelector('#img-file').files[0];
+    if (!file) return toast('Choose a file first', true);
+    try {
+      toast('Uploading…');
+      await uploadImage(file);
+      toast('Image uploaded');
+      navigate('images');
+    } catch (err) { toast(err.message, true); }
+  });
+  main.querySelectorAll('[data-img-copy]').forEach((b) => b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(b.dataset.imgCopy); toast('URL copied'); }
+    catch { toast('Copy failed', true); }
+  }));
+  main.querySelectorAll('[data-img-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Delete this image from Supabase Storage? Products/packages using it will lose their photo.')) return;
+    try {
+      await api('/uploads/' + encodeURIComponent(b.dataset.imgDel), { method: 'DELETE' });
+      toast('Image deleted'); navigate('images');
     } catch (err) { toast(err.message, true); }
   }));
 };
