@@ -63,7 +63,8 @@ async function main() {
 
     let inserted = 0;
     for (const row of rows) {
-      const cols = table.columns.filter((c) => row[c] !== undefined);
+      // Exclude 'id' column - let the database auto-generate it (GENERATED ALWAYS AS IDENTITY)
+      const cols = table.columns.filter((c) => row[c] !== undefined && c !== 'id');
       const vals = cols.map((c) => {
         const v = row[c];
         if (v instanceof Uint8Array) return Buffer.from(v).toString('base64');
@@ -87,11 +88,12 @@ async function main() {
       }
     }
 
-    // Sync sequence
+    // Sync sequence past the highest SQLite id to avoid future conflicts
     if (table.columns.includes('id') && rows.length > 0) {
       try {
+        const maxId = Math.max(...rows.map((r: any) => Number(r.id) || 0));
         await pg.query(
-          `SELECT setval(pg_get_serial_sequence('${table.name}', 'id'), GREATEST((SELECT COALESCE(MAX(id),0) FROM "${table.name}"), 1))`
+          `SELECT setval(pg_get_serial_sequence('${table.name}', 'id'), GREATEST((SELECT COALESCE(MAX(id),0) FROM "${table.name}"), ${maxId}))`
         );
       } catch (e) {
         // Sequence might not exist for all tables
