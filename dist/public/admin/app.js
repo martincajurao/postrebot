@@ -1,9 +1,9 @@
-﻿/* Postre Admin SPA */
+﻿﻿/* Postre Admin SPA */
 const API = '/api/admin';
-let TOKEN = sessionStorage.getItem('token') || '';
-let ME = sessionStorage.getItem('me') || '';
-let ME_ID = Number(sessionStorage.getItem('me_id')) || 0;
-let ROLE = sessionStorage.getItem('role') || 'ADMIN';
+let TOKEN = localStorage.getItem('token') || '';
+let ME = localStorage.getItem('me') || '';
+let ME_ID = Number(localStorage.getItem('me_id')) || 0;
+let ROLE = localStorage.getItem('role') || 'ADMIN';
 let currentView = 'dashboard';
 
 // ---------- helpers ----------
@@ -34,7 +34,7 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => { if (
 // ---------- auth ----------
 function logout() {
   TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
-  sessionStorage.clear();
+  localStorage.clear();
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-view').style.display = 'flex';
 }
@@ -59,8 +59,8 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     if (!res.ok) throw new Error(data.error || 'Login failed');
     TOKEN = data.token; ME = data.username || document.getElementById('login-user').value;
     ME_ID = Number(data.id) || 0; ROLE = data.role || 'ADMIN';
-    sessionStorage.setItem('token', TOKEN); sessionStorage.setItem('me', ME);
-    sessionStorage.setItem('me_id', String(ME_ID)); sessionStorage.setItem('role', ROLE);
+    localStorage.setItem('token', TOKEN); localStorage.setItem('me', ME);
+    localStorage.setItem('me_id', String(ME_ID)); localStorage.setItem('role', ROLE);
     document.getElementById('login-err').textContent = '';
     showApp();
   } catch (err) { document.getElementById('login-err').textContent = err.message; }
@@ -105,12 +105,8 @@ async function uploadImage(file) {
   if (!res.ok) throw new Error(data.error || 'Upload failed');
   return data.url;
 }
-/** Browser cache-buster for remote images — Supabase/etc keep the same address
- *  when a file is replaced in place; local /uploads files have unique names. */
-const bustImg = (url) => {
-  if (!url || !/^https?:\/\//i.test(url) || url.includes('/uploads/')) return url || '';
-  return url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
-};
+/** Local /uploads files have unique names, so no cache-busting is needed. */
+const bustImg = (url) => url || '';
 function photoField(id, value) {
   return `
     <div class="field"><label>Photo</label>

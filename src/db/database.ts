@@ -264,6 +264,14 @@ export function migrate(): void {
   addCol('packages', 'is_custom', 'DEFAULT 0');
   addCol('package_options', 'is_default', 'DEFAULT 0');
 
+  // v5: remove dead Supabase Storage URLs. The Supabase project was deleted,
+  // so every https://*.supabase.co/... photo_url 400s in the admin panel and in
+  // Messenger. Clear them (UI shows a placeholder; admins re-upload via the
+  // panel, which now stores local /uploads/... paths).
+  for (const [t, c] of [['products', 'photo_url'], ['packages', 'photo_url'], ['categories', 'image']] as const) {
+    try { db.exec(`UPDATE ${t} SET ${c} = NULL WHERE ${c} LIKE '%supabase.co%';`); } catch { /* column may not exist */ }
+  }
+
   // Give every slot without a default its first option as the pre-selected dish.
   db.exec(`UPDATE package_options SET is_default = 1 WHERE id IN (
     SELECT po.id FROM package_options po
