@@ -142,10 +142,15 @@ export function notifyOrderStatus(psid: string, status: string): void {
   const messages: Record<string, string> = {
     CONFIRMED: '✅ Your order has been confirmed.',
     PREPARING: '👨‍🍳 Your order is now being prepared.',
-    READY: '🎉 Your order is ready!',
+    READY: '🎉 Your order is ready! Our delivery rider will pick it up shortly.',
     CANCELLED: '❌ Your order has been cancelled. Contact us if this is unexpected.',
     COMPLETED: '🙏 Thank you for ordering from Postre Food Products!',
   };
   const msg = messages[status];
   if (msg) sendText(psid, msg).catch(() => { });
+}
+
+/** Rider has picked up the order — customer is informed it's on the way. */
+export function notifyOrderOnTheWay(psid: string): void {
+  sendText(psid, '🛵 Your order has been picked up by our delivery rider and is now on its way!').catch(() => { });
 }

@@ -501,8 +501,8 @@ async function handlePayload(psid, payload) {
             (0, send_1.setState)(psid, 'CHECKOUT_PHONE', (0, send_1.getState)(psid).ctx);
             return (0, send_1.sendText)(psid, 'Please type your contact number:');
         case 'ASK_NOTES':
-            (0, send_1.setState)(psid, 'CHECKOUT_NOTES', (0, send_1.getState)(psid).ctx);
-            return (0, send_1.sendText)(psid, 'Any special notes? (type "none" to skip)');
+            // Special-notes step removed from the checkout flow — go straight to payment.
+            return handlePayload(psid, 'ASK_PAY');
         case 'ASK_PAY':
             (0, send_1.setState)(psid, 'CHECKOUT_PAY', (0, send_1.getState)(psid).ctx);
             return (0, send_1.sendQuickReplies)(psid, 'Payment method:', [

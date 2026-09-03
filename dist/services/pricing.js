@@ -5,6 +5,7 @@ exports.netPackagePrice = netPackagePrice;
 exports.priceProduct = priceProduct;
 exports.normalizeChoices = normalizeChoices;
 exports.packageDefaults = packageDefaults;
+exports.computePackageBasePrice = computePackageBasePrice;
 exports.choiceUpgrade = choiceUpgrade;
 exports.pricePackage = pricePackage;
 exports.computeCartTotals = computeCartTotals;
@@ -50,6 +51,22 @@ function packageDefaults(packageId) {
             out.push({ slot_number: s.slot_number, product_id: opt.product_id });
     }
     return out;
+}
+/**
+ * Base price of a package = sum of the price of each slot's pre-selected (default)
+ * dish. Not manually editable — derived from the dishes in the package.
+ */
+function computePackageBasePrice(packageId) {
+    const slots = database_1.db.prepare('SELECT id FROM package_slots WHERE package_id = ? ORDER BY slot_number').all(packageId);
+    let sum = 0;
+    for (const s of slots) {
+        const opt = database_1.db.prepare('SELECT product_id FROM package_options WHERE slot_id = ? ORDER BY is_default DESC, id LIMIT 1').get(s.id);
+        if (!opt)
+            continue;
+        const v = database_1.db.prepare('SELECT MIN(price) AS p FROM product_variants WHERE product_id = ?').get(opt.product_id);
+        sum += Number(v?.p) || 0;
+    }
+    return sum;
 }
 /** Surcharge for a single package slot choice (upgrade + optional size upgrade). */
 function choiceUpgrade(packageId, slotNumber, productId, size) {

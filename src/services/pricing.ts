@@ -56,6 +56,24 @@ export function packageDefaults(packageId: number): SlotChoice[] {
   return out;
 }
 
+/**
+ * Base price of a package = sum of the price of each slot's pre-selected (default)
+ * dish. Not manually editable — derived from the dishes in the package.
+ */
+export function computePackageBasePrice(packageId: number): number {
+  const slots = db.prepare('SELECT id FROM package_slots WHERE package_id = ? ORDER BY slot_number').all(packageId) as any[];
+  let sum = 0;
+  for (const s of slots) {
+    const opt = db.prepare(
+      'SELECT product_id FROM package_options WHERE slot_id = ? ORDER BY is_default DESC, id LIMIT 1'
+    ).get(s.id) as any;
+    if (!opt) continue;
+    const v = db.prepare('SELECT MIN(price) AS p FROM product_variants WHERE product_id = ?').get(opt.product_id) as any;
+    sum += Number(v?.p) || 0;
+  }
+  return sum;
+}
+
 /** Surcharge for a single package slot choice (upgrade + optional size upgrade). */
 export function choiceUpgrade(packageId: number, slotNumber: number, productId: number, size?: string): number {
   const slot = db.prepare('SELECT id FROM package_slots WHERE package_id = ? AND slot_number = ?')

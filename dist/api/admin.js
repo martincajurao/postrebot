@@ -106,10 +106,15 @@ r.post('/packages', (req, res) => {
 });
 r.put('/packages/:id', (req, res) => {
     const { name, description, photo_url, base_price, discount, selections, active, is_fixed, is_custom } = req.body;
+    // For non-custom packages the base price is NOT manual — it is the sum of the
+    // package's items (each slot's default dish). Only custom packages keep a
+    // manual set price.
+    const pkg = database_1.db.prepare('SELECT is_custom FROM packages WHERE id = ?').get(req.params.id);
+    const autoPrice = !(pkg?.is_custom || is_custom) ? (0, pricing_1.computePackageBasePrice)(Number(req.params.id)) : null;
     database_1.db.prepare(`UPDATE packages SET name = COALESCE(?, name), description = COALESCE(?, description),
     photo_url = COALESCE(?, photo_url), base_price = COALESCE(?, base_price), discount = COALESCE(?, discount), selections = COALESCE(?, selections),
     active = COALESCE(?, active), is_fixed = COALESCE(?, is_fixed), is_custom = COALESCE(?, is_custom) WHERE id = ?`)
-        .run(name ?? null, description ?? null, photo_url ?? null, base_price ?? null, discount == null ? null : Math.max(0, Number(discount) || 0), selections ?? null, active ?? null, is_fixed == null ? null : (is_fixed ? 1 : 0), is_custom == null ? null : (is_custom ? 1 : 0), req.params.id);
+        .run(name ?? null, description ?? null, photo_url ?? null, autoPrice ?? (base_price ?? null), discount == null ? null : Math.max(0, Number(discount) || 0), selections ?? null, active ?? null, is_fixed == null ? null : (is_fixed ? 1 : 0), is_custom == null ? null : (is_custom ? 1 : 0), req.params.id);
     res.json({ ok: true });
 });
 // Set slots: { slots: [{ slot_number: 1, product_ids: [1,2,3], upgrade_prices: {productId: 0}, default_product_id: 1 }] }
@@ -127,6 +132,11 @@ r.put('/packages/:id/slots', (req, res) => {
         }
     });
     tx();
+    // Re-derive the base price from the saved slots (non-custom packages only).
+    const pkg = database_1.db.prepare('SELECT is_custom FROM packages WHERE id = ?').get(req.params.id);
+    if (!pkg?.is_custom) {
+        database_1.db.prepare('UPDATE packages SET base_price = ? WHERE id = ?').run((0, pricing_1.computePackageBasePrice)(Number(req.params.id)), req.params.id);
+    }
     res.json({ ok: true });
 });
 r.delete('/packages/:id', (req, res) => {
@@ -163,6 +173,14 @@ r.put('/orders/:id/payment', (req, res) => {
     catch (e) {
         res.status(400).json({ error: e.message });
     }
+});
+// Rider picked up the order — tell the customer it's on the way.
+r.post('/orders/:id/on-the-way', (req, res) => {
+    const order = database_1.db.prepare("SELECT o.customer_id, c.psid FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = ?").get(req.params.id);
+    if (!order?.psid)
+        return res.status(404).json({ error: 'Order or customer Messenger ID not found' });
+    (0, send_1.notifyOrderOnTheWay)(order.psid);
+    res.json({ ok: true });
 });
 // ---- Reservations ----
 r.get('/reservations/availability', (req, res) => {

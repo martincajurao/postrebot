@@ -333,6 +333,7 @@ views.orders = async (main) => {
           <td><span class="badge b-${esc(o.status)}">${esc(o.status)}</span></td>
           <td><div class="row-actions">
             ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
+            ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
             ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
           </div></td>
@@ -345,6 +346,10 @@ views.orders = async (main) => {
   });
   main.querySelectorAll('[data-advance]').forEach((b) => b.addEventListener('click', async () => {
     try { await api(`/orders/${b.dataset.advance}/status`, { method: 'PUT', body: { status: b.dataset.next } }); toast('Order → ' + b.dataset.next); navigate('orders'); }
+    catch (err) { toast(err.message, true); }
+  }));
+  main.querySelectorAll('[data-otw]').forEach((b) => b.addEventListener('click', async () => {
+    try { await api(`/orders/${b.dataset.otw}/on-the-way`, { method: 'POST' }); toast('Customer notified: order is on the way 🛵'); }
     catch (err) { toast(err.message, true); }
   }));
   main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
@@ -582,11 +587,21 @@ views.packages = async (main) => {
   function openPackageEditor(p, draft = null) {
     const info = draft?.info || { name: p.name, description: p.description || '', base_price: p.base_price, discount: p.discount || 0, selections: p.selections, photo_url: p.photo_url || '', is_fixed: !!p.is_fixed };
     const slots = draft?.slots || slotRowsOf(p, info.selections);
+    // Base price is derived: sum of each slot's default dish price (cheapest variant).
+    const minPrice = (pid) => {
+      const prod = products.find((x) => x.id == pid);
+      const vs = (prod?.variants || []).map((v) => Number(v.price)).filter((n) => !isNaN(n));
+      return vs.length ? Math.min(...vs) : 0;
+    };
+    const computeBase = (slotList) =>
+      p.is_custom ? 0 : slotList.reduce((sum, s) => sum + minPrice(s.default_product_id || (s.options[0] && s.options[0].product_id)), 0);
     const render = () => modal(`<h3>Edit Package — ${esc(p.name)}</h3>
       <div class="field"><label>Name</label><input id="pn-name" value="${esc(info.name)}"></div>
       <div class="field"><label>Description</label><input id="pn-desc" value="${esc(info.description)}"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <div class="field"><label>Base price (₱)</label><input type="number" id="pn-price" value="${info.base_price}"></div>
+        ${p.is_custom
+          ? '<div class="field"><label>Base price (₱) — custom package</label><input type="number" id="pn-price" value="' + info.base_price + '"></div>'
+          : '<div class="field"><label>Base price (auto: sum of dishes)</label><input id="pn-price" readonly style="background:#f0f1f3" value="' + computeBase(slots) + '" title="Derived from the pre-selected dish in each slot — not editable"></div>'}
         <div class="field"><label>Discount (₱)</label><input type="number" id="pn-disc" value="${info.discount || 0}" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="pn-sel" value="${info.selections}" min="1" max="10"></div>
       </div>
@@ -622,7 +637,7 @@ views.packages = async (main) => {
     const readInfo = () => ({
       name: document.getElementById('pn-name').value,
       description: document.getElementById('pn-desc').value,
-      base_price: Number(document.getElementById('pn-price').value),
+      base_price: Number(document.getElementById('pn-price').value) || 0,
       discount: Math.max(0, Number(document.getElementById('pn-disc').value) || 0),
       selections: Number(document.getElementById('pn-sel').value),
       photo_url: document.getElementById('pn-photo').value,
@@ -649,6 +664,8 @@ views.packages = async (main) => {
     });
     document.getElementById('pn-save').addEventListener('click', async () => {
       const infoBody = readInfo();
+      // Recompute base price from the current slots right before saving.
+      if (!p.is_custom) infoBody.base_price = computeBase(readSlots(infoBody.selections));
       try {
         if (!infoBody.name.trim()) throw new Error('Package name is required.');
         const slotsPayload = readSlots(infoBody.selections).map((s) => {
@@ -673,11 +690,11 @@ views.packages = async (main) => {
     modal(`<h3>New Package</h3>
       <div class="field"><label>Name</label><input id="np-name"></div>
       <div class="field"><label>Description</label><input id="np-desc"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <div class="field"><label>Base price (₱)</label><input type="number" id="np-price"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="field"><label>Discount (₱)</label><input type="number" id="np-disc" value="0" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="np-sel" value="4" min="1" max="10"></div>
       </div>
+      <p class="muted">Base price is computed automatically from the dishes you add (sum of each slot's pre-selected dish).</p>
       ${photoField('np-photo', null)}
       <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
         <input type="checkbox" id="np-fixed" style="width:auto"> Fixed package (dishes pre-set — customers cannot change them)</label></div>
@@ -690,7 +707,7 @@ views.packages = async (main) => {
         const created = await api('/packages', { method: 'POST', body: {
           name,
           description: document.getElementById('np-desc').value,
-          base_price: Number(document.getElementById('np-price').value),
+          base_price: 0, // set automatically from the slot dishes
           discount: Math.max(0, Number(document.getElementById('np-disc').value) || 0),
           selections: Number(document.getElementById('np-sel').value),
           photo_url: document.getElementById('np-photo').value,

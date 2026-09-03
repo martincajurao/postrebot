@@ -488,8 +488,8 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       setState(psid, 'CHECKOUT_PHONE', getState(psid).ctx);
       return sendText(psid, 'Please type your contact number:');
     case 'ASK_NOTES':
-      setState(psid, 'CHECKOUT_NOTES', getState(psid).ctx);
-      return sendText(psid, 'Any special notes? (type "none" to skip)');
+      // Special-notes step removed from the checkout flow — go straight to payment.
+      return handlePayload(psid, 'ASK_PAY');
     case 'ASK_PAY':
       setState(psid, 'CHECKOUT_PAY', getState(psid).ctx);
       return sendQuickReplies(psid, 'Payment method:', [
