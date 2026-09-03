@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { migrate, db } from './db/database';
 import adminRoutes from './api/admin';
 import uploadRoutes from './api/upload';
+import { logConfig } from './api/supabase-storage';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
 import path from 'path';
@@ -62,5 +63,6 @@ app.use((err: any, _req: any, res: any, _next: any) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+logConfig();
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => console.log(`Postre server listening on http://localhost:${PORT}`));
