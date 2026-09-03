@@ -2,7 +2,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * All image CRUD (create/read/update/delete) goes through Supabase Storage.
- * The SQLite `uploads` asdxx table only keeps lightweight metadata (name, mime,
+ * The SQLite `uplasdoads` asdxx table only keeps lightweight metadata (name, mime,
  * public URL) so the admin panel can list files — the bytes themselves live
  * in the bucket.
  */
