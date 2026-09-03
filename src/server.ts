@@ -28,23 +28,14 @@ app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
 }));
 
 app.use('/api/admin', adminRoutes);
-const uploadsDirs = ['./data/uploads', './dist/data/uploads'].map((d) => path.resolve(process.cwd(), d));
 app.get('/uploads/:file', async (req, res) => {
   const file = String(req.params.file);
   if (!/^[-\w.]+$/.test(file)) return res.status(400).end();
-  for (const dir of uploadsDirs) {
-    const p = path.join(dir, file);
-    if (fs.existsSync(p)) {
-      res.setHeader('Cache-Control', 'public, max-age=2592000');
-      return res.sendFile(p);
-    }
-  }
+  // Redirect to Supabase Storage public URL
   const { one } = await import('./db');
-  const row = await one('SELECT mime, bytes FROM uploads WHERE name = $1', [file]) as any;
-  if (!row) return res.status(404).end();
-  res.setHeader('Content-Type', row.mime);
-  res.setHeader('Cache-Control', 'public, max-age=2592000');
-  res.end(Buffer.from(row.bytes));
+  const row = await one('SELECT public_url FROM uploads WHERE name = $1', [file]) as any;
+  if (!row || !row.public_url) return res.status(404).end();
+  return res.redirect(row.public_url);
 });
 app.use('/api/admin', uploadRoutes);
 

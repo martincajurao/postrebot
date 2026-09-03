@@ -36,8 +36,8 @@ r.post('/upload', upload.single('image'), async (req, res) => {
 
   try {
     const url = await uploadImage(name, mime, req.file.buffer);
-    await run('INSERT INTO uploads (name, mime, bytes, public_url) VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO UPDATE SET mime = EXCLUDED.mime, bytes = EXCLUDED.bytes, public_url = EXCLUDED.public_url',
-      [name, mime, Buffer.alloc(0), url]);
+    await run('INSERT INTO uploads (name, mime, public_url) VALUES ($1, $2, $3) ON CONFLICT (name) DO UPDATE SET mime = EXCLUDED.mime, public_url = EXCLUDED.public_url',
+      [name, mime, url]);
     return res.json({ url, name, storage: 'supabase' });
   } catch (e: any) {
     console.error('[upload] supabase error:', e.message);
