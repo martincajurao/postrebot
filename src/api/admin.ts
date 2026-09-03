@@ -7,7 +7,7 @@ import {
   createReservation, cancelReservation, updateReservationStatus,
   rescheduleReservation, slotAvailability, isDateOpen,
 } from '../services/reservations';
-import { computeCartTotals, computePackageBasePrice } from '../services/pricing';
+import { computeCartTotals } from '../services/pricing';
 import { notifyOrderStatus, notifyOrderOnTheWay } from '../messenger/send';
 
 const r = Router();
@@ -328,9 +328,9 @@ r.post('/payments', async (req, res) => {
 });
 
 // ---- Pricing preview (for admin/testing) ----
-r.post('/pricing/preview', (req, res) => {
+r.post('/pricing/preview', async (req, res) => {
   try {
-    res.json(computeCartTotals(req.body.items || [], req.body.delivery_fee || 0));
+    res.json(await computeCartTotals(req.body.items || [], req.body.delivery_fee || 0));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

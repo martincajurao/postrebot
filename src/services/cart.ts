@@ -61,5 +61,5 @@ export async function clearCart(psid: string): Promise<void> {
 
 export async function cartTotals(psid: string, deliveryFee = 0) {
   const items = await getCart(psid);
-  return computeCartTotals(items, deliveryFee);
+  return await computeCartTotals(items, deliveryFee);
 }
