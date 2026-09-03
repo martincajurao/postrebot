@@ -31,7 +31,7 @@ export async function createOrderFromCart(
   }
   const items = await getCart(psid);
   if (items.length === 0) throw new Error('Cart is empty');
-  const totals = computeCartTotals(items, deliveryFee);
+  const totals = await computeCartTotals(items, deliveryFee);
 
   const result = await tx(async (client) => {
     const orderNumber = await nextOrderNumber();
@@ -46,7 +46,7 @@ export async function createOrderFromCart(
       ]);
     const orderId = Number(res.rows[0].id);
     for (const it of items) {
-      const line = computeCartTotals([it], 0);
+      const line = await computeCartTotals([it], 0);
       const unit = Math.round(line.subtotal / it.quantity);
       const r = await client.query(`INSERT INTO order_items
         (order_id, product_id, package_id, name, variant_size, quantity, unit_price, line_total)
@@ -58,7 +58,7 @@ export async function createOrderFromCart(
         for (const c of it.slot_choices) {
           const prod = await one('SELECT name FROM products WHERE id = $1', [c.product_id]) as any;
           let extra = 0;
-          try { extra = choiceUpgrade(it.package_id, c.slot_number, c.product_id, it.variant_size); } catch { extra = 0; }
+          try { extra = await choiceUpgrade(it.package_id, c.slot_number, c.product_id, it.variant_size); } catch { extra = 0; }
           await client.query(`INSERT INTO order_package_items
             (order_item_id, slot_number, product_name, upgrade_price) VALUES ($1, $2, $3, $4)`,
             [orderItemId, c.slot_number, prod?.name ?? 'Unknown', extra]);

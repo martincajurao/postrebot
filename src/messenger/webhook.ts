@@ -131,7 +131,7 @@ async function showCart(psid: string) {
       if (dishes) label += `\n(${dishes})`;
     }
     let lineTotal = 0;
-    try { lineTotal = computeCartTotals([i], 0).subtotal; } catch { lineTotal = 0; }
+    try { lineTotal = (await computeCartTotals([i], 0)).subtotal; } catch { lineTotal = 0; }
     return `${label} — ${money(lineTotal)}`;
   })).then(l => l.join('\n'));
   await sendText(psid, `YOUR CART\n\n${lines}\n\nTotal: ${money(totals.total)}`);
@@ -266,7 +266,7 @@ async function packageTotal(packageId: number, choices: Record<number, number>, 
   const arr = Object.entries(choices || {}).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
   if (arr.length !== pkg.selections) return null;
   try {
-    return pricePackage(packageId, arr, size).total;
+    return (await pricePackage(packageId, arr, size)).total;
   } catch {
     return null;
   }
@@ -281,7 +281,7 @@ async function showPackageDetails(psid: string, packageId: number, ctx?: any) {
     for (const [k, v] of Object.entries(prev.choices)) saved[Number(k)] = Number(v);
   }
   const defaults: Record<number, number> = {};
-  for (const d of packageDefaults(packageId)) defaults[d.slot_number] = d.product_id;
+  for (const d of await packageDefaults(packageId)) defaults[d.slot_number] = d.product_id;
   const choices: Record<number, number> = pkg.is_custom ? { ...saved } : { ...defaults, ...saved };
   await setState(psid, 'PACKAGE_DETAILS', { package_id: packageId, choices });
 
@@ -398,14 +398,14 @@ async function addPackageToCart(psid: string, packageId: number, size: string, q
     for (const [k, v] of Object.entries(st.choices)) choices[Number(k)] = Number(v);
   }
   if (Object.keys(choices).length === 0) {
-    for (const d of packageDefaults(packageId)) choices[d.slot_number] = d.product_id;
+    for (const d of await packageDefaults(packageId)) choices[d.slot_number] = d.product_id;
   }
   if (Object.keys(choices).length !== pkg.selections) {
     return showPackageDetails(psid, packageId, { package_id: packageId, choices });
   }
   const arr = Object.entries(choices).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
   let total = netPackagePrice(pkg);
-  try { total = pricePackage(packageId, arr, chosenSize).total; } catch { /* fall back to base price */ }
+  try { total = (await pricePackage(packageId, arr, chosenSize)).total; } catch { /* fall back to base price */ }
   await addItem(psid, { package_id: packageId, variant_size: chosenSize, quantity: qty, slot_choices: arr });
   return sendText(psid, `Added ${qty}x ${pkg.name} (${chosenSize}) to your cart.\n\n${await packageLines(packageId, choices)}\nPrice: ${money(total)}`)
     .then(() => sendButtons(psid, 'What next?', [
