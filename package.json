@@ -10,8 +10,8 @@
     "postinstall": "npm run build",
     "seed": "echo Seed disabled on the live system - it would add sample products/packages. See src/db/seed.ts.",
     "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\"",
-    "db:seed:supabase": "node dist/scripts/seed-to-supabase.js",
-    "db:seed:supabase:tsx": "tsx scripts/seed-to-supabase.ts",
+    "db:seed:supabase": "node dist/db/seed-to-supabase.js",
+    "db:seed:supabase:tsx": "tsx src/db/seed-to-supabase.ts",
     "db:seed:sqlite": "node dist/db/seed.js",
     "db:seed:sqlite:tsx": "tsx src/db/seed.ts"
   },

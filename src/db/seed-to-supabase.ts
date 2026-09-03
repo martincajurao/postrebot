@@ -7,7 +7,7 @@
 
 import 'dotenv/config';
 import { DatabaseSync } from 'node:sqlite';
-import { poolOf, query, one, run } from '../src/db/pg';
+import { poolOf, query, one, run } from './pg';
 
 const SQLITE = process.env.DATABASE_FILE || './data/postre.db';
 
@@ -27,7 +27,7 @@ async function main() {
 
   // Run migrations first
   console.log('Running schema migrations...');
-  const { migrate } = await import('../src/db/postgres');
+  const { migrate } = await import('./postgres');
   await migrate();
   console.log('Schema ensured.\n');
 
