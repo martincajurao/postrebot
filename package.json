@@ -11,7 +11,9 @@
         "seed": "echo Seed disabled on the live system - it would add sample products/packages. See src/db/seed.ts.",
         "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\"",
     "db:seed:supabase": "tsx scripts/seed-to-supabase.ts",
-    "db:seed:sqlite": "tsx src/db/seed.ts"
+    "db:seed:supabase:js": "node dist/scripts/seed-to-supabase.js",
+    "db:seed:sqlite": "tsx src/db/seed.ts",
+    "db:seed:sqlite:js": "node dist/db/seed.js"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.114.0",
@@ -29,6 +31,7 @@
         "@types/multer": "^2.2.0",
         "@types/node": "^22.5.0",
         "@types/pg": "^8.23.1",
+        "tsx": "^4.23.13",
         "typescript": "^5.5.4"
     }
 }

@@ -88,7 +88,7 @@ async function main() {
     }
 
     // Sync sequence
-    if (cols.includes('id') && rows.length > 0) {
+    if (table.columns.includes('id') && rows.length > 0) {
       try {
         await pg.query(
           `SELECT setval(pg_get_serial_sequence('${table.name}', 'id'), GREATEST((SELECT COALESCE(MAX(id),0) FROM "${table.name}"), 1))`
