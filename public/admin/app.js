@@ -35,11 +35,10 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => { if (
 function logout() {
   TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
   localStorage.clear();
+  location.hash = '';
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-view').style.display = 'flex';
 }
-// NOTE: showApp() is invoked further down, after the navigation bindings are set up
-// (navigate() touches the More-sheet elements, which are `const`s below).
 
 function showApp() {
   document.getElementById('login-view').style.display = 'none';
@@ -67,33 +66,64 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 });
 document.getElementById('logout-btn').addEventListener('click', logout);
 
-// ---------- navigation ----------
-document.querySelectorAll('[data-view]').forEach((a) =>
-  a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.dataset.view); }));
+// ---------- navigation (single source of truth) ----------
+const NAV = [
+  { view: 'dashboard',    icon: '📊', label: 'Dashboard',    bottom: 'Home' },
+  { view: 'orders',       icon: '🛒', label: 'Orders',       bottom: 'Orders' },
+  { view: 'reservations', icon: '📅', label: 'Reservations', bottom: 'Resv.' },
+  { view: 'menu',         icon: '🍽️', label: 'Menu',         bottom: 'Menu' },
+  { view: 'packages',     icon: '🔥', label: 'Packages',     bottom: 'Pkgs',   role: 'ADMIN' },
+  { view: 'customers',    icon: '👥', label: 'Customers',    bottom: 'Cust.',  role: 'ADMIN' },
+  { view: 'admins',       icon: '🛡️', label: 'Admins',       bottom: 'Admins', role: 'ADMIN' },
+  { view: 'delivery',     icon: '🚚', label: 'Delivery',     bottom: 'Deliv.' },
+  { view: 'settings',     icon: '⚙️', label: 'Settings',     bottom: 'Settings' },
+];
 
-// mobile "More" bottom sheet — holds the tabs that don't fit the bottom bar
-// (Packages, Customers, Admins, Delivery, Settings)
-const MORE_VIEWS = ['packages', 'customers', 'admins', 'delivery', 'settings'];
-const moreBtn = document.getElementById('more-btn');
-const moreSheet = document.getElementById('moresheet-overlay');
-moreBtn.addEventListener('click', (e) => { e.preventDefault(); moreSheet.classList.toggle('hidden'); });
-moreSheet.addEventListener('click', (e) => { if (e.target === moreSheet) moreSheet.classList.add('hidden'); });
+function buildNav() {
+  const items = NAV.filter((n) => !n.role || ROLE === n.role);
+  const link = (n, mobile) => {
+    const a = document.createElement('a');
+    a.href = '#' + n.view;
+    a.dataset.view = n.view;
+    a.innerHTML = mobile ? `<span>${n.icon}</span>${n.bottom}` : `${n.icon} ${n.label}`;
+    return a;
+  };
+  const side = document.getElementById('side-nav');
+  const bottom = document.getElementById('bottom-nav');
+  side.innerHTML = ''; bottom.innerHTML = '';
+  items.forEach((n) => { side.appendChild(link(n, false)); bottom.appendChild(link(n, true)); });
+}
+
+function applyHash() {
+  const allowed = NAV.filter((n) => !n.role || ROLE === n.role).map((n) => n.view);
+  const requested = (location.hash || '').replace(/^#/, '');
+  const view = allowed.includes(requested) ? requested : allowed[0];
+  navigate(view);
+}
 
 function navigate(view) {
   currentView = view;
-  moreSheet.classList.add('hidden');
+  if (location.hash !== '#' + view) { location.hash = view; return; } // re-enters via applyHash
   document.querySelectorAll('[data-view]').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
-  // keep the More tab highlighted while a sheet-only view is open
-  moreBtn.classList.toggle('active', MORE_VIEWS.includes(view));
+  // keep the scrolled-to tab visible on mobile
+  const active = document.querySelector('#bottom-nav a.active');
+  if (active) active.scrollIntoView({ block: 'nearest', inline: 'center' });
   const main = document.getElementById('main');
   main.innerHTML = '<p class="muted">Loading…</p>';
   views[view](main).catch((err) => { main.innerHTML = ''; toast(err.message, true); });
+  window.scrollTo({ top: 0 });
+}
+window.addEventListener('hashchange', applyHash);
+
+function showApp() {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('whoami').textContent = ME + (ROLE === 'ADMIN' ? ' · Admin' : ' · Staff');
+  buildNav();
+  applyHash();
 }
 
-if (TOKEN) showApp();
-
-const views = {};
-
+/* app boot: moved to the very bottom of the file so all views are registered first */
 
 // ---------- image upload helper ----------
 async function uploadImage(file) {
@@ -972,3 +1002,7 @@ views.admins = async (main) => {
     } catch (err) { toast(err.message, true); }
   }));
 };
+
+/* ================= APP BOOT =================
+ * Runs last so every view above is registered before the first navigate(). */
+if (TOKEN) showApp();
