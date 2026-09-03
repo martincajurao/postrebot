@@ -605,6 +605,7 @@ views.packages = async (main) => {
         <div class="field"><label>Discount (₱)</label><input type="number" id="pn-disc" value="${info.discount || 0}" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="pn-sel" value="${info.selections}" min="1" max="10"></div>
       </div>
+      ${p.is_custom ? '' : '<p class="muted" id="pn-disc-note">Discounts only apply to packages worth ₱3,000 or more (sum of dishes).</p>'}
       ${photoField('pn-photo', info.photo_url)}
       <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
         <input type="checkbox" id="pn-fixed" style="width:auto" ${info.is_fixed ? 'checked' : ''}> Fixed package (dishes pre-set — customers cannot change them)</label></div>
@@ -662,6 +663,27 @@ views.packages = async (main) => {
       document.getElementById('pn-sel').value = count;
       openPackageEditor(p, { info: readInfo(), slots: readSlots(info.selections) });
     });
+    // Live-update the (read-only) base price whenever a slot's default dish changes.
+    if (!p.is_custom) {
+      const refreshBase = () => {
+        const el = document.getElementById('pn-price');
+        const base = computeBase(readSlots(info.selections));
+        if (el) el.value = base;
+        // Discount rule: sum of items below ₱3000 → discount forced to 0.
+        const disc = document.getElementById('pn-disc');
+        const note = document.getElementById('pn-disc-note');
+        if (disc) {
+          if (base < 3000) { disc.value = 0; disc.disabled = true; }
+          else disc.disabled = false;
+        }
+        if (note) note.style.display = base < 3000 ? '' : 'none';
+      };
+      document.getElementById('modal').addEventListener('change', (e) => {
+        const t = e.target;
+        if (t.classList && (t.classList.contains('slot-def') || t.classList.contains('opt-prod'))) refreshBase();
+      });
+      refreshBase();
+    }
     document.getElementById('pn-save').addEventListener('click', async () => {
       const infoBody = readInfo();
       // Recompute base price from the current slots right before saving.

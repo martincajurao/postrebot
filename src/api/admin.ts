@@ -113,11 +113,14 @@ r.put('/packages/:id', (req, res) => {
   // manual set price.
   const pkg = db.prepare('SELECT is_custom FROM packages WHERE id = ?').get(req.params.id) as any;
   const autoPrice = !(pkg?.is_custom || is_custom) ? computePackageBasePrice(Number(req.params.id)) : null;
+  // Rule: if the sum of the items is below ₱3000, no combo discount is allowed.
+  let effDiscount = discount == null ? null : Math.max(0, Number(discount) || 0);
+  if (autoPrice != null && autoPrice < 3000) effDiscount = 0;
   db.prepare(`UPDATE packages SET name = COALESCE(?, name), description = COALESCE(?, description),
     photo_url = COALESCE(?, photo_url), base_price = COALESCE(?, base_price), discount = COALESCE(?, discount), selections = COALESCE(?, selections),
     active = COALESCE(?, active), is_fixed = COALESCE(?, is_fixed), is_custom = COALESCE(?, is_custom) WHERE id = ?`)
     .run(name ?? null, description ?? null, photo_url ?? null, autoPrice ?? (base_price ?? null),
-      discount == null ? null : Math.max(0, Number(discount) || 0), selections ?? null, active ?? null,
+      effDiscount, selections ?? null, active ?? null,
       is_fixed == null ? null : (is_fixed ? 1 : 0), is_custom == null ? null : (is_custom ? 1 : 0), req.params.id);
   res.json({ ok: true });
 });
@@ -139,7 +142,10 @@ r.put('/packages/:id/slots', (req, res) => {
   // Re-derive the base price from the saved slots (non-custom packages only).
   const pkg = db.prepare('SELECT is_custom FROM packages WHERE id = ?').get(req.params.id) as any;
   if (!pkg?.is_custom) {
-    db.prepare('UPDATE packages SET base_price = ? WHERE id = ?').run(computePackageBasePrice(Number(req.params.id)), req.params.id);
+    const auto = computePackageBasePrice(Number(req.params.id));
+    // Rule: sum of items below ₱3000 → discount must be 0.
+    if (auto < 3000) db.prepare('UPDATE packages SET base_price = ?, discount = 0 WHERE id = ?').run(auto, req.params.id);
+    else db.prepare('UPDATE packages SET base_price = ? WHERE id = ?').run(auto, req.params.id);
   }
   res.json({ ok: true });
 });
