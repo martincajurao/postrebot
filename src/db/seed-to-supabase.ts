@@ -114,8 +114,15 @@ async function main() {
   const packages = sq.prepare('SELECT * FROM packages').all() as any[];
   for (const row of packages) {
     if (packageMap.has(row.name)) {
-      // Already exists, use existing ID
-      packageMap.set(Number(row.id), packageMap.get(row.name)!);
+      // Already exists — UPDATE discount/is_fixed/is_custom so migrated packages
+      // get the correct values from SQLite (the old "skip" behaviour left them at 0).
+      await pg.query(
+        `UPDATE packages SET description = $1, photo_url = $2, base_price = $3,
+           selections = $4, active = $5, discount = $6, is_fixed = $7, is_custom = $8
+         WHERE id = $9`,
+        [row.description, row.photo_url, row.base_price, row.selections, row.active,
+         row.discount, row.is_fixed, row.is_custom, packageMap.get(row.name)]
+      );
       continue;
     }
     const res = await pg.query(
