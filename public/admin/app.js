@@ -1,4 +1,4 @@
-﻿﻿/* Postre Admin SPA */
+﻿/* Postre Admin SPA */
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('token') || '';
 let ME = localStorage.getItem('me') || '';
@@ -124,6 +124,7 @@ function showApp() {
 }
 
 /* app boot: moved to the very bottom of the file so all views are registered first */
+const views = {};
 
 // ---------- image upload helper ----------
 async function uploadImage(file) {
