@@ -1,37 +1,37 @@
-{
-    "name": "postre-ordering-system",
-    "version": "1.0.0",
-    "description": "Postre Food Products - Messenger Ordering & Reservation System",
-    "main": "dist/server.js",
-    "scripts": {
-        "build": "tsc && node -e \"require('fs').cpSync('public','dist/public',{recursive:true})\" && node -e \"const f=require('fs'),p=require('path');const src=p.resolve('data/uploads');const out=p.resolve('dist/data/uploads');let n=0;if(f.existsSync(src)){f.mkdirSync(out,{recursive:true});for(const file of f.readdirSync(src)){const ext=p.extname(file).toLowerCase();if(!['.jpg','.jpeg','.png','.webp','.gif'].includes(ext))continue;const to=p.join(out,file);if(!f.existsSync(to)){f.copyFileSync(p.join(src,file),to);n++;}}}console.log('uploads mirrored to dist/data/uploads: '+n+' new');\"",
-        "start": "node dist/server.js",
-        "dev": "tsc && node dist/server.js",
-        "postinstall": "node -e \"const f=require('fs');const out='dist/data/uploads';f.mkdirSync(out,{recursive:true});console.log('ensured '+out);try{f.mkdirSync('.git/hooks',{recursive:true});f.copyFileSync('.githooks/pre-push','.git/hooks/pre-push');f.chmodSync('.githooks/pre-push',0o755);console.log('installed git pre-push hook (auto db checkpoint)')}catch(e){console.log('skipping git hook install (CI/not a repo):',e.message)}\"",
-        "seed": "echo Seed disabled on the live system - it would add sample products/packages. See src/db/seed.ts.",
-        "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\"",
-    "db:seed:supabase": "tsx scripts/seed-to-supabase.ts",
-    "db:seed:supabase:js": "node dist/scripts/seed-to-supabase.js",
-    "db:seed:sqlite": "tsx src/db/seed.ts",
-    "db:seed:sqlite:js": "node dist/db/seed.js"
-    },
-    "dependencies": {
-        "@supabase/supabase-js": "^2.114.0",
-        "bcryptjs": "^2.4.3",
-        "dotenv": "^16.4.5",
-        "express": "^4.19.2",
-        "jsonwebtoken": "^9.0.2",
-        "multer": "^2.3.0",
-        "pg": "^8.23.0"
-    },
-    "devDependencies": {
-        "@types/bcryptjs": "^2.4.6",
-        "@types/express": "^4.17.21",
-        "@types/jsonwebtoken": "^9.0.6",
-        "@types/multer": "^2.2.0",
-        "@types/node": "^22.5.0",
-        "@types/pg": "^8.23.1",
-        "tsx": "^4.23.13",
-        "typescript": "^5.5.4"
-    }
+﻿{
+  "name": "postre-ordering-system",
+  "version": "1.0.0",
+  "description": "Postre Food Products - Messenger Ordering & Reservation System",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc && node dist/server.js",
+    "postinstall": "npm run build",
+    "seed": "echo Seed disabled on the live system - it would add sample products/packages. See src/db/seed.ts.",
+    "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\"",
+    "db:seed:supabase": "node dist/scripts/seed-to-supabase.js",
+    "db:seed:supabase:tsx": "tsx scripts/seed-to-supabase.ts",
+    "db:seed:sqlite": "node dist/db/seed.js",
+    "db:seed:sqlite:tsx": "tsx src/db/seed.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.114.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.3.0",
+    "pg": "^8.23.0",
+    "tsx": "^4.23.13"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.5.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.5.4"
+  }
 }
