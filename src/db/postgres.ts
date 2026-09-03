@@ -226,4 +226,37 @@ async function seedDefaults(): Promise<void> {
       }
     }
   }
+
+  // v6: Order ratings table for customer feedback
+  await query(`
+    CREATE TABLE IF NOT EXISTS order_ratings (
+      id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      order_id INTEGER REFERENCES orders(id),
+      rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+      feedback TEXT,
+      created_at TEXT DEFAULT (now()::text)
+    );
+  `);
+
+  // v6: Promo codes table for discounts
+  await query(`
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      discount_type TEXT CHECK(discount_type IN ('fixed', 'percent')),
+      discount_value INTEGER NOT NULL,
+      min_order INTEGER DEFAULT 0,
+      max_uses INTEGER,
+      used_count INTEGER DEFAULT 0,
+      valid_from TEXT,
+      valid_until TEXT,
+      active INTEGER DEFAULT 1
+    );
+  `);
+
+  // v6: Add notes column to cart_items for special instructions
+  const cartItemCols = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['cart_items'])).map((c: any) => c.column_name);
+  if (!cartItemCols.includes('notes')) {
+    await query(`ALTER TABLE cart_items ADD COLUMN notes TEXT;`);
+  }
 }

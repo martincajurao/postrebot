@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { one, many, run, insertReturningId } from '../db';
-import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, SendResult } from './send';
-import { getCart, addItem, removeItem, updateQuantity, cartTotals } from '../services/cart';
-import { createOrderFromCart } from '../services/orders';
+import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
+import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart } from '../services/cart';
+import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, rateOrder } from '../services/orders';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
 
@@ -100,15 +100,17 @@ async function ensureCustomer(psid: string): Promise<any> {
 
 async function mainMenu(psid: string) {
   await setState(psid, 'MAIN_MENU');
-  await sendButtons(psid, 'Welcome to Postre Food Products!\n\nHow can we help you today?', [
-    { title: 'Order Now', payload: 'MENU_ORDER' },
-    { title: 'Packages', payload: 'MENU_PACKAGES' },
-    { title: 'Menu', payload: 'MENU_BROWSE' },
+  await sendButtons(psid, '🍽️ Welcome to Postre Food Products!\n\nHow can we help you today?', [
+    { title: '📋 Order Now', payload: 'MENU_ORDER' },
+    { title: '🎁 Packages', payload: 'MENU_PACKAGES' },
+    { title: '📖 View Menu', payload: 'MENU_BROWSE' },
   ]).then(() =>
-    sendQuickReplies(psid, 'More options:', [
-      { title: 'Reservation', payload: 'MENU_RESERVE' },
-      { title: 'My Cart', payload: 'MENU_CART' },
-      { title: 'Contact Us', payload: 'MENU_CONTACT' },
+    sendQuickReplies(psid, 'Quick actions:', [
+      { title: '🛒 My Cart', payload: 'MENU_CART' },
+      { title: '📍 Track Order', payload: 'TRACK_ORDER' },
+      { title: '📜 Order History', payload: 'ORDER_HISTORY' },
+      { title: '📅 Reservation', payload: 'MENU_RESERVE' },
+      { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
     ])
   );
 }
@@ -118,7 +120,7 @@ function money(n: number) { return `\u20b1${n.toLocaleString('en-PH')}`; }
 async function showCart(psid: string) {
   const items = await getCart(psid);
   if (items.length === 0) {
-    await sendText(psid, 'Your cart is empty.');
+    await sendText(psid, '🛒 Your cart is empty.\n\nBrowse our menu to add items!');
     return mainMenu(psid);
   }
   const totals = await cartTotals(psid);
@@ -128,17 +130,24 @@ async function showCart(psid: string) {
       const dishes = (await Promise.all(i.slot_choices
         .map(async (c: any) => (await one('SELECT name FROM products WHERE id = $1', [c.product_id]) as any)?.name)))
         .filter(Boolean).join(', ');
-      if (dishes) label += `\n(${dishes})`;
+      if (dishes) label += `\n   📦 ${dishes}`;
     }
     let lineTotal = 0;
     try { lineTotal = (await computeCartTotals([i], 0)).subtotal; } catch { lineTotal = 0; }
-    return `${label} — ${money(lineTotal)}`;
+    return `• ${label} — ${money(lineTotal)}`;
   })).then(l => l.join('\n'));
-  await sendText(psid, `YOUR CART\n\n${lines}\n\nTotal: ${money(totals.total)}`);
+  await sendText(psid,
+    `🛒 YOUR CART\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `${lines}\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `${totals.delivery > 0 ? `📦 Delivery: ${money(totals.delivery)}\n` : ''}` +
+    `💰 TOTAL: ${money(totals.total)}`
+  );
   return sendButtons(psid, 'What would you like to do?', [
-    { title: 'Checkout', payload: 'CART_CHECKOUT' },
-    { title: 'Add More', payload: 'MENU_ORDER' },
-    { title: 'Remove Item', payload: 'CART_REMOVE' },
+    { title: '✅ Checkout', payload: 'CART_CHECKOUT' },
+    { title: '📋 Add More', payload: 'MENU_ORDER' },
+    { title: '❌ Remove Item', payload: 'CART_REMOVE' },
   ]);
 }
 
@@ -380,11 +389,11 @@ async function showPackageSize(psid: string, packageId: number, ctx?: any) {
 
 async function checkoutStart(psid: string) {
   const items = await getCart(psid);
-  if (items.length === 0) return sendText(psid, 'Your cart is empty.');
+  if (items.length === 0) return sendText(psid, '🛒 Your cart is empty.\n\nBrowse our menu to add items!');
   await setState(psid, 'CHECKOUT_TYPE');
-  return sendQuickReplies(psid, 'Delivery or Pickup?', [
-    { title: 'Delivery', payload: 'TYPE:delivery' },
-    { title: 'Pickup', payload: 'TYPE:pickup' },
+  return sendQuickReplies(psid, '🚚 How would you like to receive your order?', [
+    { title: '🚚 Delivery', payload: 'TYPE:delivery' },
+    { title: '🏪 Pickup', payload: 'TYPE:pickup' },
   ]);
 }
 
@@ -452,11 +461,11 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       const product = await one('SELECT * FROM products WHERE id = $1', [productId]) as any;
       const v = await one('SELECT * FROM product_variants WHERE product_id = $1 AND size = $2', [productId, size]) as any;
       await addItem(psid, { product_id: productId, variant_size: size, quantity: qty });
-      sendText(psid, `Added ${qty}x ${product.name} (${size}) to your cart.`)
+      sendText(psid, `✅ Added ${qty}x ${product.name} (${size}) to your cart!`)
         .then(() => sendButtons(psid, 'What next?', [
-          { title: 'View Cart', payload: 'MENU_CART' },
-          { title: 'Checkout', payload: 'CART_CHECKOUT' },
-          { title: 'Keep Shopping', payload: 'MENU_ORDER' },
+          { title: '🛒 View Cart', payload: 'MENU_CART' },
+          { title: '💳 Checkout', payload: 'CART_CHECKOUT' },
+          { title: '📋 Keep Shopping', payload: 'MENU_ORDER' },
         ]));
       return;
     }
@@ -515,11 +524,25 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
           gcash: 'GCash: 0917-000-0000 (Postre Foods). Send the receipt to confirm.',
           bank: 'BDO: 1234-5678-9012 (Postre Foods). Send the receipt to confirm.',
         }[method as 'cod'] || '';
-        sendText(psid, `Order #${order.orderNumber} confirmed!\nTotal: ${money(order.total)}\n\n${payInfo}`)
-          .then(() => mainMenu(psid));
+        // Get order items for detailed confirmation
+        const orderItems = await getOrderItems(order.orderId);
+        await sendOrderConfirmation(psid, { ...order, order_number: order.orderNumber }, orderItems);
+        await sendText(psid, payInfo);
+        return mainMenu(psid);
       } catch (e: any) {
         sendText(psid, 'Sorry, something went wrong placing your order. Please try again.').then(() => mainMenu(psid));
       }
+      return;
+    }
+    case 'TRACK_ORDER': {
+      await setState(psid, 'TRACK_ORDER_INPUT');
+      return sendText(psid, 'Please enter your order number (e.g., PP-1001):');
+    }
+    case 'ORDER_HISTORY': {
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'No customer record found.');
+      const orders = await getCustomerOrders(cust.id, 5);
+      await sendOrderHistory(psid, orders);
       return;
     }
     case 'PKG':
@@ -549,8 +572,15 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     }
     case 'MENU_CONTACT':
       setState(psid, 'CONTACT_MENU');
-      return sendText(psid, 'Contact us:\nPhone: 0917-000-0000\nEmail: hello@postre.example\nAddress: 123 Sample St.')
-        .then(() => mainMenu(psid));
+      return sendText(psid,
+        '📞 CONTACT US\n' +
+        '━━━━━━━━━━━━━━━━━━━\n' +
+        '📱 Phone: 0917-000-0000\n' +
+        '📧 Email: hello@postre.example\n' +
+        '📍 Address: 123 Sample St.\n' +
+        '━━━━━━━━━━━━━━━━━━━\n' +
+        '⏰ Open: Mon-Sat, 10AM-7PM'
+      ).then(() => mainMenu(psid));
     default:
       return mainMenu(psid);
   }
@@ -574,6 +604,20 @@ async function handleText(psid: string, text: string) {
     case 'CHECKOUT_NOTES':
       await setState(psid, 'CHECKOUT_NOTES_DONE', { ...ctx, notes: text.trim().toLowerCase() === 'none' ? '' : text.trim() });
       return handlePayload(psid, 'ASK_PAY');
+    case 'TRACK_ORDER_INPUT': {
+      // Handle order tracking by order number
+      const orderNumber = text.trim().toUpperCase();
+      if (!orderNumber.startsWith('PP-')) {
+        return sendText(psid, 'Please enter a valid order number (e.g., PP-1001):');
+      }
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'Customer not found.');
+      const order = await one('SELECT * FROM orders WHERE order_number = $1 AND customer_id = $2', [orderNumber, cust.id]) as any;
+      if (!order) return sendText(psid, 'Order not found. Please check the number and try again.');
+      const statusHistory = await getOrderStatusHistory(order.id);
+      await sendOrderStatus(psid, order, statusHistory);
+      return mainMenu(psid);
+    }
     case 'RESERVE_DATE': {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(text.trim())) {
         return sendText(psid, 'Please use the date format YYYY-MM-DD, e.g. 2025-06-15:');
@@ -636,6 +680,98 @@ export async function handleMessage(messaging: any) {
         await sendText(psid, 'Could not complete the reservation. Please try again.');
         return mainMenu(psid);
       }
+    }
+    // Order detail view
+    if (payload.startsWith('ORDER_DETAIL:')) {
+      const orderId = Number(payload.split(':')[1]);
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'Customer not found.');
+      const order = await getOrderById(orderId);
+      if (!order || order.customer_id !== cust.id) return sendText(psid, 'Order not found.');
+      const items = await getOrderItems(orderId);
+      const statusHistory = await getOrderStatusHistory(orderId);
+      await sendOrderStatus(psid, order, statusHistory);
+      // Show items
+      const itemLines = items.map((item: any) => {
+        const pkgItems = item.package_items?.filter(Boolean)?.map((p: any) => `   • Slot ${p.slot_number}: ${p.product_name}${p.upgrade_price > 0 ? ` (+₱${p.upgrade_price})` : ''}`).join('\n');
+        return `• ${item.name} x${item.quantity} - ₱${item.line_total}${pkgItems ? '\n' + pkgItems : ''}`;
+      }).join('\n');
+      await sendText(psid, `📝 Items:\n${itemLines}`);
+      // Show cancel button if order is still pending
+      if (order.status === 'PENDING') {
+        await sendQuickReplies(psid, 'Actions:', [
+          { title: '❌ Cancel Order', payload: `CANCEL:${orderId}` },
+          { title: '🔙 Back', payload: 'ORDER_HISTORY' },
+        ]);
+      } else {
+        await sendButtons(psid, 'Actions:', [
+          { title: '🔙 Back to History', payload: 'ORDER_HISTORY' },
+          { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
+        ]);
+      }
+      return;
+    }
+    // Reorder from history
+    if (payload.startsWith('REORDER:')) {
+      const orderId = Number(payload.split(':')[1]);
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'Customer not found.');
+      const order = await getOrderById(orderId);
+      if (!order || order.customer_id !== cust.id) return sendText(psid, 'Order not found.');
+      const items = await getOrderItems(orderId);
+      // Clear current cart and add items from previous order
+      await clearCart(psid);
+      for (const item of items) {
+        if (item.package_id) {
+          // For packages, we need to get the original slot choices
+          const pkgChoices = item.package_items?.filter(Boolean)?.map((p: any) => ({
+            slot_number: p.slot_number,
+            product_id: p.product_id,
+          })) || [];
+          await addItem(psid, {
+            package_id: item.package_id,
+            variant_size: item.variant_size,
+            quantity: item.quantity,
+            slot_choices: pkgChoices,
+          });
+        } else {
+          await addItem(psid, {
+            product_id: item.product_id,
+            variant_size: item.variant_size,
+            quantity: item.quantity,
+          });
+        }
+      }
+      await sendText(psid, 'Items from your previous order have been added to your cart!');
+      return showCart(psid);
+    }
+    // Cancel order
+    if (payload.startsWith('CANCEL:')) {
+      const orderId = Number(payload.split(':')[1]);
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'Customer not found.');
+      const result = await cancelOrder(orderId, cust.id);
+      if (result.ok) {
+        await sendText(psid, '✅ Your order has been cancelled.');
+      } else {
+        await sendText(psid, `❌ ${result.message}`);
+      }
+      return mainMenu(psid);
+    }
+    // Rate order
+    if (payload.startsWith('RATE:')) {
+      const [, orderIdStr, ratingStr] = payload.split(':');
+      const orderId = Number(orderIdStr);
+      const rating = Number(ratingStr);
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'Customer not found.');
+      try {
+        await rateOrder(orderId, cust.id, rating);
+        await sendText(psid, `Thank you for your ${rating}-star rating! We appreciate your feedback.`);
+      } catch (e: any) {
+        await sendText(psid, `Could not submit rating: ${e.message}`);
+      }
+      return mainMenu(psid);
     }
     return void handlePayload(psid, payload);
   }

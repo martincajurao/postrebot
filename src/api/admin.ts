@@ -8,7 +8,7 @@ import {
   rescheduleReservation, slotAvailability, isDateOpen,
 } from '../services/reservations';
 import { computeCartTotals } from '../services/pricing';
-import { notifyOrderStatus, notifyOrderOnTheWay } from '../messenger/send';
+import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest } from '../messenger/send';
 
 const r = Router();
 r.use(authMiddleware);
@@ -188,8 +188,12 @@ r.post('/orders/:id/status', async (req, res) => {
   if (order.customer_id) {
     const customer = await one('SELECT psid FROM customers WHERE id = $1', [order.customer_id]) as any;
     if (customer?.psid) {
-      if (status === 'READY') await notifyOrderOnTheWay(customer.psid);
-      else await notifyOrderStatus(customer.psid, status);
+      if (status === 'READY') await notifyOrderOnTheWay(customer.psid, order.order_number);
+      else await notifyOrderStatus(customer.psid, status, order.order_number);
+      // Send rating request when order is completed
+      if (status === 'COMPLETED') {
+        await sendRatingRequest(customer.psid, order.order_number, order.id);
+      }
     }
   }
   res.json({ ok: true });
@@ -198,6 +202,32 @@ r.post('/orders/:id/payment-status', async (req, res) => {
   const { payment_status } = req.body;
   await updatePaymentStatus(Number(req.params.id), payment_status);
   res.json({ ok: true });
+});
+
+// ---- Order Ratings & Feedback ----
+r.get('/ratings', async (_req, res) => {
+  const ratings = await many(`
+    SELECT r.*, o.order_number, c.name as customer_name
+    FROM order_ratings r
+    JOIN orders o ON o.id = r.order_id
+    LEFT JOIN customers c ON c.id = o.customer_id
+    ORDER BY r.created_at DESC
+  `);
+  res.json(ratings);
+});
+r.get('/ratings/stats', async (_req, res) => {
+  const stats = await one(`
+    SELECT
+      COUNT(*) as total_ratings,
+      ROUND(AVG(rating), 1) as average_rating,
+      COUNT(CASE WHEN rating = 5 THEN 1 END) as five_star,
+      COUNT(CASE WHEN rating = 4 THEN 1 END) as four_star,
+      COUNT(CASE WHEN rating = 3 THEN 1 END) as three_star,
+      COUNT(CASE WHEN rating = 2 THEN 1 END) as two_star,
+      COUNT(CASE WHEN rating = 1 THEN 1 END) as one_star
+    FROM order_ratings
+  `);
+  res.json(stats);
 });
 
 // ---- Customers ----

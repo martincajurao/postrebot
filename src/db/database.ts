@@ -360,4 +360,37 @@ export function migrate(): void {
       }
     }
   }
+
+  // v6: Order ratings table for customer feedback
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS order_ratings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER REFERENCES orders(id),
+      rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+      feedback TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  // v6: Promo codes table for discounts
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      discount_type TEXT CHECK(discount_type IN ('fixed', 'percent')),
+      discount_value INTEGER NOT NULL,
+      min_order INTEGER DEFAULT 0,
+      max_uses INTEGER,
+      used_count INTEGER DEFAULT 0,
+      valid_from TEXT,
+      valid_until TEXT,
+      active INTEGER DEFAULT 1
+    );
+  `);
+
+  // v6: Add notes column to cart_items for special instructions
+  const cartItemCols = (db.prepare('PRAGMA table_info(cart_items)').all() as any[]).map((c: any) => c.name);
+  if (!cartItemCols.includes('notes')) {
+    db.exec(`ALTER TABLE cart_items ADD COLUMN notes TEXT;`);
+  }
 }

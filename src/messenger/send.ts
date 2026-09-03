@@ -138,19 +138,120 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
 }
 
 // ---------- notification helpers (used by admin actions) ----------
-export function notifyOrderStatus(psid: string, status: string): void {
+export function notifyOrderStatus(psid: string, status: string, orderNumber?: string): void {
+  const orderRef = orderNumber ? ` (${orderNumber})` : '';
   const messages: Record<string, string> = {
-    CONFIRMED: 'Your order has been confirmed.',
-    PREPARING: 'Your order is now being prepared.',
-    READY: 'Your order is ready! Our delivery rider will pick it up shortly.',
-    CANCELLED: 'Your order has been cancelled. Contact us if this is unexpected.',
-    COMPLETED: 'Thank you for ordering from Postre Food Products!',
+    CONFIRMED: `Good news! Your order${orderRef} has been confirmed and will be prepared soon.`,
+    PREPARING: `Your order${orderRef} is now being prepared. We'll let you know when it's ready!`,
+    READY: `Your order${orderRef} is ready! Our delivery rider will pick it up shortly.`,
+    CANCELLED: `Your order${orderRef} has been cancelled. Contact us if this is unexpected.`,
+    COMPLETED: `Your order${orderRef} has been completed. Thank you for ordering from Postre Food Products!`,
   };
   const msg = messages[status];
   if (msg) sendText(psid, msg).catch(() => { });
 }
 
 /** Rider has picked up the order - customer is informed it's on the way. */
-export function notifyOrderOnTheWay(psid: string): void {
-  sendText(psid, 'Your order has been picked up by our delivery rider and is now on its way!').catch(() => { });
+export function notifyOrderOnTheWay(psid: string, orderNumber?: string): void {
+  const orderRef = orderNumber ? ` (${orderNumber})` : '';
+  sendText(psid, `Your order${orderRef} has been picked up by our delivery rider and is now on its way!`).catch(() => { });
+}
+
+/** Enhanced order confirmation with full details */
+export async function sendOrderConfirmation(psid: string, order: any, items: any[]): Promise<void> {
+  const itemLines = items.map((item: any) => {
+    const pkgItems = item.package_items?.filter(Boolean)?.map((p: any) => `   • Slot ${p.slot_number}: ${p.product_name}${p.upgrade_price > 0 ? ` (+₱${p.upgrade_price})` : ''}`).join('\n');
+    return `• ${item.name} x${item.quantity} - ₱${item.line_total}${pkgItems ? '\n' + pkgItems : ''}`;
+  }).join('\n');
+
+  const message = 
+    `✅ ORDER CONFIRMED\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `📋 Order #: ${order.order_number}\n` +
+    `💰 Total: ₱${order.total}\n` +
+    `📦 Type: ${order.order_type === 'delivery' ? 'Delivery' : 'Pickup'}\n` +
+    `${order.address ? `📍 Address: ${order.address}\n` : ''}` +
+    `📅 Date: ${order.fulfillment_date || 'ASAP'}\n` +
+    `⏰ Time: ${order.time_slot || 'ASAP'}\n` +
+    `💳 Payment: ${order.payment_method || 'Cash on Delivery'}\n` +
+    `\n📝 Items:\n${itemLines}\n` +
+    `\n━━━━━━━━━━━━━━━━━━━\n` +
+    `We'll keep you updated on your order status!`;
+
+  await sendText(psid, message);
+}
+
+/** Send order status with visual progress indicator */
+export async function sendOrderStatus(psid: string, order: any, statusHistory: any[]): Promise<void> {
+  const statusEmoji: Record<string, string> = {
+    PENDING: '⏳',
+    CONFIRMED: '✅',
+    PREPARING: '👨‍🍳',
+    READY: '📦',
+    COMPLETED: '🎉',
+    CANCELLED: '❌',
+  };
+
+  const statusOrder = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED'];
+  const currentStatus = order.status;
+  const currentIndex = statusOrder.indexOf(currentStatus);
+
+  const progressBar = statusOrder.map((s, i) => {
+    if (s === currentStatus) return '🔵';
+    if (i < currentIndex) return '✅';
+    if (currentStatus === 'CANCELLED') return '❌';
+    return '⚪';
+  }).join(' ');
+
+  const message = 
+    `📦 ORDER STATUS\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `Order #: ${order.order_number}\n` +
+    `${progressBar}\n` +
+    `${statusEmoji[currentStatus] || ''} ${currentStatus}\n` +
+    `\n━━━━━━━━━━━━━━━━━━━\n` +
+    `Payment: ${order.payment_status || 'UNPAID'}\n` +
+    `Total: ₱${order.total}`;
+
+  await sendText(psid, message);
+}
+
+/** Send order history carousel */
+export async function sendOrderHistory(psid: string, orders: any[]): Promise<void> {
+  if (orders.length === 0) {
+    await sendText(psid, 'You have no previous orders.');
+    return;
+  }
+
+  const statusEmoji: Record<string, string> = {
+    PENDING: '⏳',
+    CONFIRMED: '✅',
+    PREPARING: '👨‍🍳',
+    READY: '📦',
+    COMPLETED: '🎉',
+    CANCELLED: '❌',
+  };
+
+  const elements = orders.map((o: any) => ({
+    title: `${statusEmoji[o.status] || '📦'} ${o.order_number}`,
+    subtitle: `${o.status} • ₱${o.total} • ${o.created_at?.slice(0, 10) || 'N/A'}`,
+    buttons: [
+      { title: 'View Details', payload: `ORDER_DETAIL:${o.id}` },
+      { title: 'Reorder', payload: `REORDER:${o.id}` },
+    ],
+  }));
+
+  await sendCarousel(psid, elements);
+}
+
+/** Send rating request after order completion */
+export async function sendRatingRequest(psid: string, orderNumber: string, orderId: number): Promise<void> {
+  await sendText(psid, `How was your order (${orderNumber})?`);
+  await sendQuickReplies(psid, 'Please rate your experience:', [
+    { title: '⭐', payload: `RATE:${orderId}:1` },
+    { title: '⭐⭐', payload: `RATE:${orderId}:2` },
+    { title: '⭐⭐⭐', payload: `RATE:${orderId}:3` },
+    { title: '⭐⭐⭐⭐', payload: `RATE:${orderId}:4` },
+    { title: '⭐⭐⭐⭐⭐', payload: `RATE:${orderId}:5` },
+  ]);
 }

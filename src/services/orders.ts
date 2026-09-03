@@ -93,3 +93,83 @@ export async function updatePaymentStatus(orderId: number, paymentStatus: string
   if (!allowed.includes(paymentStatus)) throw new Error('Invalid payment status');
   await run('UPDATE orders SET payment_status = $1 WHERE id = $2', [paymentStatus, orderId]);
 }
+
+// ---------- Order History & Tracking ----------
+
+export async function getCustomerOrders(customerId: number, limit = 5): Promise<any[]> {
+  return await many(
+    `SELECT o.*, 
+      (SELECT status FROM order_status_history WHERE order_id = o.id ORDER BY id DESC LIMIT 1) as current_status
+     FROM orders o 
+     WHERE o.customer_id = $1 
+     ORDER BY o.created_at DESC 
+     LIMIT $2`,
+    [customerId, limit]
+  );
+}
+
+export async function getOrderById(orderId: number): Promise<any> {
+  return await one('SELECT * FROM orders WHERE id = $1', [orderId]);
+}
+
+export async function getOrderByNumber(orderNumber: string): Promise<any> {
+  return await one('SELECT * FROM orders WHERE order_number = $1', [orderNumber]);
+}
+
+export async function getOrderItems(orderId: number): Promise<any[]> {
+  return await many(
+    `SELECT oi.*, 
+      (SELECT json_agg(json_build_object('slot_number', opi.slot_number, 'product_name', opi.product_name, 'upgrade_price', opi.upgrade_price)) 
+       FROM order_package_items opi WHERE opi.order_item_id = oi.id) as package_items
+     FROM order_items oi 
+     WHERE oi.order_id = $1`,
+    [orderId]
+  );
+}
+
+export async function getOrderStatusHistory(orderId: number): Promise<any[]> {
+  return await many(
+    'SELECT * FROM order_status_history WHERE order_id = $1 ORDER BY created_at ASC',
+    [orderId]
+  );
+}
+
+// ---------- Order Cancellation ----------
+
+export async function cancelOrder(orderId: number, customerId: number): Promise<{ ok: boolean; message: string }> {
+  const order = await one('SELECT * FROM orders WHERE id = $1 AND customer_id = $2', [orderId, customerId]);
+  if (!order) {
+    return { ok: false, message: 'Order not found' };
+  }
+  const status = (order as any).status;
+  if (!['PENDING'].includes(status)) {
+    return { ok: false, message: `Order can no longer be cancelled (current status: ${status})` };
+  }
+  await updateOrderStatus(orderId, 'CANCELLED');
+  return { ok: true, message: 'Order cancelled successfully' };
+}
+
+// ---------- Order Rating ----------
+
+export async function rateOrder(orderId: number, customerId: number, rating: number, feedback?: string): Promise<void> {
+  if (rating < 1 || rating > 5) throw new Error('Rating must be between 1 and 5');
+  const order = await one('SELECT * FROM orders WHERE id = $1 AND customer_id = $2', [orderId, customerId]);
+  if (!order) throw new Error('Order not found');
+  if ((order as any).status !== 'COMPLETED') throw new Error('Can only rate completed orders');
+  // Check if already rated
+  const existing = await one('SELECT id FROM order_ratings WHERE order_id = $1', [orderId]);
+  if (existing) throw new Error('Order already rated');
+  await run(
+    'INSERT INTO order_ratings (order_id, rating, feedback) VALUES ($1, $2, $3)',
+    [orderId, rating, feedback ?? null]
+  );
+}
+
+// ---------- Cart Expiration Cleanup ----------
+
+export async function cleanupAbandonedCarts(hoursOld = 24): Promise<number> {
+  const result = await run(
+    `DELETE FROM carts WHERE updated_at < (now()::text::timestamp - interval '${hoursOld} hours')`
+  );
+  return result;
+}
