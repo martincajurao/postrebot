@@ -9,7 +9,9 @@
         "dev": "tsc && node dist/server.js",
         "postinstall": "node -e \"const f=require('fs');const out='dist/data/uploads';f.mkdirSync(out,{recursive:true});console.log('ensured '+out);try{f.mkdirSync('.git/hooks',{recursive:true});f.copyFileSync('.githooks/pre-push','.git/hooks/pre-push');f.chmodSync('.githooks/pre-push',0o755);console.log('installed git pre-push hook (auto db checkpoint)')}catch(e){console.log('skipping git hook install (CI/not a repo):',e.message)}\"",
         "seed": "echo Seed disabled on the live system - it would add sample products/packages. See src/db/seed.ts.",
-        "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\""
+        "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\"",
+    "db:seed:supabase": "tsx scripts/seed-to-supabase.ts",
+    "db:seed:sqlite": "tsx src/db/seed.ts"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.114.0",
