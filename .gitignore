@@ -3,6 +3,11 @@
 !.env.example
 
 node_modules/
-data/*.db
-
 dist/
+
+# keep the real database in git so image links survive redeploys;
+# only ignore scratch/backup copies
+data/*.db.backup*
+data/admin-test.db*
+data/verify.db*
+data/image-test.db*
