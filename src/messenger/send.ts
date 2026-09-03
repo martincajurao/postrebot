@@ -1,18 +1,18 @@
-import type { Request, Response } from 'express';
-import { db } from '../db/database';
+﻿import type { Request, Response } from 'express';
+import { one, run } from '../db';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
 
 // ---------- conversation state helpers ----------
-export function getState(psid: string): { state: string; ctx: any } {
-  const row = db.prepare('SELECT state, context_json FROM conversation_states WHERE psid = ?').get(psid) as any;
+export async function getState(psid: string): Promise<{ state: string; ctx: any }> {
+  const row = await one('SELECT state, context_json FROM conversation_states WHERE psid = $1', [psid]) as any;
   return { state: row?.state || 'MAIN_MENU', ctx: row?.context_json ? JSON.parse(row.context_json) : {} };
 }
 
-export function setState(psid: string, state: string, ctx: any = {}): void {
-  db.prepare(`INSERT INTO conversation_states (psid, state, context_json) VALUES (?, ?, ?)
+export async function setState(psid: string, state: string, ctx: any = {}): Promise<void> {
+  await run(`INSERT INTO conversation_states (psid, state, context_json) VALUES ($1, $2, $3)
     ON CONFLICT(psid) DO UPDATE SET state = excluded.state, context_json = excluded.context_json,
-    updated_at = datetime('now')`).run(psid, state, JSON.stringify(ctx));
+    updated_at = now()::text`, [psid, state, JSON.stringify(ctx)]);
 }
 
 // ---------- Messenger send API ----------
@@ -78,7 +78,7 @@ async function imageUrlOk(url: string): Promise<boolean> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
     // Supabase Storage rejects HEAD (400) on public objects in some configs,
-    // and spaces in keys must be encoded — use a ranged GET, which is what
+    // and spaces in keys must be encoded - use a ranged GET, which is what
     // Messenger itself does. Only fetch the first byte to keep it cheap.
     const res = await fetch(url, {
       method: 'GET',
@@ -96,7 +96,7 @@ async function imageUrlOk(url: string): Promise<boolean> {
     const ct = res.headers.get('content-type') || '';
     return ct === '' || ct.startsWith('image/');
   } catch (e: any) {
-    console.warn(`[messenger] image pre-flight error: ${url} — ${e?.message || e}`);
+    console.warn(`[messenger] image pre-flight error: ${url} - ${e?.message || e}`);
     return false;
   }
 }
@@ -130,9 +130,9 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
   });
 
   let result = await send(els);
-  // Never lose the whole carousel because of a bad image — retry without images.
+  // Never lose the whole carousel because of a bad image - retry without images.
   if (!result.ok && els.some((e) => e.image_url)) {
-    console.warn('[messenger] carousel with images failed — retrying without images');
+    console.warn('[messenger] carousel with images failed - retrying without images');
     await send(els.map((e) => ({ ...e, image_url: undefined })));
   }
 }
@@ -140,17 +140,17 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
 // ---------- notification helpers (used by admin actions) ----------
 export function notifyOrderStatus(psid: string, status: string): void {
   const messages: Record<string, string> = {
-    CONFIRMED: '✅ Your order has been confirmed.',
-    PREPARING: '👨‍🍳 Your order is now being prepared.',
-    READY: '🎉 Your order is ready! Our delivery rider will pick it up shortly.',
-    CANCELLED: '❌ Your order has been cancelled. Contact us if this is unexpected.',
-    COMPLETED: '🙏 Thank you for ordering from Postre Food Products!',
+    CONFIRMED: 'Your order has been confirmed.',
+    PREPARING: 'Your order is now being prepared.',
+    READY: 'Your order is ready! Our delivery rider will pick it up shortly.',
+    CANCELLED: 'Your order has been cancelled. Contact us if this is unexpected.',
+    COMPLETED: 'Thank you for ordering from Postre Food Products!',
   };
   const msg = messages[status];
   if (msg) sendText(psid, msg).catch(() => { });
 }
 
-/** Rider has picked up the order — customer is informed it's on the way. */
+/** Rider has picked up the order - customer is informed it's on the way. */
 export function notifyOrderOnTheWay(psid: string): void {
-  sendText(psid, '🛵 Your order has been picked up by our delivery rider and is now on its way!').catch(() => { });
+  sendText(psid, 'Your order has been picked up by our delivery rider and is now on its way!').catch(() => { });
 }

@@ -1,14 +1,14 @@
-import jwt from 'jsonwebtoken';
+﻿import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import { db } from '../db/database';
+import { one } from '../db';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
-export function loginHandler(req: Request, res: Response) {
+export async function loginHandler(req: Request, res: Response) {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
-  const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username) as any;
+  const admin = await one('SELECT * FROM admins WHERE username = $1', [username]) as any;
   if (!admin || !bcrypt.compareSync(password, admin.password_hash)) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
@@ -32,7 +32,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
 export function requireRole(role: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     const admin = (req as any).admin;
-    // Tokens issued before roles existed belong to the original owner account → treat as ADMIN.
+    // Tokens issued before roles existed belong to the original owner account â†’ treat as ADMIN.
     if (!admin || (admin.role || 'ADMIN') !== role) {
       return res.status(403).json({ error: 'Forbidden: admin role required' });
     }

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../db/database';
+import { one, many, run, insertReturningId } from '../db';
 import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, SendResult } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals } from '../services/cart';
 import { createOrderFromCart } from '../services/orders';
@@ -89,18 +89,18 @@ function imageUrl(url?: string | null): string | undefined {
 }
 
 // ---------- helpers ----------
-function ensureCustomer(psid: string) {
-  let c = db.prepare('SELECT * FROM customers WHERE psid = ?').get(psid) as any;
+async function ensureCustomer(psid: string): Promise<any> {
+  let c = await one('SELECT * FROM customers WHERE psid = $1', [psid]) as any;
   if (!c) {
-    db.prepare('INSERT INTO customers (psid) VALUES (?)').run(psid);
-    c = db.prepare('SELECT * FROM customers WHERE psid = ?').get(psid) as any;
+    await run('INSERT INTO customers (psid) VALUES ($1)', [psid]);
+    c = await one('SELECT * FROM customers WHERE psid = $1', [psid]) as any;
   }
   return c;
 }
 
-function mainMenu(psid: string) {
-  setState(psid, 'MAIN_MENU');
-  sendButtons(psid, 'Welcome to Postre Food Products!\n\nHow can we help you today?', [
+async function mainMenu(psid: string) {
+  await setState(psid, 'MAIN_MENU');
+  await sendButtons(psid, 'Welcome to Postre Food Products!\n\nHow can we help you today?', [
     { title: 'Order Now', payload: 'MENU_ORDER' },
     { title: 'Packages', payload: 'MENU_PACKAGES' },
     { title: 'Menu', payload: 'MENU_BROWSE' },
@@ -116,24 +116,24 @@ function mainMenu(psid: string) {
 function money(n: number) { return `\u20b1${n.toLocaleString('en-PH')}`; }
 
 async function showCart(psid: string) {
-  const items = getCart(psid);
+  const items = await getCart(psid);
   if (items.length === 0) {
     await sendText(psid, 'Your cart is empty.');
     return mainMenu(psid);
   }
-  const totals = cartTotals(psid);
-  const lines = items.map((i: any) => {
+  const totals = await cartTotals(psid);
+  const lines = await Promise.all(items.map(async (i: any) => {
     let label = `${i.quantity}x ${i.name}`;
     if (i.package_id && Array.isArray(i.slot_choices) && i.slot_choices.length) {
-      const dishes = i.slot_choices
-        .map((c: any) => (db.prepare('SELECT name FROM products WHERE id = ?').get(c.product_id) as any)?.name)
+      const dishes = (await Promise.all(i.slot_choices
+        .map(async (c: any) => (await one('SELECT name FROM products WHERE id = $1', [c.product_id]) as any)?.name)))
         .filter(Boolean).join(', ');
       if (dishes) label += `\n(${dishes})`;
     }
     let lineTotal = 0;
     try { lineTotal = computeCartTotals([i], 0).subtotal; } catch { lineTotal = 0; }
     return `${label} — ${money(lineTotal)}`;
-  }).join('\n');
+  })).then(l => l.join('\n'));
   await sendText(psid, `YOUR CART\n\n${lines}\n\nTotal: ${money(totals.total)}`);
   return sendButtons(psid, 'What would you like to do?', [
     { title: 'Checkout', payload: 'CART_CHECKOUT' },
@@ -168,25 +168,26 @@ function categoryIcon(name: string): string {
   return DEFAULT_CATEGORY_ICON;
 }
 
-function showCategories(psid: string, backPayload = 'MAIN_MENU_BACK') {
-  const cats = db.prepare('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order').all() as any[];
-  setState(psid, 'ORDER_CATEGORY', { back: backPayload });
-  sendQuickReplies(psid, 'Choose a category:', [
+async function showCategories(psid: string, backPayload = 'MAIN_MENU_BACK') {
+  const cats = await many('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order') as any[];
+  await setState(psid, 'ORDER_CATEGORY', { back: backPayload });
+  await sendQuickReplies(psid, 'Choose a category:', [
     ...cats.map((c) => ({ title: `${categoryIcon(c.name)} ${c.name}`, payload: `CAT:${c.id}` })),
     { title: 'Back', payload: backPayload },
   ]);
 }
 
-function showProducts(psid: string, categoryId: number) {
-  const products = db.prepare(
-    'SELECT * FROM products WHERE category_id = ? AND active = 1 AND unavailable = 0 ORDER BY sort_order'
-  ).all(categoryId) as any[];
+async function showProducts(psid: string, categoryId: number) {
+  const products = await many(
+    'SELECT * FROM products WHERE category_id = $1 AND active = 1 AND unavailable = 0 ORDER BY sort_order',
+    [categoryId]
+  ) as any[];
   if (products.length === 0) {
     return sendText(psid, 'No products in this category yet.').then(() => showCategories(psid));
   }
-  setState(psid, 'ORDER_PRODUCT', { category_id: categoryId });
-  sendCarousel(psid, products.map((p: any) => {
-    const variants = db.prepare('SELECT * FROM product_variants WHERE product_id = ?').all(p.id) as any[];
+  await setState(psid, 'ORDER_PRODUCT', { category_id: categoryId });
+  await sendCarousel(psid, await Promise.all(products.map(async (p: any) => {
+    const variants = await many('SELECT * FROM product_variants WHERE product_id = $1', [p.id]) as any[];
     const subtitle = variants.map((v) => `${v.size} ${money(v.price)}`).join(' - ');
     return {
       title: p.name,
@@ -194,32 +195,31 @@ function showProducts(psid: string, categoryId: number) {
       image_url: imageUrl(p.photo_url),
       buttons: [{ title: 'Order', payload: `PROD:${p.id}` }],
     };
-  })).then(() =>
-    sendQuickReplies(psid, 'Or pick from the list:', [
-      ...products.slice(0, 10).map((p: any) => ({ title: p.name.slice(0, 20), payload: `PROD:${p.id}` })),
-      { title: 'Categories', payload: 'MENU_ORDER' },
-    ])
-  );
+  })));
+  return sendQuickReplies(psid, 'Or pick from the list:', [
+    ...products.slice(0, 10).map((p: any) => ({ title: p.name.slice(0, 20), payload: `PROD:${p.id}` })),
+    { title: 'Categories', payload: 'MENU_ORDER' },
+  ]);
 }
 
 async function showVariants(psid: string, productId: number): Promise<SendResult | void> {
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId) as any;
+  const product = await one('SELECT * FROM products WHERE id = $1', [productId]) as any;
   if (!product) return sendText(psid, 'Product not found.');
-  const variants = db.prepare('SELECT * FROM product_variants WHERE product_id = ?').all(productId) as any[];
-  setState(psid, 'ORDER_VARIANT', { product_id: productId });
+  const variants = await many('SELECT * FROM product_variants WHERE product_id = $1', [productId]) as any[];
+  await setState(psid, 'ORDER_VARIANT', { product_id: productId });
   if (variants.length === 1) {
     return handlePayload(psid, `SIZE:${productId}:${variants[0].size}`);
   }
-  sendQuickReplies(psid, `Select a size for ${product.name}:`, [
+  return sendQuickReplies(psid, `Select a size for ${product.name}:`, [
     ...variants.map((v) => ({ title: `${v.size} ${money(v.price)}`.slice(0, 20), payload: `SIZE:${productId}:${v.size}` })),
     { title: 'Back', payload: `CAT:${product.category_id}` },
   ]);
 }
 
-function showQuantity(psid: string, productId: number, size: string) {
-  setState(psid, 'ORDER_QUANTITY', { product_id: productId, size });
-  const v = db.prepare('SELECT * FROM product_variants WHERE product_id = ? AND size = ?').get(productId, size) as any;
-  sendQuickReplies(psid, `How many (${size} - ${money(v.price)})?`, [
+async function showQuantity(psid: string, productId: number, size: string) {
+  await setState(psid, 'ORDER_QUANTITY', { product_id: productId, size });
+  const v = await one('SELECT * FROM product_variants WHERE product_id = $1 AND size = $2', [productId, size]) as any;
+  return sendQuickReplies(psid, `How many (${size} - ${money(v.price)})?`, [
     { title: '1', payload: `QTY:${productId}:${size}:1` },
     { title: '2', payload: `QTY:${productId}:${size}:2` },
     { title: '3', payload: `QTY:${productId}:${size}:3` },
@@ -228,13 +228,13 @@ function showQuantity(psid: string, productId: number, size: string) {
 }
 
 // ---------- packages ----------
-function getPackage(packageId: number) {
-  return db.prepare('SELECT * FROM packages WHERE id = ? AND active = 1').get(packageId) as any;
+async function getPackage(packageId: number) {
+  return await one('SELECT * FROM packages WHERE id = $1 AND active = 1', [packageId]) as any;
 }
 
-function showPackages(psid: string) {
-  const packages = db.prepare('SELECT * FROM packages WHERE active = 1 ORDER BY is_custom, id').all() as any[];
-  setState(psid, 'PACKAGE_LIST');
+async function showPackages(psid: string) {
+  const packages = await many('SELECT * FROM packages WHERE active = 1 ORDER BY is_custom, id') as any[];
+  await setState(psid, 'PACKAGE_LIST');
   if (packages.length === 0) return sendText(psid, 'No packages available right now.');
   const elements = packages.map((p: any) => p.is_custom ? {
     title: p.name,
@@ -250,18 +250,18 @@ function showPackages(psid: string) {
   return sendCarousel(psid, elements);
 }
 
-function packageLines(packageId: number, choices: Record<number, number>): string {
-  const slots = db.prepare('SELECT * FROM package_slots WHERE package_id = ? ORDER BY slot_number').all(packageId) as any[];
-  return slots.map((s: any) => {
+async function packageLines(packageId: number, choices: Record<number, number>): Promise<string> {
+  const slots = await many('SELECT * FROM package_slots WHERE package_id = $1 ORDER BY slot_number', [packageId]) as any[];
+  return (await Promise.all(slots.map(async (s: any) => {
     const pid = choices?.[s.slot_number];
-    const prod = pid ? db.prepare('SELECT name FROM products WHERE id = ?').get(pid) as any : null;
+    const prod = pid ? await one('SELECT name FROM products WHERE id = $1', [pid]) as any : null;
     return `${s.slot_number}. ${prod ? prod.name : '(not chosen yet)'}`;
-  }).join('\n');
+  }))).join('\n');
 }
 
 /** Authoritative total for a complete set of choices, or null when incomplete/invalid. */
-function packageTotal(packageId: number, choices: Record<number, number>, size: string): number | null {
-  const pkg = getPackage(packageId);
+async function packageTotal(packageId: number, choices: Record<number, number>, size: string): Promise<number | null> {
+  const pkg = await getPackage(packageId);
   if (!pkg) return null;
   const arr = Object.entries(choices || {}).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
   if (arr.length !== pkg.selections) return null;
@@ -272,10 +272,10 @@ function packageTotal(packageId: number, choices: Record<number, number>, size: 
   }
 }
 
-function showPackageDetails(psid: string, packageId: number, ctx?: any) {
-  const pkg = getPackage(packageId);
+async function showPackageDetails(psid: string, packageId: number, ctx?: any) {
+  const pkg = await getPackage(packageId);
   if (!pkg) return sendText(psid, 'Package not found.');
-  const prev = ctx || getState(psid).ctx;
+  const prev = ctx || (await getState(psid)).ctx;
   const saved: Record<number, number> = {};
   if (prev && prev.package_id === packageId && prev.choices) {
     for (const [k, v] of Object.entries(prev.choices)) saved[Number(k)] = Number(v);
@@ -283,14 +283,14 @@ function showPackageDetails(psid: string, packageId: number, ctx?: any) {
   const defaults: Record<number, number> = {};
   for (const d of packageDefaults(packageId)) defaults[d.slot_number] = d.product_id;
   const choices: Record<number, number> = pkg.is_custom ? { ...saved } : { ...defaults, ...saved };
-  setState(psid, 'PACKAGE_DETAILS', { package_id: packageId, choices });
+  await setState(psid, 'PACKAGE_DETAILS', { package_id: packageId, choices });
 
   // Fixed packages stay on the quick "Add M/L" view unless the user asked to customize.
   if (pkg.is_fixed && !(prev && prev.customize)) {
-    const mTotal = packageTotal(packageId, choices, 'M') ?? netPackagePrice(pkg);
-    const lTotal = packageTotal(packageId, choices, 'L') ?? netPackagePrice(pkg);
+    const mTotal = (await packageTotal(packageId, choices, 'M')) ?? netPackagePrice(pkg);
+    const lTotal = (await packageTotal(packageId, choices, 'L')) ?? netPackagePrice(pkg);
     const saveNote = pkg.discount > 0 ? ` (was ${money(pkg.base_price)} — Save ${money(pkg.discount)})` : '';
-    return sendText(psid, `${pkg.name}\n${money(mTotal)}${saveNote}\n\n${packageLines(packageId, choices)}`)
+    return sendText(psid, `${pkg.name}\n${money(mTotal)}${saveNote}\n\n${await packageLines(packageId, choices)}`)
       .then(() => sendQuickReplies(psid, 'This package is ready to order:', [
         { title: `Add M ${money(mTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:M:1` },
         { title: `Add L ${money(lTotal)}`.slice(0, 20), payload: `PKGADD:${packageId}:L:1` },
@@ -299,11 +299,11 @@ function showPackageDetails(psid: string, packageId: number, ctx?: any) {
       ]));
   }
 
-  const slots = db.prepare('SELECT * FROM package_slots WHERE package_id = ? ORDER BY slot_number').all(packageId) as any[];
+  const slots = await many('SELECT * FROM package_slots WHERE package_id = $1 ORDER BY slot_number', [packageId]) as any[];
   const filled = Object.keys(choices).length;
   const header = pkg.is_custom
-    ? `${pkg.name}\n${money(pkg.base_price)} base\n\nPick any ${pkg.selections} dishes (${filled}/${pkg.selections} chosen):\n\n${packageLines(packageId, choices)}`
-    : `${pkg.name}\n${money(netPackagePrice(pkg))}${pkg.discount > 0 ? ` — Save ${money(pkg.discount)}` : ''}\n\n${packageLines(packageId, choices)}`;
+    ? `${pkg.name}\n${money(pkg.base_price)} base\n\nPick any ${pkg.selections} dishes (${filled}/${pkg.selections} chosen):\n\n${await packageLines(packageId, choices)}`
+    : `${pkg.name}\n${money(netPackagePrice(pkg))}${pkg.discount > 0 ? ` — Save ${money(pkg.discount)}` : ''}\n\n${await packageLines(packageId, choices)}`;
   const verb = pkg.is_custom ? 'Pick' : 'Change';
   const replies: { title: string; payload: string }[] = slots.slice(0, 11).map((s: any) => ({
     title: `${verb} #${s.slot_number}`.slice(0, 20),
@@ -316,28 +316,28 @@ function showPackageDetails(psid: string, packageId: number, ctx?: any) {
     .then(() => sendQuickReplies(psid, pkg.is_custom ? 'Build your package:' : 'Customize your package:', replies));
 }
 
-function showSlotOptions(psid: string, packageId: number, slotNumber: number, page = 0) {
-  const st = getState(psid);
-  const pkg = getPackage(packageId);
+async function showSlotOptions(psid: string, packageId: number, slotNumber: number, page = 0) {
+  const st = await getState(psid);
+  const pkg = await getPackage(packageId);
   if (!pkg) return sendText(psid, 'Package not found.');
-  const slot = db.prepare('SELECT * FROM package_slots WHERE package_id = ? AND slot_number = ?').get(packageId, slotNumber) as any;
+  const slot = await one('SELECT * FROM package_slots WHERE package_id = $1 AND slot_number = $2', [packageId, slotNumber]) as any;
   if (!slot) return sendText(psid, 'Invalid slot.');
 
   let opts: { product_id: number; product_name: string; upgrade_price: number }[];
   if (pkg.is_custom) {
     // Custom package: every active menu dish is allowed (admin-defined upgrade prices still apply).
-    opts = db.prepare(`SELECT id AS product_id, name AS product_name, 0 AS upgrade_price
-      FROM products WHERE active = 1 AND unavailable = 0 ORDER BY name`).all() as any[];
-    const ups = db.prepare(`SELECT po.product_id, po.upgrade_price FROM package_options po
-      JOIN package_slots ps ON ps.id = po.slot_id WHERE ps.package_id = ?`).all(packageId) as any[];
+    opts = await many(`SELECT id AS product_id, name AS product_name, 0 AS upgrade_price
+      FROM products WHERE active = 1 AND unavailable = 0 ORDER BY name`) as any[];
+    const ups = await many(`SELECT po.product_id, po.upgrade_price FROM package_options po
+      JOIN package_slots ps ON ps.id = po.slot_id WHERE ps.package_id = $1`, [packageId]) as any[];
     for (const u of ups) {
       const o = opts.find((x) => x.product_id === u.product_id);
       if (o) o.upgrade_price = u.upgrade_price || 0;
     }
   } else {
-    opts = db.prepare(`SELECT po.product_id, po.upgrade_price, p.name AS product_name
+    opts = await many(`SELECT po.product_id, po.upgrade_price, p.name AS product_name
       FROM package_options po JOIN products p ON p.id = po.product_id
-      WHERE po.slot_id = ? AND p.active = 1 AND p.unavailable = 0 ORDER BY p.name`).all(slot.id) as any[];
+      WHERE po.slot_id = $1 AND p.active = 1 AND p.unavailable = 0 ORDER BY p.name`, [slot.id]) as any[];
   }
   if (opts.length === 0) return sendText(psid, 'No dishes available for this slot right now.');
 
@@ -345,7 +345,7 @@ function showSlotOptions(psid: string, packageId: number, slotNumber: number, pa
   const pages = Math.ceil(opts.length / PAGE);
   const safePage = Math.max(0, Math.min(page, pages - 1));
   const ctx = st.ctx.package_id === packageId ? st.ctx : { package_id: packageId, choices: {} };
-  setState(psid, 'SELECT_OPTION', { ...ctx, slot_number: slotNumber });
+  await setState(psid, 'SELECT_OPTION', { ...ctx, slot_number: slotNumber });
   const replies = opts.slice(safePage * PAGE, safePage * PAGE + PAGE).map((o) => ({
     title: `${o.product_name}${o.upgrade_price > 0 ? ` +${money(o.upgrade_price)}` : ''}`.slice(0, 20),
     payload: `CHOICE:${packageId}:${slotNumber}:${o.product_id}`,
@@ -355,21 +355,21 @@ function showSlotOptions(psid: string, packageId: number, slotNumber: number, pa
   return sendQuickReplies(psid, `Choose dish for slot #${slotNumber}:`, replies);
 }
 
-function afterChoice(psid: string, packageId: number, slotNumber: number, productId: number) {
-  const st = getState(psid);
+async function afterChoice(psid: string, packageId: number, slotNumber: number, productId: number) {
+  const st = await getState(psid);
   const base = st.ctx && st.ctx.package_id === packageId ? st.ctx : { package_id: packageId, choices: {} };
   const ctx = { ...base, choices: { ...(base.choices || {}), [slotNumber]: productId } };
   return showPackageDetails(psid, packageId, ctx);
 }
 
-function showPackageSize(psid: string, packageId: number, ctx?: any) {
-  const c = ctx || getState(psid).ctx;
+async function showPackageSize(psid: string, packageId: number, ctx?: any) {
+  const c = ctx || (await getState(psid)).ctx;
   const choices: Record<number, number> = {};
   if (c && c.choices) for (const [k, v] of Object.entries(c.choices)) choices[Number(k)] = Number(v);
-  setState(psid, 'PACKAGE_SIZE', { package_id: packageId, choices });
-  const pkg = getPackage(packageId);
-  const m = packageTotal(packageId, choices, 'M');
-  const l = packageTotal(packageId, choices, 'L');
+  await setState(psid, 'PACKAGE_SIZE', { package_id: packageId, choices });
+  const pkg = await getPackage(packageId);
+  const m = await packageTotal(packageId, choices, 'M');
+  const l = await packageTotal(packageId, choices, 'L');
   const priceLine = m != null ? `\n\nTotal M: ${money(m)} | Total L: ${money(l ?? (pkg ? netPackagePrice(pkg) : 0))}` : '';
   return sendQuickReplies(psid, `Package dish size? (L may add an upgrade fee)${priceLine}`, [
     { title: 'M - Included', payload: `PKGADD:${packageId}:M:1` },
@@ -378,21 +378,21 @@ function showPackageSize(psid: string, packageId: number, ctx?: any) {
   ]);
 }
 
-function checkoutStart(psid: string) {
-  const items = getCart(psid);
+async function checkoutStart(psid: string) {
+  const items = await getCart(psid);
   if (items.length === 0) return sendText(psid, 'Your cart is empty.');
-  setState(psid, 'CHECKOUT_TYPE');
-  sendQuickReplies(psid, 'Delivery or Pickup?', [
+  await setState(psid, 'CHECKOUT_TYPE');
+  return sendQuickReplies(psid, 'Delivery or Pickup?', [
     { title: 'Delivery', payload: 'TYPE:delivery' },
     { title: 'Pickup', payload: 'TYPE:pickup' },
   ]);
 }
 
-function addPackageToCart(psid: string, packageId: number, size: string, qty: number) {
-  const pkg = getPackage(packageId);
+async function addPackageToCart(psid: string, packageId: number, size: string, qty: number) {
+  const pkg = await getPackage(packageId);
   if (!pkg) return sendText(psid, 'Package not found.');
   const chosenSize = size.toUpperCase() === 'L' ? 'L' : 'M';
-  const st = getState(psid).ctx;
+  const st = (await getState(psid)).ctx;
   const choices: Record<number, number> = {};
   if (st && st.package_id === packageId && st.choices) {
     for (const [k, v] of Object.entries(st.choices)) choices[Number(k)] = Number(v);
@@ -406,8 +406,8 @@ function addPackageToCart(psid: string, packageId: number, size: string, qty: nu
   const arr = Object.entries(choices).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
   let total = netPackagePrice(pkg);
   try { total = pricePackage(packageId, arr, chosenSize).total; } catch { /* fall back to base price */ }
-  addItem(psid, { package_id: packageId, variant_size: chosenSize, quantity: qty, slot_choices: arr });
-  return sendText(psid, `Added ${qty}x ${pkg.name} (${chosenSize}) to your cart.\n\n${packageLines(packageId, choices)}\nPrice: ${money(total)}`)
+  await addItem(psid, { package_id: packageId, variant_size: chosenSize, quantity: qty, slot_choices: arr });
+  return sendText(psid, `Added ${qty}x ${pkg.name} (${chosenSize}) to your cart.\n\n${await packageLines(packageId, choices)}\nPrice: ${money(total)}`)
     .then(() => sendButtons(psid, 'What next?', [
       { title: 'View Cart', payload: 'MENU_CART' },
       { title: 'Checkout', payload: 'CART_CHECKOUT' },
@@ -427,8 +427,8 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'MENU_PACKAGES':
       return showPackages(psid);
     case 'MENU_BROWSE': {
-      const cats = db.prepare('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order').all() as any[];
-      setState(psid, 'BROWSE_CATEGORY');
+      const cats = await many('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order') as any[];
+      await setState(psid, 'BROWSE_CATEGORY');
       return sendQuickReplies(psid, 'Browse our menu:', [
         ...cats.map((c) => ({ title: `${categoryIcon(c.name)} ${c.name}`, payload: `BROWSE:${c.id}` })),
         { title: 'Back', payload: 'MAIN_MENU_BACK' },
@@ -449,9 +449,9 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       const productId = Number(rest[0]);
       const size = rest[1];
       const qty = Number(rest[2]);
-      const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId) as any;
-      const v = db.prepare('SELECT * FROM product_variants WHERE product_id = ? AND size = ?').get(productId, size) as any;
-      addItem(psid, { product_id: productId, variant_size: size, quantity: qty });
+      const product = await one('SELECT * FROM products WHERE id = $1', [productId]) as any;
+      const v = await one('SELECT * FROM product_variants WHERE product_id = $1 AND size = $2', [productId, size]) as any;
+      await addItem(psid, { product_id: productId, variant_size: size, quantity: qty });
       sendText(psid, `Added ${qty}x ${product.name} (${size}) to your cart.`)
         .then(() => sendButtons(psid, 'What next?', [
           { title: 'View Cart', payload: 'MENU_CART' },
@@ -463,9 +463,9 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'MENU_CART':
       return showCart(psid);
     case 'CART_REMOVE': {
-      const items = getCart(psid);
+      const items = await getCart(psid);
       if (items.length === 0) return sendText(psid, 'Your cart is empty.');
-      setState(psid, 'CART_REMOVE_ITEM');
+      await setState(psid, 'CART_REMOVE_ITEM');
       return sendQuickReplies(psid, 'Remove which item?', [
         ...items.slice(0, 10).map((i: any) => ({ title: `${i.name} (${i.size})`.slice(0, 20), payload: `REMOVE:${i.line_id}` })),
         { title: 'Cancel', payload: 'MENU_CART' },
@@ -473,25 +473,25 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     }
     case 'REMOVE': {
       const lineId = Number(rest[0]);
-      removeItem(psid, lineId);
+      await removeItem(psid, lineId);
       return showCart(psid);
     }
     case 'CART_CHECKOUT':
       return checkoutStart(psid);
     case 'TYPE': {
       const type = rest[0];
-      setState(psid, 'CHECKOUT_ADDRESS', { delivery_type: type });
+      await setState(psid, 'CHECKOUT_ADDRESS', { delivery_type: type });
       if (type === 'pickup') return handlePayload(psid, 'ASK_PHONE');
       return sendText(psid, 'Please type your delivery address (house #, street, barangay, city):');
     }
     case 'ASK_PHONE':
-      setState(psid, 'CHECKOUT_PHONE', getState(psid).ctx);
+      await setState(psid, 'CHECKOUT_PHONE', (await getState(psid)).ctx);
       return sendText(psid, 'Please type your contact number:');
     case 'ASK_NOTES':
       // Special-notes step removed from the checkout flow — go straight to payment.
       return handlePayload(psid, 'ASK_PAY');
     case 'ASK_PAY':
-      setState(psid, 'CHECKOUT_PAY', getState(psid).ctx);
+      await setState(psid, 'CHECKOUT_PAY', (await getState(psid)).ctx);
       return sendQuickReplies(psid, 'Payment method:', [
         { title: 'COD', payload: 'PAY:cod' },
         { title: 'GCash', payload: 'PAY:gcash' },
@@ -499,17 +499,17 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       ]);
     case 'PAY': {
       const method = rest[0];
-      const st = getState(psid);
+      const st = await getState(psid);
       try {
-        const cust = db.prepare('SELECT id FROM customers WHERE psid = ?').get(psid) as any;
+        const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
         if (!cust) throw new Error('Customer not found');
         // Remember contact details collected during checkout on the customer record.
         if (st.ctx.phone || st.ctx.address) {
-          db.prepare('UPDATE customers SET phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE id = ?')
-            .run(st.ctx.phone ?? null, st.ctx.address ?? null, cust.id);
+          await run('UPDATE customers SET phone = COALESCE($1, phone), address = COALESCE($2, address) WHERE id = $3',
+            [st.ctx.phone ?? null, st.ctx.address ?? null, cust.id]);
         }
-        const order = createOrderFromCart(psid, { customer_id: cust.id, order_type: st.ctx.delivery_type || 'delivery', address: st.ctx.address, notes: st.ctx.notes, payment_method: method });
-        setState(psid, 'ORDER_CONFIRMED', { order_id: order.orderId });
+        const order = await createOrderFromCart(psid, { customer_id: cust.id, order_type: st.ctx.delivery_type || 'delivery', address: st.ctx.address, notes: st.ctx.notes, payment_method: method });
+        await setState(psid, 'ORDER_CONFIRMED', { order_id: order.orderId });
         const payInfo = {
           cod: 'Pay in cash when your order arrives.',
           gcash: 'GCash: 0917-000-0000 (Postre Foods). Send the receipt to confirm.',
@@ -537,14 +537,14 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'PKGADD':
       return addPackageToCart(psid, Number(rest[0]), rest[1], Number(rest[2]));
     case 'MENU_RESERVE':
-      setState(psid, 'RESERVE_TYPE');
+      await setState(psid, 'RESERVE_TYPE');
       return sendQuickReplies(psid, 'Reservation for?', [
         { title: 'Cottage', payload: 'RESTYPE:Cottage' },
         { title: 'Table', payload: 'RESTYPE:Table' },
       ]);
     case 'RESTYPE': {
       const type = rest[0];
-      setState(psid, 'RESERVE_DATE', { res_type: type });
+      await setState(psid, 'RESERVE_DATE', { res_type: type });
       return sendText(psid, 'What date? (format: YYYY-MM-DD)');
     }
     case 'MENU_CONTACT':
@@ -557,45 +557,46 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
 }
 
 async function handleText(psid: string, text: string) {
-  const st = getState(psid);
+  const st = await getState(psid);
   const state = st.state;
   const ctx = st.ctx || {};
 
   switch (state) {
     case 'CHECKOUT_ADDRESS':
-      setState(psid, 'CHECKOUT_ADDRESS_DONE', { ...ctx, address: text });
+      await setState(psid, 'CHECKOUT_ADDRESS_DONE', { ...ctx, address: text });
       return handlePayload(psid, 'ASK_PHONE');
     case 'CHECKOUT_PHONE':
       if (!/^[0-9+\-\s()]{7,15}$/.test(text.trim())) {
         return sendText(psid, 'That does not look like a valid phone number. Please try again:');
       }
-      setState(psid, 'CHECKOUT_PHONE_DONE', { ...ctx, phone: text.trim() });
+      await setState(psid, 'CHECKOUT_PHONE_DONE', { ...ctx, phone: text.trim() });
       return handlePayload(psid, 'ASK_NOTES');
     case 'CHECKOUT_NOTES':
-      setState(psid, 'CHECKOUT_NOTES_DONE', { ...ctx, notes: text.trim().toLowerCase() === 'none' ? '' : text.trim() });
+      await setState(psid, 'CHECKOUT_NOTES_DONE', { ...ctx, notes: text.trim().toLowerCase() === 'none' ? '' : text.trim() });
       return handlePayload(psid, 'ASK_PAY');
     case 'RESERVE_DATE': {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(text.trim())) {
         return sendText(psid, 'Please use the date format YYYY-MM-DD, e.g. 2025-06-15:');
       }
-      if (!isDateOpen(text.trim())) {
+      const dateOpen = await isDateOpen(text.trim());
+      if (!dateOpen.open) {
         return sendText(psid, 'We are closed on that day. Please pick another date (YYYY-MM-DD):');
       }
-      setState(psid, 'RESERVE_TIME', { ...ctx, res_date: text.trim() });
+      await setState(psid, 'RESERVE_TIME', { ...ctx, res_date: text.trim() });
       return sendText(psid, 'What time? (format: HH:MM, 24-hour, e.g. 15:30)');
     }
     case 'RESERVE_TIME': {
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(text.trim())) {
         return sendText(psid, 'Please use the time format HH:MM, e.g. 15:30:');
       }
-      const slots = slotAvailability(ctx.res_date);
-      setState(psid, 'RESERVE_SLOT', { ...ctx, res_time: text.trim() });
+      const slots = await slotAvailability(ctx.res_date);
+      await setState(psid, 'RESERVE_SLOT', { ...ctx, res_time: text.trim() });
       return sendQuickReplies(psid, 'Choose a slot:', [
         ...slots.filter((s: any) => !s.full).map((s: any) => ({ title: `${s.label} (${s.capacity - s.used} left)`.slice(0, 20), payload: `RESSLOT:${s.label}` })),
       ]);
     }
     case 'RESERVE_NAME':
-      setState(psid, 'RESERVE_NAME_DONE', { ...ctx, res_name: text.trim() });
+      await setState(psid, 'RESERVE_NAME_DONE', { ...ctx, res_name: text.trim() });
       return handlePayload(psid, 'RES_PHONE_ASK');
     default:
       // unknown text -> main menu
@@ -604,37 +605,37 @@ async function handleText(psid: string, text: string) {
   }
 }
 
-export function handleMessage(messaging: any) {
+export async function handleMessage(messaging: any) {
   const psid = messaging.sender?.id;
   if (!psid) return;
-  ensureCustomer(psid);
+  await ensureCustomer(psid);
 
   if (messaging.postback?.payload) {
     const payload = messaging.postback.payload;
     if (payload.startsWith('RESSLOT:')) {
       const timeSlot = payload.slice('RESSLOT:'.length);
-      const st = getState(psid);
-      setState(psid, 'RESERVE_NAME', { ...st.ctx, res_time: timeSlot });
-      sendText(psid, 'Name for the reservation?');
+      const st = await getState(psid);
+      await setState(psid, 'RESERVE_NAME', { ...st.ctx, res_time: timeSlot });
+      await sendText(psid, 'Name for the reservation?');
       return;
     }
     if (payload === 'RES_PHONE_ASK') {
-      setState(psid, 'RESERVE_PHONE', getState(psid).ctx);
-      sendText(psid, 'Contact number for the reservation?');
+      await setState(psid, 'RESERVE_PHONE', (await getState(psid)).ctx);
+      await sendText(psid, 'Contact number for the reservation?');
       return;
     }
     if (payload.startsWith('RES_PHONE:')) {
       const phone = payload.split(':')[1];
-      const st = getState(psid);
+      const st = await getState(psid);
       try {
-        const res = createReservation({ customer_name: st.ctx.res_name, phone, res_date: st.ctx.res_date, time_slot: st.ctx.res_time, notes: st.ctx.res_type });
-        setState(psid, 'RESERVE_CONFIRMED', { res_id: res });
-        sendText(psid, `Reservation confirmed! Reference: RES-${res}\n${st.ctx.res_type} on ${st.ctx.res_date} at ${st.ctx.res_time}.`)
-          .then(() => mainMenu(psid));
+        const res = await createReservation({ customer_name: st.ctx.res_name, phone, res_date: st.ctx.res_date, time_slot: st.ctx.res_time, notes: st.ctx.res_type });
+        await setState(psid, 'RESERVE_CONFIRMED', { res_id: res });
+        await sendText(psid, `Reservation confirmed! Reference: RES-${res}\n${st.ctx.res_type} on ${st.ctx.res_date} at ${st.ctx.res_time}.`);
+        return mainMenu(psid);
       } catch (e: any) {
-        sendText(psid, 'Could not complete the reservation. Please try again.').then(() => mainMenu(psid));
+        await sendText(psid, 'Could not complete the reservation. Please try again.');
+        return mainMenu(psid);
       }
-      return;
     }
     return void handlePayload(psid, payload);
   }
