@@ -31,7 +31,7 @@ function modal(html) { document.getElementById('modal').innerHTML = html; docume
 function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
 document.getElementById('modal-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-overlay') closeModal(); });
 
-// ---------- auth ----------
+// ---------- auth --assad--------
 function logout() {
   TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
   localStorage.clear();
