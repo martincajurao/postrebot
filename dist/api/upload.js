@@ -9,7 +9,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const crypto_1 = __importDefault(require("crypto"));
 const auth_1 = require("./auth");
-const UPLOAD_DIR = process.env.UPLOAD_DIR || './data/uploads';
+const UPLOAD_DIR = process.env.UPLOAD_DIR || (fs_1.default.existsSync('./data/uploads') ? './data/uploads' : './dist/data/uploads');
 fs_1.default.mkdirSync(UPLOAD_DIR, { recursive: true });
 const ALLOWED = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB

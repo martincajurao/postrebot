@@ -11,6 +11,7 @@ const upload_1 = __importDefault(require("./api/upload"));
 const auth_1 = require("./api/auth");
 const webhook_1 = __importDefault(require("./messenger/webhook"));
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const app = (0, express_1.default)();
 // Behind Render's proxy: makes req.protocol honor X-Forwarded-Proto (https),
 // which the webhook uses to build absolute image URLs.
@@ -29,7 +30,11 @@ app.use('/admin', express_1.default.static(path_1.default.join(__dirname, 'publi
 }));
 // Admin API (JWT protected)
 app.use('/api/admin', admin_1.default);
-app.use('/uploads', express_1.default.static(path_1.default.join(process.cwd(), (process.env.UPLOAD_DIR || './data/uploads').replace('./', ''))));
+// Serve uploaded images. Prefers ./data/uploads (persistent disk); falls back
+// to the build-mirrored ./dist/data/uploads so images survive fresh deploys.
+const uploadDirCandidates = ['./data/uploads', './dist/data/uploads'];
+const uploadsDir = uploadDirCandidates.map((d) => path_1.default.resolve(process.cwd(), d)).find((d) => fs_1.default.existsSync(d)) || path_1.default.resolve(process.cwd(), './data/uploads');
+app.use('/uploads', express_1.default.static(uploadsDir, { maxAge: '30d' }));
 app.use('/api/admin', upload_1.default);
 app.get('/health', (_req, res) => res.json({ ok: true }));
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

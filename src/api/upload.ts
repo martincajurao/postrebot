@@ -5,7 +5,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { authMiddleware } from './auth';
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || './data/uploads';
+const UPLOAD_DIR = process.env.UPLOAD_DIR || (fs.existsSync('./data/uploads') ? './data/uploads' : './dist/data/uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const ALLOWED = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];

@@ -6,6 +6,7 @@ import uploadRoutes from './api/upload';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
 import path from 'path';
+import fs from 'fs';
 
 const app = express();
 // Behind Render's proxy: makes req.protocol honor X-Forwarded-Proto (https),
@@ -30,7 +31,11 @@ app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
 
 // Admin API (JWT protected)
 app.use('/api/admin', adminRoutes);
-app.use('/uploads', express.static(path.join(process.cwd(), (process.env.UPLOAD_DIR || './data/uploads').replace('./', ''))));
+// Serve uploaded images. Prefers ./data/uploads (persistent disk); falls back
+// to the build-mirrored ./dist/data/uploads so images survive fresh deploys.
+const uploadDirCandidates = ['./data/uploads', './dist/data/uploads'];
+const uploadsDir = uploadDirCandidates.map((d) => path.resolve(process.cwd(), d)).find((d) => fs.existsSync(d)) || path.resolve(process.cwd(), './data/uploads');
+app.use('/uploads', express.static(uploadsDir, { maxAge: '30d' }));
 app.use('/api/admin', uploadRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

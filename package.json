@@ -4,10 +4,11 @@
     "description": "Postre Food Products - Messenger Ordering & Reservation System",
     "main": "dist/server.js",
     "scripts": {
-        "build": "tsc && xcopy public dist\\public /E /I /Y /Q",
+        "build": "tsc && node -e \"require('fs').cpSync('public','dist/public',{recursive:true})\" && node -e \"const f=require('fs'),p=require('path');const src=p.resolve('data/uploads');const out=p.resolve('dist/data/uploads');let n=0;if(f.existsSync(src)){f.mkdirSync(out,{recursive:true});for(const file of f.readdirSync(src)){const ext=p.extname(file).toLowerCase();if(!['.jpg','.jpeg','.png','.webp','.gif'].includes(ext))continue;const to=p.join(out,file);if(!f.existsSync(to)){f.copyFileSync(p.join(src,file),to);n++;}}}console.log('uploads mirrored to dist/data/uploads: '+n+' new');\"",
         "start": "node dist/server.js",
         "dev": "tsc && node dist/server.js",
-        "seed": "node dist/db/seed.js"
+        "postinstall": "node -e \"const f=require('fs');const out='dist/data/uploads';f.mkdirSync(out,{recursive:true});console.log('ensured '+out)\"",
+        "seed": "echo Seed disabled on the live system - it would add sample products/packages. See src/db/seed.ts."
     },
     "dependencies": {
         "bcryptjs": "^2.4.3",
