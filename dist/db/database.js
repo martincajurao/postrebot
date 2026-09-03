@@ -234,6 +234,28 @@ function migrate() {
         exports.db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)')
             .run(process.env.ADMIN_USER || 'admin', hash, 'ADMIN');
     }
+    // Root admin stays in sync with the host's env vars. The seed above only runs
+    // on a fresh DB — without this, changing ADMIN_PASSWORD/ADMIN_USER on the
+    // host (e.g. Render env vars) would never take effect on an existing DB.
+    // The env password always wins on boot; per-account changes made in the
+    // Admins tab survive until the env password changes again.
+    const envUser = (process.env.ADMIN_USER || 'admin').trim();
+    const envPass = process.env.ADMIN_PASSWORD;
+    if (envPass) {
+        const root = exports.db.prepare('SELECT * FROM admins WHERE username = ?').get(envUser);
+        if (root) {
+            if (!bcryptjs_1.default.compareSync(envPass, root.password_hash)) {
+                exports.db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?')
+                    .run(bcryptjs_1.default.hashSync(envPass, 10), root.id);
+                console.log(`[migrate] root admin "${envUser}" password synced from ADMIN_PASSWORD env`);
+            }
+        }
+        else {
+            exports.db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)')
+                .run(envUser, bcryptjs_1.default.hashSync(envPass, 10), 'ADMIN');
+            console.log(`[migrate] root admin "${envUser}" created from ADMIN_USER/ADMIN_PASSWORD env`);
+        }
+    }
     const slotCount = exports.db.prepare('SELECT COUNT(*) c FROM time_slots').get().c;
     if (slotCount === 0) {
         const ins = exports.db.prepare('INSERT INTO time_slots (label, sort_order, max_capacity) VALUES (?, ?, ?)');
