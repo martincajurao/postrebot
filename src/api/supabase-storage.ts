@@ -7,7 +7,9 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
  * in the bucket.
  */
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
+// Server-side storage ops MUST use the service_role key. The anon/public key must
+// never be used here: it silently breaks whenever bucket policies are tightened.
+const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_KEY || '').trim();
 const BUCKET = process.env.SUPABASE_BUCKET || 'postre';
 
 let client: SupabaseClient | null = null;
@@ -15,7 +17,7 @@ let client: SupabaseClient | null = null;
 export function supa(): SupabaseClient {
   if (!client) {
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_ANON_KEY) must be set in .env');
+      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY (service_role secret) must be set in the environment');
     }
     client = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false },
