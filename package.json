@@ -4,9 +4,9 @@
   "description": "Postre Food Products - Messenger Ordering & Reservation System",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('public','dist/public',{recursive:true})\"",
     "start": "node dist/server.js",
-    "dev": "tsc && node dist/server.js",
+    "dev": "tsc && node -e \"require('fs').cpSync('public','dist/public',{recursive:true})\" && node dist/server.js",
     "postinstall": "npm run build",
     "seed": "echo Seed disabled on the live system - it would add sample products/packages. See src/db/seed.ts.",
     "db:checkpoint": "node -e \"const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/postre.db');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();console.log('WAL checkpointed into data/postre.db')\"",
