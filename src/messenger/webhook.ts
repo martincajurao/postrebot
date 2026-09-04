@@ -98,22 +98,47 @@ async function ensureCustomer(psid: string): Promise<any> {
   return c;
 }
 
+/**
+ * Parse a free-text time from the customer and normalize it to the app's
+ * canonical 12-hour label (same format as time_slots, e.g. "10:00 AM").
+ * Accepts 12-hour input with AM/PM ("2:30 pm", "11 am", "2pm") and 24-hour
+ * ("14:30", "9:00") for backwards compatibility.
+ */
+export function parseTimeInput(raw: string): { ok: boolean; label?: string } {
+  const t = raw.trim().toUpperCase().replace(/\./g, '');
+  const m = t.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/);
+  if (!m) return { ok: false };
+  const mm = m[2] ? Number(m[2]) : 0;
+  if (mm > 59) return { ok: false };
+  let h = Number(m[1]);
+  if (m[3]) {
+    // 12-hour with AM/PM
+    if (h < 1 || h > 12) return { ok: false };
+    if (m[3] === 'AM') h = h === 12 ? 0 : h;
+    else h = h === 12 ? 12 : h + 12;
+  } else if (h > 23) {
+    return { ok: false };
+  }
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return { ok: true, label: `${h12}:${String(mm).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` };
+}
+
 async function mainMenu(psid: string) {
   await setState(psid, 'MAIN_MENU');
-  await sendButtons(psid, '🍽️ Welcome to Postre Food Products!\n\nHow can we help you today?', [
-    { title: '📋 Order Now', payload: 'MENU_ORDER' },
+  // Messenger button templates hold a MAXIMUM of 3 buttons (sendButtons drops
+  // anything past the third), so the main menu renders as quick replies — up to
+  // 13 can display, guaranteeing all 4 options are visible.
+  return sendQuickReplies(psid, '🍽️ Welcome to Postre Food Products!\n\nHow can we help you today?', [
+    { title: '📖 View Menu', payload: 'MENU_BROWSE' },
+    { title: '🛒 Order Now', payload: 'MENU_ORDER' },
     { title: '🍱 Food Packs', payload: 'MENU_FOODPACKS' },
     { title: '🎁 Packages', payload: 'MENU_PACKAGES' },
-    { title: '📖 View Menu', payload: 'MENU_BROWSE' },
-  ]).then(() =>
-    sendQuickReplies(psid, 'Quick actions:', [
-      { title: '🛒 My Cart', payload: 'MENU_CART' },
-      { title: '📍 Track Order', payload: 'TRACK_ORDER' },
-      { title: '📜 Order History', payload: 'ORDER_HISTORY' },
-      { title: '📅 Reservation', payload: 'MENU_RESERVE' },
-      { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
-    ])
-  );
+    { title: '🛒 My Cart', payload: 'MENU_CART' },
+    { title: '📍 Track Order', payload: 'TRACK_ORDER' },
+    { title: '📅 Reservation', payload: 'MENU_RESERVE' },
+    { title: '📜 Order History', payload: 'ORDER_HISTORY' },
+    { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
+  ]);
 }
 
 function money(n: number) { return `\u20b1${n.toLocaleString('en-PH')}`; }
@@ -711,14 +736,14 @@ async function handleText(psid: string, text: string) {
         return sendText(psid, 'Please use the date format YYYY-MM-DD, e.g. 2026-09-10:');
       }
       await setState(psid, 'CHECKOUT_TIME', { ...ctx, fulfillment_date: d });
-      return sendText(psid, '⏰ What time? (format: HH:MM, 24-hour, e.g. 15:30)');
+      return sendText(psid, '⏰ What time? (e.g. 2:30 PM or 14:30)');
     }
     case 'CHECKOUT_TIME': {
-      const t = text.trim();
-      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) {
-        return sendText(psid, 'Please use the time format HH:MM, e.g. 15:30:');
+      const parsed = parseTimeInput(text);
+      if (!parsed.ok) {
+        return sendText(psid, 'Please enter a valid time, e.g. 2:30 PM or 14:30:');
       }
-      await setState(psid, 'CHECKOUT_TIME_DONE', { ...ctx, time_slot: t });
+      await setState(psid, 'CHECKOUT_TIME_DONE', { ...ctx, time_slot: parsed.label! });
       return handlePayload(psid, 'ASK_PAY');
     }
     case 'CHECKOUT_NOTES':
@@ -747,14 +772,15 @@ async function handleText(psid: string, text: string) {
         return sendText(psid, 'We are closed on that day. Please pick another date (YYYY-MM-DD):');
       }
       await setState(psid, 'RESERVE_TIME', { ...ctx, res_date: text.trim() });
-      return sendText(psid, 'What time? (format: HH:MM, 24-hour, e.g. 15:30)');
+      return sendText(psid, 'What time? (e.g. 2:30 PM)');
     }
     case 'RESERVE_TIME': {
-      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(text.trim())) {
-        return sendText(psid, 'Please use the time format HH:MM, e.g. 15:30:');
+      const parsed = parseTimeInput(text);
+      if (!parsed.ok) {
+        return sendText(psid, 'Please enter a valid time, e.g. 2:30 PM or 14:30:');
       }
       const slots = await slotAvailability(ctx.res_date);
-      await setState(psid, 'RESERVE_SLOT', { ...ctx, res_time: text.trim() });
+      await setState(psid, 'RESERVE_SLOT', { ...ctx, res_time: parsed.label! });
       return sendQuickReplies(psid, 'Choose a slot:', [
         ...slots.filter((s: any) => !s.full).map((s: any) => ({ title: `${s.label} (${s.capacity - s.used} left)`.slice(0, 20), payload: `RESSLOT:${s.label}` })),
       ]);
