@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { one, many, run, insertReturningId } from '../db';
 import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
-import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart } from '../services/cart';
+import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, rateOrder } from '../services/orders';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
@@ -123,7 +123,33 @@ async function showCart(psid: string) {
     await sendText(psid, '🛒 Your cart is empty.\n\nBrowse our menu to add items!');
     return mainMenu(psid);
   }
-  const totals = await cartTotals(psid);
+  let totals: any;
+  try {
+    totals = await cartTotals(psid);
+  } catch {
+    // A stale item (dish no longer allowed in its slot, changed price, etc.)
+    // must not take down the whole cart view — price item by item instead.
+    let subtotal = 0, discount = 0, broken = 0;
+    const keep: any[] = [];
+    for (const it of items) {
+      try {
+        const t = await computeCartTotals([it], 0);
+        subtotal += t.subtotal;
+        discount += t.discount;
+        keep.push(it);
+      } catch { broken++; }
+    }
+    if (broken > 0) {
+      await run(`DELETE FROM cart_items WHERE cart_id = $1 AND id NOT IN (${keep.map((k) => Number(k.id)).join(',') || '0'})`,
+        [(await getOrCreateCart(psid))]);
+      await sendText(psid, `⚠️ ${broken} item(s) in your cart are no longer available and were removed.`);
+    }
+    totals = { subtotal, delivery: 0, discount, total: subtotal };
+    if (keep.length === 0) {
+      await sendText(psid, '🛒 Your cart is empty.\n\nBrowse our menu to add items!');
+      return mainMenu(psid);
+    }
+  }
   const lines = await Promise.all(items.map(async (i: any) => {
     let label = `${i.quantity}x ${i.name}`;
     if (i.package_id && Array.isArray(i.slot_choices) && i.slot_choices.length) {
@@ -142,6 +168,7 @@ async function showCart(psid: string) {
     `${lines}\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
     `${totals.delivery > 0 ? `📦 Delivery: ${money(totals.delivery)}\n` : ''}` +
+    `${totals.discount > 0 ? `🏷️ Discount: -${money(totals.discount)}\n` : ''}` +
     `💰 TOTAL: ${money(totals.total)}`
   );
   return sendButtons(psid, 'What would you like to do?', [
@@ -365,6 +392,24 @@ async function showSlotOptions(psid: string, packageId: number, slotNumber: numb
 }
 
 async function afterChoice(psid: string, packageId: number, slotNumber: number, productId: number) {
+  const pkg = await getPackage(packageId);
+  if (!pkg) return sendText(psid, 'Package not found.');
+  // Validate the dish is allowed in this slot (stale quick replies can reference
+  // dishes that were removed or moved) — otherwise the cart becomes unpriceable.
+  if (!pkg.is_custom) {
+    const slot = await one('SELECT id FROM package_slots WHERE package_id = $1 AND slot_number = $2', [packageId, slotNumber]) as any;
+    const opt = slot ? await one('SELECT id FROM package_options WHERE slot_id = $1 AND product_id = $2', [slot.id, productId]) as any : null;
+    if (!opt) {
+      await sendText(psid, 'That dish is no longer available for this slot. Please pick again.');
+      return showSlotOptions(psid, packageId, slotNumber);
+    }
+  } else {
+    const prod = await one('SELECT id FROM products WHERE id = $1 AND active = 1', [productId]) as any;
+    if (!prod) {
+      await sendText(psid, 'That dish is no longer available. Please pick again.');
+      return showSlotOptions(psid, packageId, slotNumber);
+    }
+  }
   const st = await getState(psid);
   const base = st.ctx && st.ctx.package_id === packageId ? st.ctx : { package_id: packageId, choices: {} };
   const ctx = { ...base, choices: { ...(base.choices || {}), [slotNumber]: productId } };
@@ -723,16 +768,27 @@ export async function handleMessage(messaging: any) {
       await clearCart(psid);
       for (const item of items) {
         if (item.package_id) {
-          // For packages, we need to get the original slot choices
-          const pkgChoices = item.package_items?.filter(Boolean)?.map((p: any) => ({
-            slot_number: p.slot_number,
-            product_id: p.product_id,
-          })) || [];
+          // Rebuild slot choices from the stored order items; fall back to the
+          // package defaults for any slot whose dish can no longer be resolved.
+          const pkgChoices: Record<number, number> = {};
+          for (const p of item.package_items?.filter(Boolean) || []) {
+            if (p.product_id) pkgChoices[Number(p.slot_number)] = Number(p.product_id);
+          }
+          if (Object.keys(pkgChoices).length !== Number(item.selections ?? 0) && !Object.keys(pkgChoices).length) {
+            for (const d of await packageDefaults(item.package_id)) pkgChoices[d.slot_number] = d.product_id;
+          }
+          const arr = Object.entries(pkgChoices).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
+          try {
+            await pricePackage(item.package_id, arr, item.variant_size);
+          } catch {
+            await sendText(psid, `⚠️ ${item.name} from your previous order is no longer available as-is — it was skipped. You can customize it again from Packages.`);
+            continue;
+          }
           await addItem(psid, {
             package_id: item.package_id,
             variant_size: item.variant_size,
             quantity: item.quantity,
-            slot_choices: pkgChoices,
+            slot_choices: arr,
           });
         } else {
           await addItem(psid, {
@@ -807,7 +863,11 @@ r.post('/', (req, res) => {
   if (body?.object === 'page') {
     for (const entry of body.entry || []) {
       for (const messaging of entry.messaging || []) {
-        try { handleMessage(messaging); } catch (e) { console.error('[webhook] handler error', e); }
+        try { handleMessage(messaging).catch(async (e) => {
+          console.error('[webhook] handler error', e);
+          const psid = messaging?.sender?.id;
+          if (psid) { try { await sendText(psid, 'Sorry, something went wrong. Please try again.'); } catch { /* send failed too */ } }
+        }); } catch (e) { console.error('[webhook] handler error', e); }
       }
     }
     return res.status(200).send('EVENT_RECEIVED');

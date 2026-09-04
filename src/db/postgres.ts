@@ -259,4 +259,22 @@ async function seedDefaults(): Promise<void> {
   if (!cartItemCols.includes('notes')) {
     await query(`ALTER TABLE cart_items ADD COLUMN notes TEXT;`);
   }
+
+  // v7: product_id on order_package_items so reorders can rebuild the exact
+  // slot choices (previously only product_name was stored, making reordered
+  // package items unpriceable).
+  const opiCols = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['order_package_items'])).map((c: any) => c.column_name);
+  if (!opiCols.includes('product_id')) {
+    await query(`ALTER TABLE order_package_items ADD COLUMN product_id INTEGER;`);
+    // Backfill from the matching package_options where still resolvable
+    await query(`
+      UPDATE order_package_items
+      SET product_id = po.product_id
+      FROM order_items oi
+      JOIN package_slots ps ON ps.package_id = oi.package_id AND ps.slot_number = order_package_items.slot_number
+      JOIN package_options po ON po.slot_id = ps.id AND po.product_id IN (
+        SELECT p.id FROM products p WHERE p.name = order_package_items.product_name
+      )
+      WHERE order_package_items.order_item_id = oi.id AND order_package_items.product_id IS NULL`);
+  }
 }

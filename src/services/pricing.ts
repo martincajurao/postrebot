@@ -1,4 +1,4 @@
-﻿import { one, many } from '../db';
+﻿﻿import { one, many } from '../db';
 
 export interface PricingResult {
   unit_price: number;
@@ -101,7 +101,7 @@ export async function choiceUpgrade(packageId: number, slotNumber: number, produ
 
 /** Price a package cart item given slot choices (array or legacy object) and the package size. */
 export async function pricePackage(packageId: number, slotChoices: any, packageSize?: string): Promise<{ total: number; breakdown: { label: string; amount: number }[] }> {
-  const pkg = await one('SELECT * FROM packages WHERE id = $1 AND active = $1', [packageId]) as any;
+  const pkg = await one('SELECT * FROM packages WHERE id = $1 AND active = 1', [packageId]) as any;
   if (!pkg) throw new Error('Invalid package');
   const breakdown: { label: string; amount: number }[] = [{ label: `${pkg.name} base`, amount: pkg.base_price }];
   if ((pkg.discount || 0) > 0) breakdown.push({ label: `${pkg.name} discount`, amount: -(pkg.discount) });
@@ -123,14 +123,20 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
   return { total, breakdown };
 }
 
-/** Compute total for a cart: items = [{product_id?, package_id?, variant_size?, quantity, slot_choices?}] */
-export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<{ subtotal: number; delivery: number; total: number; breakdown: any[] }> {
+/** Compute total for a cart: items = [{product_id?, package_id?, variant_size?, quantity, slot_choices?}]
+ *  Cart total = sum of item lines − package discounts (discount applies per discounted package unit). */
+export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<{ subtotal: number; delivery: number; discount: number; total: number; breakdown: any[] }> {
   const breakdown: any[] = [];
   let subtotal = 0;
+  let discount = 0;
   for (const item of items) {
     if (item.package_id) {
       const { total, breakdown: bd } = await pricePackage(item.package_id, item.slot_choices, item.variant_size);
-      breakdown.push(...bd);
+      // Scale the per-unit breakdown to the quantity so lines sum to the subtotal
+      for (const line of bd) {
+        breakdown.push({ ...line, amount: line.amount * item.quantity });
+        if (line.amount < 0) discount += -line.amount * item.quantity;
+      }
       subtotal += total * item.quantity;
     } else {
       const price = await priceProduct(item.product_id, item.variant_size);
@@ -139,6 +145,7 @@ export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<
       subtotal += price * item.quantity;
     }
   }
+  // subtotal already has discounts baked in (package lines are net); total = items − discount + delivery
   const total = subtotal + deliveryFee;
-  return { subtotal, delivery: deliveryFee, total, breakdown };
+  return { subtotal, delivery: deliveryFee, discount, total, breakdown };
 }

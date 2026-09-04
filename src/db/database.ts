@@ -200,6 +200,7 @@ export function migrate(): void {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_item_id INTEGER NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
     slot_number INTEGER NOT NULL,
+    product_id INTEGER,
     product_name TEXT NOT NULL,
     upgrade_price INTEGER DEFAULT 0
   );
@@ -287,6 +288,22 @@ export function migrate(): void {
   const pkgCols = (db.prepare('PRAGMA table_info(packages)').all() as any[]).map((c: any) => c.name);
   if (!pkgCols.includes('discount')) {
     db.exec(`ALTER TABLE packages ADD COLUMN discount INTEGER NOT NULL DEFAULT 0;`);
+  }
+
+  // v7: product_id on order_package_items so reorders can rebuild the exact
+  // slot choices (previously only product_name was stored).
+  const opiCols = (db.prepare('PRAGMA table_info(order_package_items)').all() as any[]).map((c: any) => c.name);
+  if (!opiCols.includes('product_id')) {
+    db.exec(`ALTER TABLE order_package_items ADD COLUMN product_id INTEGER;`);
+    db.exec(`
+      UPDATE order_package_items
+      SET product_id = (SELECT po.product_id FROM package_options po
+        JOIN package_slots ps ON ps.id = po.slot_id
+        JOIN order_items oi ON oi.id = order_package_items.order_item_id
+          AND oi.package_id = ps.package_id AND ps.slot_number = order_package_items.slot_number
+        JOIN products p ON p.id = po.product_id AND p.name = order_package_items.product_name
+        LIMIT 1)
+      WHERE product_id IS NULL`);
   }
 
   if (adminCount === 0) {

@@ -1,4 +1,4 @@
-﻿import { one, many, run, query, tx } from '../db';
+﻿﻿import { one, many, run, query, tx } from '../db';
 import { computeCartTotals, choiceUpgrade } from './pricing';
 import { clearCart, getCart } from './cart';
 
@@ -60,8 +60,8 @@ export async function createOrderFromCart(
           let extra = 0;
           try { extra = await choiceUpgrade(it.package_id, c.slot_number, c.product_id, it.variant_size); } catch { extra = 0; }
           await client.query(`INSERT INTO order_package_items
-            (order_item_id, slot_number, product_name, upgrade_price) VALUES ($1, $2, $3, $4)`,
-            [orderItemId, c.slot_number, prod?.name ?? 'Unknown', extra]);
+            (order_item_id, slot_number, product_id, product_name, upgrade_price) VALUES ($1, $2, $3, $4, $5)`,
+            [orderItemId, c.slot_number, c.product_id, prod?.name ?? 'Unknown', extra]);
         }
       }
     }
@@ -97,15 +97,21 @@ export async function updatePaymentStatus(orderId: number, paymentStatus: string
 // ---------- Order History & Tracking ----------
 
 export async function getCustomerOrders(customerId: number, limit = 5): Promise<any[]> {
-  return await many(
-    `SELECT o.*, 
-      (SELECT status FROM order_status_history WHERE order_id = o.id ORDER BY id DESC LIMIT 1) as current_status
-     FROM orders o 
-     WHERE o.customer_id = $1 
-     ORDER BY o.created_at DESC 
-     LIMIT $2`,
+  const orders = await many(
+    'SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT $2',
     [customerId, limit]
-  );
+  ) as any[];
+
+  // Fetch current status for each order
+  for (const order of orders) {
+    const statusRow = await one(
+      'SELECT status FROM order_status_history WHERE order_id = $1 ORDER BY id DESC LIMIT 1',
+      [order.id]
+    ) as any;
+    order.current_status = statusRow?.status || order.status;
+  }
+
+  return orders;
 }
 
 export async function getOrderById(orderId: number): Promise<any> {
@@ -117,14 +123,24 @@ export async function getOrderByNumber(orderNumber: string): Promise<any> {
 }
 
 export async function getOrderItems(orderId: number): Promise<any[]> {
-  return await many(
-    `SELECT oi.*, 
-      (SELECT json_agg(json_build_object('slot_number', opi.slot_number, 'product_name', opi.product_name, 'upgrade_price', opi.upgrade_price)) 
-       FROM order_package_items opi WHERE opi.order_item_id = oi.id) as package_items
-     FROM order_items oi 
-     WHERE oi.order_id = $1`,
+  const items = await many(
+    'SELECT * FROM order_items WHERE order_id = $1',
     [orderId]
-  );
+  ) as any[];
+
+  // Fetch package items for each order item
+  for (const item of items) {
+    if (item.package_id) {
+      item.package_items = await many(
+        'SELECT slot_number, product_id, product_name, upgrade_price FROM order_package_items WHERE order_item_id = $1 ORDER BY slot_number',
+        [item.id]
+      );
+    } else {
+      item.package_items = [];
+    }
+  }
+
+  return items;
 }
 
 export async function getOrderStatusHistory(orderId: number): Promise<any[]> {

@@ -13,6 +13,7 @@
     "db:seed:supabase": "node dist/db/seed-to-supabase.js",
     "db:seed:supabase:tsx": "tsx src/db/seed-to-supabase.ts",
     "db:fix:packages": "tsx src/db/fix-packages-supabase.ts",
+    "db:fix:slots": "tsx src/db/fix-duplicate-slots.ts",
     "db:seed:sqlite": "node dist/db/seed.js",
     "db:seed:sqlite:tsx": "tsx src/db/seed.ts"
   },
