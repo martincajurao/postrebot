@@ -6,6 +6,7 @@ import uploadRoutes from './api/upload';
 import { logConfig } from './api/supabase-storage';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
+import { configurePush } from './services/push';
 import path from 'path';
 import fs from 'fs';
 
@@ -47,5 +48,6 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 });
 
 logConfig();
+configurePush();
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => console.log(`Postre server listening on http://localhost:${PORT} (db: ${dbType()})`));

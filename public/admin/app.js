@@ -59,6 +59,7 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => { if (
 
 // ---------- auth --assad--------
 function logout() {
+  unsubscribePush().catch(() => {});
   TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
   localStorage.clear();
   location.hash = '';
@@ -72,6 +73,7 @@ function showApp() {
   document.getElementById('whoami').textContent = ME + (ROLE === 'ADMIN' ? ' · Admin' : ' · Staff');
   document.querySelectorAll('[data-view="admins"]').forEach((a) => { a.style.display = ROLE === 'ADMIN' ? '' : 'none'; });
   navigate('dashboard');
+  setupPush(); // enable web push notifications
 }
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1468,6 +1470,73 @@ views.images = async (main) => {
     } catch (err) { toast(err.message, true); }
   }));
 };
+
+/* ================= PUSH NOTIFICATIONS ================= */
+/**
+ * Registers the service worker, asks for Notification permission,
+ * then subscribes to web-push via VAPID and POSTs the subscription
+ * to the admin API so the server can send new-order alerts even
+ * when this page is in the background.
+ */
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const raw = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const output = new Uint8Array(atob(raw).length);
+  for (let i = 0; i < atob(raw).length; i++) output[i] = atob(raw).charCodeAt(i);
+  return output;
+}
+
+let pushSub = null; // active subscription for cleanup on logout
+
+async function setupPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.log('[push] Web Push not supported in this browser.');
+    return;
+  }
+  try {
+    // 1. Register the service worker (lives next to this admin SPA).
+    const reg = await navigator.serviceWorker.register('/admin/sw.js');
+    console.log('[push] Service worker registered.');
+
+    // 2. Ask the user for Notification permission.
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      console.log('[push] Notification permission denied.');
+      return;
+    }
+
+    // 3. Get the VAPID public key from the server.
+    const pk = await api('/push/vapid-public-key').then((d) => d.publicKey);
+    if (!pk) {
+      console.warn('[push] No VAPID public key configured on the server — push disabled.');
+      return;
+    }
+
+    // 4. Subscribe the browser to push.
+    pushSub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(pk),
+    });
+
+    // 5. Send subscription to the server for persistence.
+    await api('/push/subscribe', { method: 'POST', body: pushSub });
+    console.log('[push] Subscription saved on server.');
+
+    // Also show a friendly toast.
+    toast('Order notifications enabled ✓');
+  } catch (err) {
+    console.error('[push] Setup failed:', err);
+    toast('Could not enable push notifications', true);
+  }
+}
+
+async function unsubscribePush() {
+  if (pushSub) {
+    await api('/push/unsubscribe?endpoint=' + encodeURIComponent(pushSub.endpoint), { method: 'POST' }).catch(() => {});
+    await pushSub.unsubscribe().catch(() => {});
+    pushSub = null;
+  }
+}
 
 /* ================= APP BOOT =================
  * Runs last so every view above is registered before the first navigate(). */

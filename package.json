@@ -15,7 +15,8 @@
     "db:fix:packages": "tsx src/db/fix-packages-supabase.ts",
     "db:fix:slots": "tsx src/db/fix-duplicate-slots.ts",
     "db:seed:sqlite": "node dist/db/seed.js",
-    "db:seed:sqlite:tsx": "tsx src/db/seed.ts"
+    "db:seed:sqlite:tsx": "tsx src/db/seed.ts",
+    "gen:vapid": "tsx src/services/gen-vapid.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.114.0",
@@ -25,7 +26,8 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.3.0",
     "pg": "^8.23.0",
-    "tsx": "^4.23.13"
+    "tsx": "^4.23.13",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { one, many, run, query, insertReturningId, tx } from '../db';
 import { authMiddleware, requireRole } from './auth';
 import { updateOrderStatus, updatePaymentStatus } from '../services/orders';
+import { getVapidPublicKey, storeSubscription, removeSubscription } from '../services/push';
 import {
   createReservation, cancelReservation, updateReservationStatus,
   rescheduleReservation, slotAvailability, isDateOpen,
@@ -542,6 +543,40 @@ r.delete('/admins/:id', requireAdmin, async (req, res) => {
   }
   await run('DELETE FROM admins WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
+});
+
+// ---- Web Push subscriptions ----
+r.get('/push/vapid-public-key', (_req, res) => {
+  res.json({ publicKey: getVapidPublicKey() });
+});
+
+r.post('/push/subscribe', async (req, res) => {
+  const { endpoint, keys } = req.body;
+  if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    return res.status(400).json({ error: 'Invalid subscription payload' });
+  }
+  try {
+    await storeSubscription(
+      { endpoint, p256dh: keys.p256dh, auth: keys.auth },
+      req.get('user-agent') ?? undefined,
+    );
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error('[push] store subscription error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+r.post('/push/unsubscribe', async (req, res) => {
+  const { endpoint } = req.query;
+  if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });
+  try {
+    await removeSubscription(String(endpoint));
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error('[push] remove subscription error', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default r;

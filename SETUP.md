@@ -133,6 +133,48 @@ Add `ADMIN_PSID` to receive instant new-order notifications without opening the 
 
 ---
 
+## 6c. Web Push Notifications (admin browser alerts)
+
+When a new order is placed the admin panel can show a **browser push notification** —
+even when the admin page is in the background — using the Web Push protocol.
+
+1. **Generate VAPID keys** (one-time):
+
+   ```bash
+   npm run gen:vapid
+   ```
+
+   Copy the three printed values into `.env`:
+
+   ```bash
+   VAPID_SUBJECT=mailto:admin@postre.example
+   VAPID_PUBLIC_KEY=BM...
+   VAPID_PRIVATE_KEY=ME...
+   ```
+
+2. **How it works at runtime:**
+   - The admin page (`/admin`) registers a service worker (`sw.js`), asks for
+     Notification permission, and subscribes via the VAPID public key.
+   - The subscription endpoint is POSTed to `POST /api/admin/push/subscribe` and
+     stored in the `push_subscriptions` table (works with both SQLite and Supabase Postgres).
+   - When `POST /webhook` receives a `messages` PAY event → `createOrderFromCart`
+     runs → the server calls `sendPushToAdmins(...)`, which loops over all stored
+     subscriptions and sends a push via `web-push`.
+   - The service worker's `push` event handler shows the notification.
+
+3. **Endpoints** (all behind the JWT auth middleware):
+
+   | Method | Path | Purpose |
+   |---|---|---|
+   | `GET` | `/api/admin/push/vapid-public-key` | Returns `{ publicKey }` for the browser |
+   | `POST` | `/api/admin/push/subscribe` | Stores/updates a subscription `{ endpoint, keys: { p256dh, auth } }` |
+   | `POST` | `/api/admin/push/unsubscribe?endpoint=…` | Removes a subscription |
+
+4. **No VAPID keys configured?** Push is silently disabled (the browser gets a 404
+   on the public-key endpoint and falls back to the Messenger `ADMIN_PSID` alert only).
+
+---
+
 ## 7. Set Up the Get Started Postback
 
 The bot's `GET_STARTED` payload shows the main menu. If Meta's "Get Started"

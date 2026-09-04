@@ -163,6 +163,19 @@ export async function migrate(): Promise<void> {
   );
   `);
 
+  // v9: Web Push subscriptions for admin notifications.
+  await run(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      endpoint TEXT UNIQUE NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      created_at TEXT DEFAULT (now()::text),
+      updated_at TEXT DEFAULT (now()::text)
+    );
+  `);
+
   await seedDefaults();
 }
 

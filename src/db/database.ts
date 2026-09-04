@@ -500,4 +500,17 @@ export function migrate(): void {
   if (!orderItemCols.includes('food_pack_id')) {
     db.exec(`ALTER TABLE order_items ADD COLUMN food_pack_id INTEGER REFERENCES food_packs(id);`);
   }
+
+  // v9: Web Push subscriptions for admin notifications.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint TEXT UNIQUE NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
 }

@@ -3,6 +3,7 @@ import { one, many, run, insertReturningId } from '../db';
 import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, completeOrderByCustomer, rateOrder } from '../services/orders';
+import { sendPushToAdmins } from '../services/push';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
 
@@ -771,6 +772,11 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
             `${st.ctx.delivery_type || 'delivery'}${st.ctx.address ? '\n📍 ' + st.ctx.address : ''}\n` +
             `💰 Total: ${money(order.total)}`));
         }
+        // Web push notification to all registered admin browsers.
+        safeSend(sendPushToAdmins({
+          title: `🆕 New Order ${order.orderNumber}`,
+          body: `${st.ctx.delivery_type || 'delivery'}${st.ctx.address ? ' • ' + st.ctx.address : ''}\n💰 Total: ${money(order.total)}`,
+        }));
         return mainMenu(psid);
       } catch (e: any) {
         safeSend(sendText(psid, 'Sorry, something went wrong placing your order. Please try again.').then(() => mainMenu(psid)));
