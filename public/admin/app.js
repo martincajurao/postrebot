@@ -1,4 +1,4 @@
-﻿/* Postre Admin SPA */
+﻿﻿﻿/* Postre Admin SPA */
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('token') || '';
 let ME = localStorage.getItem('me') || '';
@@ -94,17 +94,17 @@ document.getElementById('logout-btn').addEventListener('click', logout);
 
 // ---------- navigation (single source of truth) ----------
 const NAV = [
-  { view: 'dashboard',    icon: '📊', label: 'Dashboard',    bottom: 'Home' },
-  { view: 'orders',       icon: '🛒', label: 'Orders',       bottom: 'Orders' },
+  { view: 'dashboard', icon: '📊', label: 'Dashboard', bottom: 'Home' },
+  { view: 'orders', icon: '🛒', label: 'Orders', bottom: 'Orders' },
   { view: 'reservations', icon: '📅', label: 'Reservations', bottom: 'Resv.' },
-  { view: 'menu',         icon: '🍽️', label: 'Menu',         bottom: 'Menu' },
-  { view: 'packages',     icon: '🔥', label: 'Packages',     bottom: 'Pkgs',   role: 'ADMIN' },
-  { view: 'foodpacks',    icon: '🍱', label: 'Food Packs',   bottom: 'Packs',  role: 'ADMIN' },
-  { view: 'customers',    icon: '👥', label: 'Customers',    bottom: 'Cust.',  role: 'ADMIN' },
-  { view: 'admins',       icon: '🛡️', label: 'Admins',       bottom: 'Admins', role: 'ADMIN' },
-  { view: 'delivery',     icon: '🚚', label: 'Delivery',     bottom: 'Deliv.' },
-  { view: 'settings',     icon: '⚙️', label: 'Settings',     bottom: 'Settings' },
-  { view: 'images',       icon: '🖼️', label: 'Images',       bottom: 'Images', role: 'ADMIN' },
+  { view: 'menu', icon: '🍽️', label: 'Menu', bottom: 'Menu' },
+  { view: 'packages', icon: '🔥', label: 'Packages', bottom: 'Pkgs', role: 'ADMIN' },
+  { view: 'foodpacks', icon: '🍱', label: 'Food Packs', bottom: 'Packs', role: 'ADMIN' },
+  { view: 'customers', icon: '👥', label: 'Customers', bottom: 'Cust.', role: 'ADMIN' },
+  { view: 'admins', icon: '🛡️', label: 'Admins', bottom: 'Admins', role: 'ADMIN' },
+  { view: 'delivery', icon: '🚚', label: 'Delivery', bottom: 'Deliv.' },
+  { view: 'settings', icon: '⚙️', label: 'Settings', bottom: 'Settings' },
+  { view: 'images', icon: '🖼️', label: 'Images', bottom: 'Images', role: 'ADMIN' },
 ];
 
 function buildNav() {
@@ -466,7 +466,7 @@ views.dashboard = async (main) => {
   const d = await api('/dashboard');
   const slotRows = d.todayReservations.length
     ? d.todayReservations.map((r) =>
-        `<div class="slot-row"><span>${esc(r.time_slot)} — ${esc(r.customer_name)}</span><span class="badge b-${esc(r.status)}">${esc(r.status)}</span></div>`).join('')
+      `<div class="slot-row"><span>${esc(r.time_slot)} — ${esc(r.customer_name)}</span><span class="badge b-${esc(r.status)}">${esc(r.status)}</span></div>`).join('')
     : '<p class="muted">No reservations today.</p>';
   const orderRows = d.recentOrders.map((o) => `
     <tr>
@@ -515,7 +515,7 @@ views.orders = async (main) => {
           <td><b>${esc(o.order_number)}</b><br><span class="muted">${esc((o.created_at || '').slice(0, 10))}</span></td>
           <td>${esc(o.customer_name || '—')}<br><span class="muted">${esc(o.phone || '')}</span></td>
           <td>${(o.items || []).map((i) => `${esc(i.name)} ×${i.quantity}`).join('<br>')}</td>
-          <td>${peso(o.total)}</td>
+          <td>${peso(o.total)}${o.additional_discount ? `<br><span class="muted">− ${peso(o.additional_discount)} disc.</span>` : ''}</td>
           <td>${o.order_type === 'delivery' ? '🚚 ' + esc(o.address || '') : '🏬 Pickup'}<br><span class="muted">${esc(o.fulfillment_date || '')} ${esc(o.time_slot || '')}</span></td>
           <td><span class="badge b-${esc(o.payment_status)}">${esc(o.payment_status)}</span><br><span class="muted">${esc(o.payment_method || '')}</span></td>
           <td><span class="badge b-${esc(o.status)}">${esc(o.status)}</span></td>
@@ -524,6 +524,7 @@ views.orders = async (main) => {
             ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
             ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
+            <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
           </div></td>
         </tr>`).join('') || '<tr><td colspan="8" class="muted">No orders.</td></tr>'}
       </tbody>
@@ -533,18 +534,35 @@ views.orders = async (main) => {
     navigate('orders');
   });
   main.querySelectorAll('[data-advance]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-    await api(`/orders/${b.dataset.advance}/status`, { method: 'PUT', body: { status: b.dataset.next } }); toast('Order → ' + b.dataset.next); navigate('orders');
+    await api(`/orders/${b.dataset.advance}/status`, { method: 'POST', body: { status: b.dataset.next } }); toast('Order → ' + b.dataset.next); navigate('orders');
   })));
   main.querySelectorAll('[data-otw]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     await api(`/orders/${b.dataset.otw}/on-the-way`, { method: 'POST' }); toast('Customer notified: order is on the way 🛵');
   })));
   main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     if (!confirm('Cancel this order?')) return;
-    await api(`/orders/${b.dataset.cancel}/status`, { method: 'PUT', body: { status: 'CANCELLED' } }); toast('Order cancelled'); navigate('orders');
+    await api(`/orders/${b.dataset.cancel}/status`, { method: 'POST', body: { status: 'CANCELLED' } }); toast('Order cancelled'); navigate('orders');
   })));
   main.querySelectorAll('[data-paid]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-    await api(`/orders/${b.dataset.paid}/payment`, { method: 'PUT', body: { payment_status: 'PAID' } }); toast('Marked as paid'); navigate('orders');
+    await api(`/orders/${b.dataset.paid}/payment-status`, { method: 'POST', body: { payment_status: 'PAID' } }); toast('Marked as paid'); navigate('orders');
   })));
+  main.querySelectorAll('[data-discount]').forEach((b) => b.addEventListener('click', () => {
+    const o = orders.find((x) => x.id == b.dataset.discount);
+    modal(`<h3>Deduct Amount — ${esc(o.order_number)}</h3>
+      <p class="muted">Current total: <b>${peso(o.total)}</b>${o.additional_discount ? ` (already deducted: ${peso(o.additional_discount)})` : ''}</p>
+      <div class="field"><label>Amount to deduct (₱)</label>
+        <input type="number" id="od-disc" min="0" value="0"></div>
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="od-save">Apply Discount</button></div>`);
+    document.getElementById('od-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      const amount = Math.max(0, Number(document.getElementById('od-disc').value) || 0);
+      if (!amount) { closeModal(); return; }
+      // add the entered amount on top of whatever has already been deducted
+      const totalDisc = (o.additional_discount || 0) + amount;
+      await api(`/orders/${o.id}/discount`, { method: 'POST', body: { additional_discount: totalDisc } });
+      closeModal(); toast(`Deducted ${peso(amount)} from total`); navigate('orders');
+    }));
+  }));
 };
 
 /* ================= RESERVATIONS ================= */
@@ -620,13 +638,15 @@ views.reservations = async (main) => {
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="nr-save">Create</button></div>`);
     document.getElementById('nr-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-      await api('/reservations', { method: 'POST', body: {
-        customer_name: document.getElementById('nr-name').value,
-        phone: document.getElementById('nr-phone').value,
-        res_date: document.getElementById('nr-date').value,
-        time_slot: document.getElementById('nr-time').value,
-        notes: document.getElementById('nr-notes').value,
-      }});
+      await api('/reservations', {
+        method: 'POST', body: {
+          customer_name: document.getElementById('nr-name').value,
+          phone: document.getElementById('nr-phone').value,
+          res_date: document.getElementById('nr-date').value,
+          time_slot: document.getElementById('nr-time').value,
+          notes: document.getElementById('nr-notes').value,
+        }
+      });
       closeModal(); toast('Reservation created'); navigate('reservations');
     }));
   });
@@ -709,10 +729,14 @@ views.menu = async (main) => {
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="vp-save">Save</button></div>`);
     document.getElementById('vp-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-      await api(`/products/${p.id}/variants`, { method: 'PUT', body: { variants: [
-        { size: 'M', price: Number(document.getElementById('vp-m').value) },
-        { size: 'L', price: Number(document.getElementById('vp-l').value) },
-      ] }});
+      await api(`/products/${p.id}/variants`, {
+        method: 'PUT', body: {
+          variants: [
+            { size: 'M', price: Number(document.getElementById('vp-m').value) },
+            { size: 'L', price: Number(document.getElementById('vp-l').value) },
+          ]
+        }
+      });
       closeModal(); toast('Prices updated'); navigate('menu');
     }));
   }));
@@ -802,7 +826,7 @@ views.foodpacks = async (main) => {
     const fp = packs.find((x) => x.id == b.dataset.fpToggle);
     await api(`/food-packs/${fp.id}`, { method: 'PUT', body: { active: fp.active ? 0 : 1 } });
     toast(fp.active ? 'Food pack disabled' : 'Food pack enabled'); navigate('foodpacks');
-  }));
+  })));
 };
 
 /* ================= PACKAGES ================= */
@@ -861,9 +885,9 @@ views.packages = async (main) => {
       <div class="field"><label>Description</label><input id="pn-desc" value="${esc(info.description)}"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         ${p.is_custom
-          ? '<div class="field"><label>Base price (₱) — custom package</label><input type="number" id="pn-price" value="' + info.base_price + '"></div>'
-          : '<div class="field"><label>Base price (auto: sum of dishes)</label><input id="pn-price" readonly style="background:#f0f1f3" value="' + computeBase(slots) + '" title="Derived from the pre-selected dish in each slot — not editable"></div>'}
-        <div class="field"><label>Discount (₱)</label><input type="number" id="pn-disc" value="${info.discount || 0}" min="0"></div>
+        ? '<div class="field"><label>Base price (₱) — custom package</label><input type="number" id="pn-price" value="' + info.base_price + '"></div>'
+        : '<div class="field"><label>Base price (auto: sum of dishes)</label><input id="pn-price" readonly style="background:#f0f1f3" value="' + computeBase(slots) + '" title="Derived from the pre-selected dish in each slot — not editable"></div>'}
+        <div class="field"><label>Additional discount (₱) — applied on top of base + upgrades</label><input type="number" id="pn-disc" value="${info.discount || 0}" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="pn-sel" value="${info.selections}" min="1" max="10"></div>
       </div>
       ${p.is_custom ? '' : '<p class="muted" id="pn-disc-note">Discounts only apply to packages worth ₱3,000 or more (sum of dishes).</p>'}
@@ -978,7 +1002,7 @@ views.packages = async (main) => {
       <div class="field"><label>Name</label><input id="np-name"></div>
       <div class="field"><label>Description</label><input id="np-desc"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="field"><label>Discount (₱)</label><input type="number" id="np-disc" value="0" min="0"></div>
+        <div class="field"><label>Additional discount (₱)</label><input type="number" id="np-disc" value="0" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="np-sel" value="4" min="1" max="10"></div>
       </div>
       <p class="muted">Base price is computed automatically from the dishes you add (sum of each slot's pre-selected dish).</p>
@@ -990,15 +1014,17 @@ views.packages = async (main) => {
       document.getElementById('np-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
         const name = document.getElementById('np-name').value.trim();
         if (!name) throw new Error('Package name is required.');
-        const created = await api('/packages', { method: 'POST', body: {
-          name,
-          description: document.getElementById('np-desc').value,
-          base_price: 0, // set automatically from the slot dishes
-          discount: Math.max(0, Number(document.getElementById('np-disc').value) || 0),
-          selections: Number(document.getElementById('np-sel').value),
-          photo_url: document.getElementById('np-photo').value,
-          is_fixed: document.getElementById('np-fixed').checked ? 1 : 0,
-        }});
+        const created = await api('/packages', {
+          method: 'POST', body: {
+            name,
+            description: document.getElementById('np-desc').value,
+            base_price: 0, // set automatically from the slot dishes
+            discount: Math.max(0, Number(document.getElementById('np-disc').value) || 0),
+            selections: Number(document.getElementById('np-sel').value),
+            photo_url: document.getElementById('np-photo').value,
+            is_fixed: document.getElementById('np-fixed').checked ? 1 : 0,
+          }
+        });
         toast('Package created — now add its dishes');
         const fresh = await api('/packages');
         const p = fresh.find((x) => x.id === created.id);
@@ -1017,7 +1043,7 @@ views.packages = async (main) => {
     const p = packages.find((x) => x.id == b.dataset.pkgToggle);
     await api(`/packages/${p.id}`, { method: 'PUT', body: { active: p.active ? 0 : 1 } });
     navigate('packages');
-  }));
+  })));
 };
 
 /* ================= CUSTOMERS (members) ================= */
@@ -1056,11 +1082,13 @@ views.customers = async (main) => {
       <button class="btn" id="ce-save">Save</button></div>`);
     document.getElementById('ce-save').addEventListener('click', async () => {
       try {
-        await api(`/customers/${c.id}`, { method: 'PUT', body: {
-          name: document.getElementById('ce-name').value,
-          phone: document.getElementById('ce-phone').value,
-          address: document.getElementById('ce-address').value,
-        }});
+        await api(`/customers/${c.id}`, {
+          method: 'PUT', body: {
+            name: document.getElementById('ce-name').value,
+            phone: document.getElementById('ce-phone').value,
+            address: document.getElementById('ce-address').value,
+          }
+        });
         closeModal(); toast('Member updated'); navigate('customers');
       } catch (err) { toast(err.message, true); }
     });
@@ -1170,7 +1198,7 @@ views.settings = async (main) => {
       </div>
       ${(blocked.length ? blocked.map((b) => `<div class="slot-row"><span><b>${esc(b.date)}</b> — ${esc(b.reason || '')}</span>
         <button class="btn danger sm" data-bd-del="${esc(b.date)}">Remove</button></div>`).join('')
-        : '<p class="muted">No blocked dates.</p>')}
+      : '<p class="muted">No blocked dates.</p>')}
     </div>
     <div class="card"><h3>⏰ Time Slots &amp; Capacity</h3>
       ${slots.map((s) => `
@@ -1198,11 +1226,13 @@ views.settings = async (main) => {
       </div>
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="bh-save">Save</button></div>`);
     document.getElementById('bh-save').addEventListener('click', async () => {
-      await api(`/business-hours/${h.day_of_week}`, { method: 'PUT', body: {
-        closed: Number(document.getElementById('bh-closed').value),
-        open_time: document.getElementById('bh-open').value,
-        close_time: document.getElementById('bh-close').value,
-      }});
+      await api(`/business-hours/${h.day_of_week}`, {
+        method: 'PUT', body: {
+          closed: Number(document.getElementById('bh-closed').value),
+          open_time: document.getElementById('bh-open').value,
+          close_time: document.getElementById('bh-close').value,
+        }
+      });
       closeModal(); toast('Saved'); navigate('settings');
     });
   }));

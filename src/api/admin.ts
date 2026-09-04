@@ -1,4 +1,4 @@
-﻿﻿import { Router } from 'express';
+﻿import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { one, many, run, query, insertReturningId, tx } from '../db';
 import { authMiddleware, requireRole } from './auth';
@@ -280,6 +280,16 @@ r.post('/orders/:id/status', async (req, res) => {
     }
   }
   res.json({ ok: true });
+});
+// Set a fixed additional discount (₱) on an order; total is recomputed as
+// stored_total + previous discount - new discount, never below zero.
+r.post('/orders/:id/discount', async (req, res) => {
+  const discount = Math.max(0, Math.round(Number(req.body?.additional_discount) || 0));
+  const order = await one('SELECT * FROM orders WHERE id = $1', [req.params.id]) as any;
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  const newTotal = Math.max(0, Number(order.total) + Number(order.additional_discount || 0) - discount);
+  await query('UPDATE orders SET additional_discount = $1, total = $2 WHERE id = $3', [discount, newTotal, order.id]);
+  res.json({ ok: true, total: newTotal, additional_discount: discount });
 });
 r.post('/orders/:id/payment-status', async (req, res) => {
   const { payment_status } = req.body;

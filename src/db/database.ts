@@ -296,6 +296,13 @@ export function migrate(): void {
     db.exec(`ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'ADMIN';`);
   }
 
+  // Fixed additional discount on orders — a ₱ amount subtracted from the
+  // order total by admins (e.g. negotiated discounts, loyalty perks).
+  const orderCols = (db.prepare('PRAGMA table_info(orders)').all() as any[]).map((c: any) => c.name);
+  if (!orderCols.includes('additional_discount')) {
+    db.exec(`ALTER TABLE orders ADD COLUMN additional_discount INTEGER NOT NULL DEFAULT 0;`);
+  }
+
   // v4: package discounts — imported combos carry a `disc` amount that is
   // subtracted from base_price at checkout (never below zero).
   const pkgCols = (db.prepare('PRAGMA table_info(packages)').all() as any[]).map((c: any) => c.name);

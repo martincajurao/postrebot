@@ -10,7 +10,11 @@ export interface SlotChoice { slot_number: number; product_id: number; size?: st
 /** Size upgrade charged per dish for custom-package slots without an explicit option row. */
 export const CUSTOM_DEFAULT_SIZE_UPGRADE = 100;
 
-/** Charged package price: base minus any combo discount (never below zero). */
+/**
+ * Charged package price before the additional discount: base + upgrades.
+ * The admin-set discount is an ADDITIONAL discount applied at the end, on top
+ * of the whole package price (base + upgrades) — see pricePackage.
+ */
 export function netPackagePrice(pkg: { base_price: number; discount?: number | null }): number {
   return Math.max(0, (pkg.base_price || 0) - (pkg.discount || 0));
 }
@@ -117,8 +121,7 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
   const pkg = await one('SELECT * FROM packages WHERE id = $1 AND active = 1', [packageId]) as any;
   if (!pkg) throw new Error('Invalid package');
   const breakdown: { label: string; amount: number }[] = [{ label: `${pkg.name} base`, amount: pkg.base_price }];
-  if ((pkg.discount || 0) > 0) breakdown.push({ label: `${pkg.name} discount`, amount: -(pkg.discount) });
-  let total = netPackagePrice(pkg);
+  let total = pkg.base_price || 0;
 
   const slots = await many('SELECT * FROM package_slots WHERE package_id = $1', [packageId]) as any[];
   const choices = normalizeChoices(slotChoices);
@@ -132,6 +135,13 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
     const prod = await one('SELECT name FROM products WHERE id = $1', [choice.product_id]) as any;
     if (extra > 0) breakdown.push({ label: `${prod?.name ?? 'Dish'}${size ? ' ' + size : ''} upgrade`, amount: extra });
     total += extra;
+  }
+  // Admin-set additional discount applies on top of the FULL package price
+  // (base + upgrades), never dropping below zero.
+  if ((pkg.discount || 0) > 0) {
+    const applied = Math.min(pkg.discount, Math.max(0, total));
+    breakdown.push({ label: `${pkg.name} additional discount`, amount: -applied });
+    total = Math.max(0, total - applied);
   }
   return { total, breakdown };
 }
