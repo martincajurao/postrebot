@@ -35,36 +35,46 @@ export function transaction<T>(fn: () => T): () => T {
 
 // ---------- SQLite-compatible async wrappers ----------
 
+/**
+ * The codebase writes SQL with Postgres-style $1/$2/... placeholders (the
+ * production backend is Supabase Postgres). SQLite only accepts anonymous
+ * `?` placeholders, so translate them here. Order of the params array is
+ * preserved because $n numbering always ascends in our queries.
+ */
+function toSqliteSql(sql: string): string {
+  return sql.includes('$') ? sql.replace(/\$\d+/g, '?') : sql;
+}
+
 /** First row or undefined (replaces sqlite .get()). */
 export async function one<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
-  const stmt = db.prepare(sql);
+  const stmt = db.prepare(toSqliteSql(sql));
   const row = stmt.get(...params) as any;
   return row ? row as T : undefined;
 }
 
 /** All rows (replaces sqlite .all()). */
 export async function many<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  const stmt = db.prepare(sql);
+  const stmt = db.prepare(toSqliteSql(sql));
   return stmt.all(...params) as T[];
 }
 
 /** Execute INSERT/UPDATE/DELETE (replaces sqlite .run()); returns rowCount. */
 export async function run(sql: string, params: any[] = []): Promise<number> {
-  const stmt = db.prepare(sql);
+  const stmt = db.prepare(toSqliteSql(sql));
   const result = stmt.run(...params);
   return Number(result.changes) || 0;
 }
 
 /** Raw query when you need rows + rowCount together. */
 export async function query(sql: string, params: any[] = []): Promise<any> {
-  const stmt = db.prepare(sql);
+  const stmt = db.prepare(toSqliteSql(sql));
   const rows = stmt.all(...params);
   return { rows, rowCount: rows.length };
 }
 
 /** INSERT ... RETURNING id helper — replaces sqlite out.lastInsertRowid. */
 export async function insertReturningId(sql: string, params: any[] = []): Promise<number> {
-  const stmt = db.prepare(sql);
+  const stmt = db.prepare(toSqliteSql(sql));
   const result = stmt.run(...params);
   return Number(result.lastInsertRowid);
 }

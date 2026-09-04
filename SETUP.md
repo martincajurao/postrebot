@@ -169,9 +169,37 @@ even when the admin page is in the background — using the Web Push protocol.
    | `GET` | `/api/admin/push/vapid-public-key` | Returns `{ publicKey }` for the browser |
    | `POST` | `/api/admin/push/subscribe` | Stores/updates a subscription `{ endpoint, keys: { p256dh, auth } }` |
    | `POST` | `/api/admin/push/unsubscribe?endpoint=…` | Removes a subscription |
+   | `GET` | `/api/admin/push/status` | `{ configured, subscriptions }` — deployment diagnostics |
+   | `POST` | `/api/admin/push/test` | Sends a test push to every subscribed device |
 
-4. **No VAPID keys configured?** Push is silently disabled (the browser gets a 404
-   on the public-key endpoint and falls back to the Messenger `ADMIN_PSID` alert only).
+4. **No VAPID keys configured?** Push is disabled: the browser gets an empty
+   `publicKey` and shows a toast telling you the server keys are missing.
+
+5. **Deploying on Render** (the step that is commonly missed — `.env` is not committed,
+   so Render does **not** see your local keys):
+
+   1. Render Dashboard → your web service → **Environment** → *Add Environment Variable*,
+      then add the three values from step 1: `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`,
+      `VAPID_PRIVATE_KEY`. Click **Save changes** (Render restarts the service).
+   2. Check the boot logs — you must see
+      `[push] VAPID configured — web push notifications ENABLED.`
+      If you see `VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are NOT set`, the env vars were not
+      saved on Render.
+   3. Open `https://<your-app>.onrender.com/admin`, log in, then go to
+      **Settings → 🔔 Push Notifications**. The card shows server status, browser
+      permission, and subscribed-device count. Click **Enable on this device** and
+      choose *Allow* on the permission prompt.
+   4. Click **Send test notification** — a notification must appear within seconds.
+      If it does not, the card text + Render logs tell you exactly why.
+   5. iPhone/iPad note: Safari only supports web push for sites **installed to the Home
+      Screen** (iOS ≥ 16.4). Desktop/Android Chrome, Edge and Firefox work from the page.
+
+6. **Troubleshooting:**
+   - Every send is logged server-side: `[push] Delivered N/M push notification(s)`.
+   - If browser permission was previously denied, Chrome will not prompt again — reset it
+     in site settings (padlock icon → Notifications → Allow), then click Enable again.
+   - If the browser subscribed before the server keys were set/changed, the admin UI
+     detects the key mismatch and re-subscribes automatically.
 
 ---
 

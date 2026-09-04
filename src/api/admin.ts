@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { one, many, run, query, insertReturningId, tx } from '../db';
 import { authMiddleware, requireRole } from './auth';
 import { updateOrderStatus, updatePaymentStatus } from '../services/orders';
-import { getVapidPublicKey, storeSubscription, removeSubscription } from '../services/push';
+import { getVapidPublicKey, storeSubscription, removeSubscription, sendPushToAdmins, getPushStatus } from '../services/push';
 import {
   createReservation, cancelReservation, updateReservationStatus,
   rescheduleReservation, slotAvailability, isDateOpen,
@@ -575,6 +575,30 @@ r.post('/push/unsubscribe', async (req, res) => {
     res.json({ ok: true });
   } catch (e: any) {
     console.error('[push] remove subscription error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Diagnostics: is push configured on this server, and how many devices listen?
+r.get('/push/status', async (_req, res) => {
+  try {
+    res.json(await getPushStatus());
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Sends a test push to every subscribed admin device.
+r.post('/push/test', async (_req, res) => {
+  try {
+    const result = await sendPushToAdmins({
+      title: '🔔 Test notification',
+      body: 'If you can read this, web push is working end-to-end!',
+      tag: 'push-test',
+    });
+    res.json({ ok: true, ...result });
+  } catch (e: any) {
+    console.error('[push] test send error', e);
     res.status(500).json({ error: e.message });
   }
 });

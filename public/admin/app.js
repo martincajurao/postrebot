@@ -1231,8 +1231,35 @@ views.settings = async (main) => {
         <input type="number" id="ts-cap" placeholder="capacity" style="width:110px" value="5">
         <button class="btn sm" id="ts-add">Add Slot</button>
       </div>
+    </div>
+    <div class="card"><h3>🔔 Push Notifications</h3>
+      <div id="push-status" class="muted">Checking…</div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn sm" id="push-enable">Enable on this device</button>
+        <button class="btn ghost sm" id="push-test">Send test notification</button>
+      </div>
     </div>`;
 
+  // ---- Push notifications status + controls ----
+  api('/push/status').then((st) => {
+    const el = main.querySelector('#push-status');
+    if (!el) return;
+    const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+    el.innerHTML =
+      'Server: ' + (st.configured ? '✅ VAPID configured' : '❌ VAPID keys missing on server') +
+      ' · Subscribed devices: <b>' + st.subscriptions + '</b>' +
+      ' · This browser: ' + (perm === 'granted' ? '✅ permission granted' : perm === 'denied' ? '⛔ blocked in site settings' : '❔ not asked yet');
+  }).catch(() => {
+    const el = main.querySelector('#push-status');
+    if (el) el.textContent = 'Push status unavailable';
+  });
+  main.querySelector('#push-enable').addEventListener('click', (e) => withBtn(e.currentTarget, setupPush));
+  main.querySelector('#push-test').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const r = await api('/push/test', { method: 'POST' });
+    if (r.sent > 0) toast('Test push sent to ' + r.sent + ' device(s) ✓');
+    else if (r.total === 0) toast('No subscribed devices yet — click Enable first', true);
+    else toast('Send failed for ' + r.failed + ' device(s) — check the server logs', true);
+  }));
   main.querySelectorAll('[data-bh-edit]').forEach((b) => b.addEventListener('click', () => {
     const h = hours.find((x) => x.day_of_week == b.dataset.bhEdit);
     modal(`<h3>${DAYS[h.day_of_week]} Hours</h3>
@@ -1486,47 +1513,68 @@ function urlBase64ToUint8Array(base64String) {
   return output;
 }
 
+/** Base64url-encode an applicationServerKey so it can be compared with the server key. */
+function keyToBase64Url(key) {
+  if (!key) return '';
+  const bytes = key instanceof Uint8Array ? key : new Uint8Array(key);
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 let pushSub = null; // active subscription for cleanup on logout
 
+/**
+ * Registers the service worker, asks for Notification permission,
+ * then subscribes to web-push via VAPID and POSTs the subscription
+ * to the admin API so the server can send new-order alerts even
+ * when this page is in the background. Every failure path shows a
+ * visible toast so problems are easy to diagnose (e.g. on Render).
+ */
 async function setupPush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    console.log('[push] Web Push not supported in this browser.');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    toast('This browser does not support push notifications', true);
     return;
   }
   try {
     // 1. Register the service worker (lives next to this admin SPA).
     const reg = await navigator.serviceWorker.register('/admin/sw.js');
-    console.log('[push] Service worker registered.');
-
-    // 2. Ask the user for Notification permission.
-    const perm = await Notification.requestPermission();
+    await navigator.serviceWorker.ready; // make sure the SW is active before subscribing
+    // 2. Ask the user for Notification permission (only prompt if not decided yet).
+    let perm = Notification.permission;
+    if (perm === 'default') perm = await Notification.requestPermission();
     if (perm !== 'granted') {
-      console.log('[push] Notification permission denied.');
+      toast('Notifications are blocked — allow them in the browser site settings (padlock icon), then try again', true);
       return;
     }
-
     // 3. Get the VAPID public key from the server.
     const pk = await api('/push/vapid-public-key').then((d) => d.publicKey);
     if (!pk) {
-      console.warn('[push] No VAPID public key configured on the server — push disabled.');
+      toast('Push not configured on the server — VAPID keys missing (add them to the environment)', true);
       return;
     }
-
-    // 4. Subscribe the browser to push.
-    pushSub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(pk),
-    });
-
+    // Drop any stale subscription that was created with a different key.
+    const existing = await reg.pushManager.getSubscription();
+    if (existing && keyToBase64Url(existing.options && existing.options.applicationServerKey) !== pk) {
+      await api('/push/unsubscribe?endpoint=' + encodeURIComponent(existing.endpoint), { method: 'POST' }).catch(() => {});
+      await existing.unsubscribe().catch(() => {});
+    } else if (existing) {
+      pushSub = existing; // already subscribed with the correct key
+    }
+    if (!pushSub) {
+      // 4. Subscribe the browser to push.
+      pushSub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(pk),
+      });
+    }
     // 5. Send subscription to the server for persistence.
     await api('/push/subscribe', { method: 'POST', body: pushSub });
     console.log('[push] Subscription saved on server.');
-
-    // Also show a friendly toast.
     toast('Order notifications enabled ✓');
   } catch (err) {
     console.error('[push] Setup failed:', err);
-    toast('Could not enable push notifications', true);
+    toast('Could not enable push notifications: ' + (err && err.message ? err.message : err), true);
   }
 }
 

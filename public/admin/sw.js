@@ -1,8 +1,11 @@
-/// <reference lib="webworker" />
 /* Service worker for Postre admin — receives push events and shows notifications. */
 self.addEventListener('push', (event) => {
-  if (!event.data) return;
-  const data = event.data.json();
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = { title: 'Postre Admin', body: event.data ? String(event.data.text()).slice(0, 200) : 'New activity' };
+  }
   const title = data.title || 'Postre Admin';
   const options = {
     body: data.body || '',
@@ -11,11 +14,14 @@ self.addEventListener('push', (event) => {
     tag: data.tag || 'new-order',
     data: data.data || {},
     requireInteraction: true,
-    actions: [
-      { action: 'open', title: 'Open Admin', icon: '/admin/icon-192.svg' },
-    ],
+    actions: [{ action: 'open', title: 'Open Admin' }],
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    self.registration.showNotification(title, options).catch((err) => {
+      console.error('[sw] showNotification failed:', err);
+      return self.registration.showNotification('Postre Admin', { body: 'New activity' });
+    }),
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

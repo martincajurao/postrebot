@@ -25,7 +25,11 @@ export const tx = backend.tx;
 export const poolOf = (backend as any).poolOf;
 
 // Re-export migrate from the appropriate backend
-export { migrate } from './postgres';
+import { migrate as pgMigrate } from './postgres';
+export async function migrate(): Promise<void> {
+  if (isConfigured()) return pgMigrate();
+  return sqlite.migrate();
+}
 
 /**
  * True when running against Supabase Postgres (DATABASE_URL is set).

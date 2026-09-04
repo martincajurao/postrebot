@@ -1,5 +1,5 @@
 import webpush from 'web-push';
-import { many, run } from '../db';
+import { many, run, one } from '../db';
 
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@postre.example';
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
@@ -17,12 +17,17 @@ export function getVapidPublicKey(): string {
 
 export function configurePush(): void {
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-    console.warn('[push] VAPID keys not set in .env — web push notifications disabled.');
+    console.warn('[push] VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are NOT set — web push notifications DISABLED.');
+    console.warn('[push] Fix: run `npm run gen:vapid`, then add the keys to the server environment (Render → Environment) and restart.');
     return;
   }
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-  configured = true;
-  console.log('[push] VAPID configured — web push notifications enabled.');
+  try {
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    configured = true;
+    console.log('[push] VAPID configured — web push notifications ENABLED.');
+  } catch (err) {
+    console.error('[push] Failed to set VAPID details (check the key values):', err);
+  }
 }
 
 export interface PushSubscription {
@@ -49,36 +54,65 @@ export interface PushPayload {
   title: string;
   body: string;
   icon?: string;
+  tag?: string;
   data?: Record<string, unknown>;
 }
 
-export async function sendPushToAdmins(payload: PushPayload): Promise<void> {
-  if (!configured) return;
+export interface PushSendResult {
+  total: number;
+  sent: number;
+  failed: number;
+}
+
+export async function sendPushToAdmins(payload: PushPayload): Promise<PushSendResult> {
+  const result: PushSendResult = { total: 0, sent: 0, failed: 0 };
+  if (!configured) {
+    console.warn('[push] Send skipped — VAPID keys are not configured in the server environment.');
+    return result;
+  }
   const subs = await many('SELECT endpoint, p256dh, auth FROM push_subscriptions') as any[];
-  if (subs.length === 0) return;
+  result.total = subs.length;
+  if (subs.length === 0) {
+    console.warn('[push] Send skipped — no devices subscribed yet. Open /admin → Settings → Push Notifications to subscribe.');
+    return result;
+  }
 
   const notification = JSON.stringify({
     title: payload.title,
     body: payload.body,
     icon: payload.icon || '/admin/icon-192.svg',
+    tag: payload.tag || 'new-order',
     data: payload.data || {},
   });
 
-  const results = await Promise.allSettled(
-    subs.map((s) =>
-      webpush.sendNotification(
+  await Promise.allSettled(subs.map(async (s) => {
+    try {
+      await webpush.sendNotification(
         { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
         notification,
-      ).catch(async (err: any) => {
-        if (err.statusCode === 410 || err.statusCode === 404) {
-          await removeSubscription(s.endpoint);
-        } else {
-          throw err;
-        }
-      }),
-    ),
-  );
+      );
+      result.sent++;
+    } catch (err: any) {
+      result.failed++;
+      if (err?.statusCode === 404 || err?.statusCode === 410) {
+        console.warn(`[push] Subscription gone (${err.statusCode}) — removing ${String(s.endpoint).slice(0, 72)}…`);
+        await removeSubscription(s.endpoint).catch(() => {});
+      } else {
+        console.error(`[push] Send failed (${err?.statusCode ?? 'no status'}): ${err?.message ?? err}` +
+          (err?.body ? ` | body: ${String(err.body).slice(0, 200)}` : ''));
+      }
+    }
+  }));
 
-  const failed = results.filter((r) => r.status === 'rejected').length;
-  if (failed > 0) console.warn(`[push] ${failed}/${subs.length} notifications failed to send.`);
+  console.log(`[push] Delivered ${result.sent}/${result.total} push notification(s) (${result.failed} failed).`);
+  return result;
+}
+
+export async function getPushStatus(): Promise<{ configured: boolean; subscriptions: number }> {
+  let subscriptions = 0;
+  try {
+    const row = await one('SELECT COUNT(*) c FROM push_subscriptions') as any;
+    subscriptions = Number(row?.c || 0);
+  } catch { /* table may not exist yet */ }
+  return { configured, subscriptions };
 }
