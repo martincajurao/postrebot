@@ -8,7 +8,7 @@ import {
   rescheduleReservation, slotAvailability, isDateOpen,
 } from '../services/reservations';
 import { computeCartTotals } from '../services/pricing';
-import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText } from '../messenger/send';
+import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
 const r = Router();
 r.use(authMiddleware);
@@ -271,7 +271,14 @@ r.post('/orders/:id/status', async (req, res) => {
   if (order.customer_id) {
     const customer = await one('SELECT psid FROM customers WHERE id = $1', [order.customer_id]) as any;
     if (customer?.psid) {
-      if (status === 'READY') await notifyOrderOnTheWay(customer.psid, order.order_number);
+      if (status === 'READY') {
+        await notifyOrderOnTheWay(customer.psid, order.order_number);
+        // Give the customer a one-tap way to complete the order themselves.
+        await sendQuickReplies(customer.psid, 'Once you receive your order, tap below:', [
+          { title: '✅ Order Received', payload: `COMPLETE:${order.id}` },
+          { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
+        ]);
+      }
       else await notifyOrderStatus(customer.psid, status, order.order_number);
       // Send rating request when order is completed
       if (status === 'COMPLETED') {

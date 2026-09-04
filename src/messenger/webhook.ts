@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { one, many, run, insertReturningId } from '../db';
 import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
-import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, rateOrder } from '../services/orders';
+import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, completeOrderByCustomer, rateOrder } from '../services/orders';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
 
@@ -181,10 +181,10 @@ async function mainMenu(psid: string) {
   // anything past the third), so the main menu renders as quick replies — up to
   // 13 can display, guaranteeing all 4 options are visible.
   return sendQuickReplies(psid, '🍽️ Welcome to Postre Food Products!\n\nHow can we help you today?', [
-    { title: '📖 View Menu', payload: 'MENU_BROWSE' },
-    { title: '🛒 Order Now', payload: 'MENU_ORDER' },
-    { title: '🍱 Food Packs', payload: 'MENU_FOODPACKS' },
     { title: '🎁 Packages', payload: 'MENU_PACKAGES' },
+    { title: '📖 View Menu', payload: 'MENU_BROWSE' },
+    { title: '🍱 Food Packs', payload: 'MENU_FOODPACKS' },
+    { title: '🛒 Order Now', payload: 'MENU_ORDER' },
     { title: '🛒 My Cart', payload: 'MENU_CART' },
     { title: '📍 Track Order', payload: 'TRACK_ORDER' },
     { title: '📅 Reservation', payload: 'MENU_RESERVE' },
@@ -801,6 +801,13 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       if (!order) return sendText(psid, 'Order not found. Please check the number and try again.');
       const statusHistory = await getOrderStatusHistory(order.id);
       await sendOrderStatus(psid, order, statusHistory);
+      if (order.status === 'READY') {
+        // Customer can complete the order themselves once it is delivered/ready.
+        return sendQuickReplies(psid, 'Did you receive your order?', [
+          { title: '✅ Order Received', payload: `COMPLETE:${order.id}` },
+          { title: '🏠 Main Menu', payload: 'MAIN_MENU_BACK' },
+        ]);
+      }
       return mainMenu(psid);
     }
     case 'ORDER_HISTORY': {
@@ -912,6 +919,13 @@ async function handleText(psid: string, text: string) {
       if (!order) return sendText(psid, 'Order not found. Please check the number and try again.');
       const statusHistory = await getOrderStatusHistory(order.id);
       await sendOrderStatus(psid, order, statusHistory);
+      if (order.status === 'READY') {
+        // Customer can complete the order themselves once it is delivered/ready.
+        return sendQuickReplies(psid, 'Did you receive your order?', [
+          { title: '✅ Order Received', payload: `COMPLETE:${order.id}` },
+          { title: '🏠 Main Menu', payload: 'MAIN_MENU_BACK' },
+        ]);
+      }
       return mainMenu(psid);
     }
     case 'RESERVE_DATE': {
@@ -1055,6 +1069,13 @@ export async function handleMessage(messaging: any) {
           { title: '❌ Cancel Order', payload: `CANCEL:${orderId}` },
           { title: '🔙 Back', payload: 'ORDER_HISTORY' },
         ]);
+      } else if (order.status === 'READY') {
+        // Customer can complete the order themselves once it is delivered/ready.
+        await sendQuickReplies(psid, 'Actions:', [
+          { title: '✅ Order Received', payload: `COMPLETE:${orderId}` },
+          { title: '🔙 Back to History', payload: 'ORDER_HISTORY' },
+          { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
+        ]);
       } else {
         await sendButtons(psid, 'Actions:', [
           { title: '🔙 Back to History', payload: 'ORDER_HISTORY' },
@@ -1092,6 +1113,19 @@ export async function handleMessage(messaging: any) {
         await sendText(psid, `❌ ${result.message}`);
       }
       return mainMenu(psid);
+    }
+    // Customer marks a READY order as received -> COMPLETED (their own button).
+    if (payload.startsWith('COMPLETE:')) {
+      const orderId = Number(payload.split(':')[1]);
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'Customer not found.');
+      const result = await completeOrderByCustomer(orderId, cust.id);
+      if (result.ok) {
+        const order = await getOrderById(orderId);
+        await sendText(psid, `🎉 Enjoy! Order ${order.order_number} is complete. Thank you for ordering!`);
+        return sendRatingRequest(psid, order.order_number, order.id);
+      }
+      return sendText(psid, `ℹ️ ${result.message}`).then(() => mainMenu(psid));
     }
     // Rate order
     if (payload.startsWith('RATE:')) {

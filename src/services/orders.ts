@@ -161,6 +161,20 @@ export async function cancelOrder(orderId: number, customerId: number): Promise<
   return { ok: true, message: 'Order cancelled successfully' };
 }
 
+/** Customer-side completion: allowed only once the order is READY (received). */
+export async function completeOrderByCustomer(orderId: number, customerId: number): Promise<{ ok: boolean; message: string }> {
+  const order = await one('SELECT * FROM orders WHERE id = $1 AND customer_id = $2', [orderId, customerId]);
+  if (!order) {
+    return { ok: false, message: 'Order not found' };
+  }
+  const status = (order as any).status;
+  if (status !== 'READY') {
+    return { ok: false, message: `The order can be marked as received once it is READY (current status: ${status})` };
+  }
+  await updateOrderStatus(orderId, 'COMPLETED');
+  return { ok: true, message: 'Order completed' };
+}
+
 // ---------- Order Rating ----------
 
 export async function rateOrder(orderId: number, customerId: number, rating: number, feedback?: string): Promise<void> {
