@@ -1,4 +1,4 @@
-﻿﻿import { one, many } from '../db';
+﻿import { one, many } from '../db';
 
 export interface PricingResult {
   unit_price: number;
@@ -95,7 +95,20 @@ export async function choiceUpgrade(packageId: number, slotNumber: number, produ
     throw new Error('Product not allowed in this slot');
   }
   let extra = opt.upgrade_price || 0;
-  if (size === 'L') extra += opt.size_upgrade_price || 0;
+  if (size === 'L') {
+    // Admin-configured size upgrade wins; fall back to the real menu price
+    // difference (L variant − M variant) when none is configured, so Large
+    // never prices the same as Medium by accident.
+    let sizeExtra = opt.size_upgrade_price || 0;
+    if (!sizeExtra) {
+      const v = await one(`SELECT
+          MAX(CASE WHEN size = 'L' THEN price END) AS l,
+          MAX(CASE WHEN size = 'M' THEN price END) AS m
+        FROM product_variants WHERE product_id = $1`, [productId]) as any;
+      sizeExtra = Math.max(0, Number(v?.l || 0) - Number(v?.m || 0));
+    }
+    extra += sizeExtra;
+  }
   return extra;
 }
 
@@ -123,14 +136,25 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
   return { total, breakdown };
 }
 
-/** Compute total for a cart: items = [{product_id?, package_id?, variant_size?, quantity, slot_choices?}]
+/** Server-side authoritative price of a food pack (fixed-price bundle). */
+export async function priceFoodPack(foodPackId: number): Promise<{ price: number; name: string }> {
+  const pack = await one('SELECT id, name, price FROM food_packs WHERE id = $1 AND active = 1', [foodPackId]) as any;
+  if (!pack) throw new Error('Invalid food pack');
+  return { price: Number(pack.price) || 0, name: pack.name };
+}
+
+/** Compute total for a cart: items = [{product_id?, package_id?, food_pack_id?, variant_size?, quantity, slot_choices?}]
  *  Cart total = sum of item lines − package discounts (discount applies per discounted package unit). */
 export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<{ subtotal: number; delivery: number; discount: number; total: number; breakdown: any[] }> {
   const breakdown: any[] = [];
   let subtotal = 0;
   let discount = 0;
   for (const item of items) {
-    if (item.package_id) {
+    if (item.food_pack_id) {
+      const { price, name } = await priceFoodPack(item.food_pack_id);
+      breakdown.push({ label: `${name} (food pack) x${item.quantity}`, amount: price * item.quantity });
+      subtotal += price * item.quantity;
+    } else if (item.package_id) {
       const { total, breakdown: bd } = await pricePackage(item.package_id, item.slot_choices, item.variant_size);
       // Scale the per-unit breakdown to the quantity so lines sum to the subtotal
       for (const line of bd) {

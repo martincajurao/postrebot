@@ -102,6 +102,7 @@ async function mainMenu(psid: string) {
   await setState(psid, 'MAIN_MENU');
   await sendButtons(psid, '🍽️ Welcome to Postre Food Products!\n\nHow can we help you today?', [
     { title: '📋 Order Now', payload: 'MENU_ORDER' },
+    { title: '🍱 Food Packs', payload: 'MENU_FOODPACKS' },
     { title: '🎁 Packages', payload: 'MENU_PACKAGES' },
     { title: '📖 View Menu', payload: 'MENU_BROWSE' },
   ]).then(() =>
@@ -261,6 +262,49 @@ async function showQuantity(psid: string, productId: number, size: string) {
     { title: '3', payload: `QTY:${productId}:${size}:3` },
     { title: '5', payload: `QTY:${productId}:${size}:5` },
   ]);
+}
+
+// ---------- food packs ----------
+async function showFoodPacks(psid: string) {
+  const packs = await many('SELECT * FROM food_packs WHERE active = 1 ORDER BY sort_order, id') as any[];
+  await setState(psid, 'FOODPACK_LIST');
+  if (packs.length === 0) return sendText(psid, 'No food packs available right now.');
+  const elements = packs.map((fp: any) => ({
+    title: fp.name,
+    subtitle: `${money(fp.price)}${fp.serves ? ` — ${fp.serves}` : ''}${fp.description ? `\n${fp.description}` : ''}`,
+    image_url: imageUrl(fp.photo_url),
+    buttons: [{ title: 'Add to Cart', payload: `FPADD:${fp.id}:1` }],
+  }));
+  await sendCarousel(psid, elements);
+  return sendQuickReplies(psid, 'Or add a pack directly:', [
+    ...packs.slice(0, 9).map((fp: any) => ({ title: fp.name.slice(0, 20), payload: `FPQTY:${fp.id}` })),
+    { title: 'Main Menu', payload: 'MAIN_MENU_BACK' },
+  ]);
+}
+
+async function showFoodPackQuantity(psid: string, foodPackId: number) {
+  const fp = await one('SELECT * FROM food_packs WHERE id = $1 AND active = 1', [foodPackId]) as any;
+  if (!fp) return sendText(psid, 'Food pack not found.');
+  await setState(psid, 'FOODPACK_QTY', { food_pack_id: foodPackId });
+  return sendQuickReplies(psid, `How many ${fp.name} (${money(fp.price)} each)?`, [
+    { title: '1', payload: `FPADD:${foodPackId}:1` },
+    { title: '2', payload: `FPADD:${foodPackId}:2` },
+    { title: '3', payload: `FPADD:${foodPackId}:3` },
+    { title: '5', payload: `FPADD:${foodPackId}:5` },
+  ]);
+}
+
+async function addFoodPackToCart(psid: string, foodPackId: number, qty: number) {
+  const fp = await one('SELECT * FROM food_packs WHERE id = $1 AND active = 1', [foodPackId]) as any;
+  if (!fp) return sendText(psid, 'Food pack not found.');
+  const quantity = Math.max(1, qty || 1);
+  await addItem(psid, { food_pack_id: foodPackId, quantity });
+  return sendText(psid, `✅ Added ${quantity}x ${fp.name} (food pack) to your cart!\nPrice: ${money(fp.price * quantity)}`)
+    .then(() => sendButtons(psid, 'What next?', [
+      { title: '🛒 View Cart', payload: 'MENU_CART' },
+      { title: '💳 Checkout', payload: 'CART_CHECKOUT' },
+      { title: '🍱 Food Packs', payload: 'MENU_FOODPACKS' },
+    ]));
 }
 
 // ---------- packages ----------
@@ -521,7 +565,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       if (items.length === 0) return sendText(psid, 'Your cart is empty.');
       await setState(psid, 'CART_REMOVE_ITEM');
       return sendQuickReplies(psid, 'Remove which item?', [
-        ...items.slice(0, 10).map((i: any) => ({ title: `${i.name} (${i.size})`.slice(0, 20), payload: `REMOVE:${i.line_id}` })),
+        ...items.slice(0, 10).map((i: any) => ({ title: `${i.name}`.slice(0, 20), payload: `REMOVE:${i.id}` })),
         { title: 'Cancel', payload: 'MENU_CART' },
       ]);
     }
@@ -562,7 +606,16 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
           await run('UPDATE customers SET phone = COALESCE($1, phone), address = COALESCE($2, address) WHERE id = $3',
             [st.ctx.phone ?? null, st.ctx.address ?? null, cust.id]);
         }
-        const order = await createOrderFromCart(psid, { customer_id: cust.id, order_type: st.ctx.delivery_type || 'delivery', address: st.ctx.address, notes: st.ctx.notes, payment_method: method });
+        const order = await createOrderFromCart(psid, {
+          customer_id: cust.id,
+          order_type: st.ctx.delivery_type || 'delivery',
+          address: st.ctx.address,
+          phone: st.ctx.phone,
+          fulfillment_date: st.ctx.fulfillment_date,
+          time_slot: st.ctx.time_slot,
+          notes: st.ctx.notes,
+          payment_method: method,
+        });
         await setState(psid, 'ORDER_CONFIRMED', { order_id: order.orderId });
         const payInfo = {
           cod: 'Pay in cash when your order arrives.',
@@ -604,6 +657,12 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       return showPackageSize(psid, Number(rest[0]));
     case 'PKGADD':
       return addPackageToCart(psid, Number(rest[0]), rest[1], Number(rest[2]));
+    case 'MENU_FOODPACKS':
+      return showFoodPacks(psid);
+    case 'FPQTY':
+      return showFoodPackQuantity(psid, Number(rest[0]));
+    case 'FPADD':
+      return addFoodPackToCart(psid, Number(rest[0]), Number(rest[1]));
     case 'MENU_RESERVE':
       await setState(psid, 'RESERVE_TYPE');
       return sendQuickReplies(psid, 'Reservation for?', [
@@ -644,8 +703,24 @@ async function handleText(psid: string, text: string) {
       if (!/^[0-9+\-\s()]{7,15}$/.test(text.trim())) {
         return sendText(psid, 'That does not look like a valid phone number. Please try again:');
       }
-      await setState(psid, 'CHECKOUT_PHONE_DONE', { ...ctx, phone: text.trim() });
-      return handlePayload(psid, 'ASK_NOTES');
+      await setState(psid, 'CHECKOUT_DATE', { ...ctx, phone: text.trim() });
+      return sendText(psid, '📅 What date would you like your order? (format: YYYY-MM-DD, e.g. 2026-09-10)');
+    case 'CHECKOUT_DATE': {
+      const d = text.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        return sendText(psid, 'Please use the date format YYYY-MM-DD, e.g. 2026-09-10:');
+      }
+      await setState(psid, 'CHECKOUT_TIME', { ...ctx, fulfillment_date: d });
+      return sendText(psid, '⏰ What time? (format: HH:MM, 24-hour, e.g. 15:30)');
+    }
+    case 'CHECKOUT_TIME': {
+      const t = text.trim();
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) {
+        return sendText(psid, 'Please use the time format HH:MM, e.g. 15:30:');
+      }
+      await setState(psid, 'CHECKOUT_TIME_DONE', { ...ctx, time_slot: t });
+      return handlePayload(psid, 'ASK_PAY');
+    }
     case 'CHECKOUT_NOTES':
       await setState(psid, 'CHECKOUT_NOTES_DONE', { ...ctx, notes: text.trim().toLowerCase() === 'none' ? '' : text.trim() });
       return handlePayload(psid, 'ASK_PAY');
@@ -789,6 +864,11 @@ export async function handleMessage(messaging: any) {
             variant_size: item.variant_size,
             quantity: item.quantity,
             slot_choices: arr,
+          });
+        } else if (item.food_pack_id) {
+          await addItem(psid, {
+            food_pack_id: item.food_pack_id,
+            quantity: item.quantity,
           });
         } else {
           await addItem(psid, {

@@ -1,4 +1,4 @@
-﻿﻿/* Postre Admin SPA */
+﻿﻿﻿/* Postre Admin SPA */
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('token') || '';
 let ME = localStorage.getItem('me') || '';
@@ -73,6 +73,7 @@ const NAV = [
   { view: 'reservations', icon: '📅', label: 'Reservations', bottom: 'Resv.' },
   { view: 'menu',         icon: '🍽️', label: 'Menu',         bottom: 'Menu' },
   { view: 'packages',     icon: '🔥', label: 'Packages',     bottom: 'Pkgs',   role: 'ADMIN' },
+  { view: 'foodpacks',    icon: '🍱', label: 'Food Packs',   bottom: 'Packs',  role: 'ADMIN' },
   { view: 'customers',    icon: '👥', label: 'Customers',    bottom: 'Cust.',  role: 'ADMIN' },
   { view: 'admins',       icon: '🛡️', label: 'Admins',       bottom: 'Admins', role: 'ADMIN' },
   { view: 'delivery',     icon: '🚚', label: 'Delivery',     bottom: 'Deliv.' },
@@ -223,7 +224,7 @@ async function uploadImage(file) {
   // Compress image before upload
   const originalSize = file.size;
   file = await compressImage(file);
-  
+
   const fd = new FormData();
   fd.append('image', file);
   const res = await fetch(API + '/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: fd });
@@ -247,8 +248,24 @@ function photoField(id, value) {
     </div>`;
 }
 
+function restoreModal() {
+  const snap = window.__modalSnapshot;
+  if (!snap) { closeModal(); return; }
+  delete window.__modalSnapshot;
+  const m = document.getElementById('modal');
+  m.innerHTML = snap.html;
+  m.querySelectorAll('input, select, textarea').forEach((el) => {
+    if (el.id && snap.values[el.id] !== undefined && el.type !== 'file') el.value = snap.values[el.id];
+  });
+  if (window.__modalRebind) { const rb = window.__modalRebind; delete window.__modalRebind; rb(); }
+}
 function openImageLibrary(selectedId) {
   let files = [];
+  // snapshot the form currently in the modal (the library replaces it)
+  const modalEl = document.getElementById('modal');
+  const values = {};
+  modalEl.querySelectorAll('input, select, textarea').forEach((el) => { if (el.id) values[el.id] = el.value; });
+  window.__modalSnapshot = { html: modalEl.innerHTML, values };
   const content = `
     <div style="max-height:60vh;overflow-y:auto">
       <h3>📁 Select Image</h3>
@@ -274,12 +291,12 @@ function openImageLibrary(selectedId) {
       grid.querySelectorAll('.library-img').forEach((el) => {
         el.addEventListener('click', () => {
           const url = el.dataset.url;
+          restoreModal();
           document.getElementById(selectedId).value = url;
           document.getElementById(selectedId + '-url').textContent = url;
           const prev = document.getElementById(selectedId + '-prev');
           prev.src = url;
           prev.style.display = 'block';
-          closeModal();
           toast('Image selected');
         });
       });
@@ -635,6 +652,15 @@ views.menu = async (main) => {
     <div class="field"><label>Mark unavailable?</label><select id="pf-un"><option value="0">No</option><option value="1" ${p?.unavailable ? 'selected' : ''}>Yes</option></select></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
     <button class="btn" id="pf-save">Save</button></div>`);
+  const openProductForm = (p) => {
+    productForm(p);
+    bindPhotoField('pf-photo');
+    document.getElementById('pf-save').addEventListener('click', () => saveProduct(p));
+    window.__modalRebind = () => {
+      bindPhotoField('pf-photo');
+      document.getElementById('pf-save').addEventListener('click', () => saveProduct(p));
+    };
+  };
   const saveProduct = async (p) => {
     const body = {
       name: document.getElementById('pf-name').value,
@@ -649,11 +675,8 @@ views.menu = async (main) => {
       closeModal(); toast('Saved'); navigate('menu');
     } catch (err) { toast(err.message, true); }
   };
-  main.querySelector('#prod-new').addEventListener('click', () => { productForm(null); bindPhotoField('pf-photo'); document.getElementById('pf-save').addEventListener('click', () => saveProduct(null)); });
-  main.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => {
-    const p = products.find((x) => x.id == b.dataset.edit);
-    productForm(p); bindPhotoField('pf-photo'); document.getElementById('pf-save').addEventListener('click', () => saveProduct(p));
-  }));
+  main.querySelector('#prod-new').addEventListener('click', () => openProductForm(null));
+  main.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => openProductForm(products.find((x) => x.id == b.dataset.edit))));
   main.querySelectorAll('[data-variants]').forEach((b) => b.addEventListener('click', () => {
     const p = products.find((x) => x.id == b.dataset.variants);
     const m = p.variants.find((v) => v.size === 'M'), l = p.variants.find((v) => v.size === 'L');
@@ -687,6 +710,71 @@ views.menu = async (main) => {
       closeModal(); toast('Category added'); navigate('menu');
     });
   });
+};
+
+/* ================= FOOD PACKS ================= */
+views.foodpacks = async (main) => {
+  const packs = await api('/food-packs');
+  main.innerHTML = `
+    <h2 class="page-title">Food Packs</h2>
+    <div class="card">
+      <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="btn sm" id="fp-new">＋ Add Food Pack</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Photo</th><th>Name</th><th>Price</th><th>Serves</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+        ${packs.map((fp) => `
+          <tr>
+            <td>${imgTag(fp.photo_url, fp.name)}</td>
+            <td><b>${esc(fp.name)}</b><br><span class="muted">${esc(fp.description || '')}</span></td>
+            <td>${peso(fp.price)}</td>
+            <td>${esc(fp.serves || '—')}</td>
+            <td>${fp.active ? '<span class="badge b-CONFIRMED">Available</span>' : '<span class="badge b-COMPLETED">Inactive</span>'}</td>
+            <td><div class="row-actions">
+              <button class="btn ghost sm" data-fp-edit="${fp.id}">Edit</button>
+              <button class="btn danger sm" data-fp-toggle="${fp.id}">${fp.active ? 'Disable' : 'Enable'}</button>
+            </div></td>
+          </tr>`).join('') || '<tr><td colspan="6" class="muted">No food packs yet.</td></tr>'}
+        </tbody></table></div>
+      <p class="muted" style="margin-top:10px">Food packs are simple fixed-price bundles. Customers order them as-is from Messenger — no dish customization.</p>
+    </div>`;
+
+  const packForm = (fp) => modal(`<h3>${fp ? 'Edit' : 'New'} Food Pack</h3>
+    <div class="field"><label>Name</label><input id="fp-name" value="${esc(fp?.name || '')}"></div>
+    <div class="row2">
+      <div class="field"><label>Price (₱)</label><input type="number" id="fp-price" value="${fp?.price ?? ''}"></div>
+      <div class="field"><label>Serves (optional)</label><input id="fp-serves" value="${esc(fp?.serves || '')}" placeholder="e.g. 4-5 pax"></div>
+    </div>
+    <div class="field"><label>Description</label><input id="fp-desc" value="${esc(fp?.description || '')}"></div>
+    ${photoField('fp-photo', fp?.photo_url)}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn" id="fp-save">Save</button></div>`);
+  const savePack = async (fp) => {
+    const body = {
+      name: document.getElementById('fp-name').value.trim(),
+      price: Number(document.getElementById('fp-price').value),
+      serves: document.getElementById('fp-serves').value.trim() || null,
+      description: document.getElementById('fp-desc').value.trim() || null,
+      photo_url: document.getElementById('fp-photo').value || null,
+    };
+    if (!body.name || !(body.price > 0)) { toast('Name and a price above ₱0 are required.', true); return; }
+    try {
+      if (fp) await api(`/food-packs/${fp.id}`, { method: 'PUT', body });
+      else await api('/food-packs', { method: 'POST', body });
+      closeModal(); toast('Food pack saved'); navigate('foodpacks');
+    } catch (err) { toast(err.message, true); }
+  };
+  main.querySelector('#fp-new').addEventListener('click', () => { packForm(null); bindPhotoField('fp-photo'); document.getElementById('fp-save').addEventListener('click', () => savePack(null)); });
+  main.querySelectorAll('[data-fp-edit]').forEach((b) => b.addEventListener('click', () => {
+    const fp = packs.find((x) => x.id == b.dataset.fpEdit);
+    packForm(fp); bindPhotoField('fp-photo'); document.getElementById('fp-save').addEventListener('click', () => savePack(fp));
+  }));
+  main.querySelectorAll('[data-fp-toggle]').forEach((b) => b.addEventListener('click', async () => {
+    const fp = packs.find((x) => x.id == b.dataset.fpToggle);
+    await api(`/food-packs/${fp.id}`, { method: 'PUT', body: { active: fp.active ? 0 : 1 } });
+    toast(fp.active ? 'Food pack disabled' : 'Food pack enabled'); navigate('foodpacks');
+  }));
 };
 
 /* ================= PACKAGES ================= */

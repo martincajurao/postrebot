@@ -49,9 +49,9 @@ export async function createOrderFromCart(
       const line = await computeCartTotals([it], 0);
       const unit = Math.round(line.subtotal / it.quantity);
       const r = await client.query(`INSERT INTO order_items
-        (order_id, product_id, package_id, name, variant_size, quantity, unit_price, line_total)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [orderId, it.product_id ?? null, it.package_id ?? null, it.name,
+        (order_id, product_id, package_id, food_pack_id, name, variant_size, quantity, unit_price, line_total)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [orderId, it.product_id ?? null, it.package_id ?? null, it.food_pack_id ?? null, it.name,
           it.variant_size ?? null, it.quantity, unit, line.subtotal]);
       const orderItemId = Number(r.rows[0].id);
       if (it.package_id && it.slot_choices) {

@@ -164,18 +164,16 @@ export async function sendOrderConfirmation(psid: string, order: any, items: any
     return `• ${item.name} x${item.quantity} - ₱${item.line_total}${pkgItems ? '\n' + pkgItems : ''}`;
   }).join('\n');
 
-  const message = 
+  const message =
     `✅ ORDER CONFIRMED\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
     `📋 Order #: ${order.order_number}\n` +
-    `💰 Total: ₱${order.total}\n` +
-    `📦 Type: ${order.order_type === 'delivery' ? 'Delivery' : 'Pickup'}\n` +
-    `${order.address ? `📍 Address: ${order.address}\n` : ''}` +
-    `📅 Date: ${order.fulfillment_date || 'ASAP'}\n` +
-    `⏰ Time: ${order.time_slot || 'ASAP'}\n` +
-    `💳 Payment: ${order.payment_method || 'Cash on Delivery'}\n` +
+    `💰 Total: ₱${Number(order.total).toLocaleString('en-PH')}\n` +
+    `📦 ${order.order_type === 'delivery' ? 'Delivery' : 'Pickup'}${order.address ? `\n📍 ${order.address}` : ''}\n` +
+    `📅 ${order.fulfillment_date || 'ASAP'} at ${order.time_slot || 'ASAP'}\n` +
+    `💳 ${order.payment_method ? order.payment_method.toUpperCase() : 'COD'}\n` +
     `\n📝 Items:\n${itemLines}\n` +
-    `\n━━━━━━━━━━━━━━━━━━━\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
     `We'll keep you updated on your order status!`;
 
   await sendText(psid, message);
@@ -203,7 +201,7 @@ export async function sendOrderStatus(psid: string, order: any, statusHistory: a
     return '⚪';
   }).join(' ');
 
-  const message = 
+  const message =
     `📦 ORDER STATUS\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
     `Order #: ${order.order_number}\n` +

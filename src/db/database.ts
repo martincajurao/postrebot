@@ -156,11 +156,23 @@ export function migrate(): void {
     updated_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS food_packs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    photo_url TEXT,
+    price INTEGER NOT NULL,
+    serves TEXT,
+    sort_order INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1
+  );
+
   CREATE TABLE IF NOT EXISTS cart_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cart_id INTEGER NOT NULL REFERENCES carts(id) ON DELETE CASCADE,
     product_id INTEGER,
     package_id INTEGER,
+    food_pack_id INTEGER REFERENCES food_packs(id),
     variant_size TEXT,
     quantity INTEGER NOT NULL DEFAULT 1,
     slot_choices TEXT
@@ -189,6 +201,7 @@ export function migrate(): void {
     order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
     product_id INTEGER,
     package_id INTEGER,
+    food_pack_id INTEGER REFERENCES food_packs(id),
     name TEXT NOT NULL,
     variant_size TEXT,
     quantity INTEGER NOT NULL,
@@ -458,5 +471,26 @@ export function migrate(): void {
   const cartItemCols = (db.prepare('PRAGMA table_info(cart_items)').all() as any[]).map((c: any) => c.name);
   if (!cartItemCols.includes('notes')) {
     db.exec(`ALTER TABLE cart_items ADD COLUMN notes TEXT;`);
+  }
+
+  // v8: Food packs — simple fixed-price bundles, ordered as-is (no slots/customization).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS food_packs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      photo_url TEXT,
+      price INTEGER NOT NULL,
+      serves TEXT,
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1
+    );
+  `);
+  if (!cartItemCols.includes('food_pack_id')) {
+    db.exec(`ALTER TABLE cart_items ADD COLUMN food_pack_id INTEGER REFERENCES food_packs(id);`);
+  }
+  const orderItemCols = (db.prepare('PRAGMA table_info(order_items)').all() as any[]).map((c: any) => c.name);
+  if (!orderItemCols.includes('food_pack_id')) {
+    db.exec(`ALTER TABLE order_items ADD COLUMN food_pack_id INTEGER REFERENCES food_packs(id);`);
   }
 }

@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+﻿﻿import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { one, many, run, query, insertReturningId, tx } from '../db';
 import { authMiddleware, requireRole } from './auth';
@@ -217,6 +217,32 @@ r.put('/options/:id', async (req, res) => {
 });
 r.delete('/options/:id', async (req, res) => {
   await run('DELETE FROM package_options WHERE id = $1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ---- Food Packs (simple fixed-price bundles) ----
+r.get('/food-packs', async (_req, res) => {
+  res.json(await many('SELECT * FROM food_packs ORDER BY sort_order, id'));
+});
+r.post('/food-packs', async (req, res) => {
+  const { name, description, photo_url, price, serves, sort_order = 0, active = 1 } = req.body;
+  if (!name || price == null) return res.status(400).json({ error: 'name and price are required' });
+  const id = await insertReturningId(
+    'INSERT INTO food_packs (name, description, photo_url, price, serves, sort_order, active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+    [name, description ?? null, photo_url ?? null, price, serves ?? null, sort_order, active]
+  );
+  res.json({ id });
+});
+r.put('/food-packs/:id', async (req, res) => {
+  const { name, description, photo_url, price, serves, sort_order, active } = req.body;
+  await run(`UPDATE food_packs SET name = COALESCE($1, name), description = COALESCE($2, description),
+    photo_url = COALESCE($3, photo_url), price = COALESCE($4, price), serves = COALESCE($5, serves),
+    sort_order = COALESCE($6, sort_order), active = COALESCE($7, active) WHERE id = $8`,
+    [name ?? null, description ?? null, photo_url ?? null, price ?? null, serves ?? null, sort_order ?? null, active ?? null, req.params.id]);
+  res.json({ ok: true });
+});
+r.delete('/food-packs/:id', async (req, res) => {
+  await run('UPDATE food_packs SET active = 0 WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
 });
 

@@ -69,10 +69,18 @@ export async function migrate(): Promise<void> {
     psid TEXT UNIQUE NOT NULL,
     updated_at TEXT DEFAULT (now()::text)
   );
+  CREATE TABLE IF NOT EXISTS food_packs (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL, description TEXT, photo_url TEXT,
+    price INTEGER NOT NULL,
+    serves TEXT,
+    sort_order INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1
+  );
   CREATE TABLE IF NOT EXISTS cart_items (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     cart_id INTEGER NOT NULL REFERENCES carts(id) ON DELETE CASCADE,
-    product_id INTEGER, package_id INTEGER,
+    product_id INTEGER, package_id INTEGER, food_pack_id INTEGER REFERENCES food_packs(id),
     variant_size TEXT, quantity INTEGER NOT NULL DEFAULT 1,
     slot_choices TEXT
   );
@@ -91,7 +99,7 @@ export async function migrate(): Promise<void> {
   CREATE TABLE IF NOT EXISTS order_items (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    product_id INTEGER, package_id INTEGER,
+    product_id INTEGER, package_id INTEGER, food_pack_id INTEGER REFERENCES food_packs(id),
     name TEXT NOT NULL, variant_size TEXT,
     quantity INTEGER NOT NULL, unit_price INTEGER NOT NULL,
     line_total INTEGER NOT NULL
@@ -258,6 +266,26 @@ async function seedDefaults(): Promise<void> {
   const cartItemCols = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['cart_items'])).map((c: any) => c.column_name);
   if (!cartItemCols.includes('notes')) {
     await query(`ALTER TABLE cart_items ADD COLUMN notes TEXT;`);
+  }
+
+  // v8: Food packs — simple fixed-price bundles, ordered as-is (no slots/customization).
+  await query(`
+    CREATE TABLE IF NOT EXISTS food_packs (
+      id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      name TEXT NOT NULL, description TEXT, photo_url TEXT,
+      price INTEGER NOT NULL,
+      serves TEXT,
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1
+    );
+  `);
+  const cartItemColsV8 = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['cart_items'])).map((c: any) => c.column_name);
+  if (!cartItemColsV8.includes('food_pack_id')) {
+    await query(`ALTER TABLE cart_items ADD COLUMN food_pack_id INTEGER REFERENCES food_packs(id);`);
+  }
+  const orderItemColsV8 = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['order_items'])).map((c: any) => c.column_name);
+  if (!orderItemColsV8.includes('food_pack_id')) {
+    await query(`ALTER TABLE order_items ADD COLUMN food_pack_id INTEGER REFERENCES food_packs(id);`);
   }
 
   // v7: product_id on order_package_items so reorders can rebuild the exact
