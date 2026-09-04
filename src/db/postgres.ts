@@ -194,6 +194,18 @@ async function seedDefaults(): Promise<void> {
       await run('INSERT INTO business_hours (day_of_week, open_time, close_time, closed) VALUES ($1, $2, $3, $4)', [d, '10:00', '19:00', d === 0 ? 1 : 0]);
     }
   }
+  if ((await one<{ c: number }>('SELECT COUNT(*)::int AS c FROM delivery_areas'))!.c === 0) {
+
+    const areas: [string, number][] = [
+      ['Magarao',   50],
+      ['Naga City',  100],
+      ['Pili',       150],
+      ['Other Area',  200],
+    ];
+    for (const [name, fee] of areas) {
+      await run('INSERT INTO delivery_areas (name,fee) VALUES ($1,$2)', [name, fee]);
+    }
+  }
   if ((await one<{ c: number }>('SELECT COUNT(*)::int AS c FROM categories'))!.c === 0) {
     let i = 0;
     for (const c of ['Chicken', 'Pork', 'Beef', 'Noodles', 'Bilao', 'Desserts']) {

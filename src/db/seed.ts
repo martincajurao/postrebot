@@ -34,12 +34,12 @@ const pancit = product('Noodles', 'Pancit', 'Stir-fried noodles', 350, 500);
 const palabok = product('Noodles', 'Palabok', 'Rice noodles with shrimp sauce', 420, 620);
 const chopsuey = product('Bilao', 'Chopsuey', 'Mixed vegetables', 350, 500);
 
-// Delivery areas
-const insArea = db.prepare('INSERT INTO delivery_areas (name, fee) VALUES (?, ?)');
-insArea.run('Magarao', 50);
-insArea.run('Naga City', 100);
-insArea.run('Other Area', 150);
-
+// Delivery areas (estimated delivery fees - adjust anytime in Admin > Delivery).
+const insArea = db.prepare('INSERT INTO delivery_areas (name,fee) VALUES (?, ?)');
+insArea.run('Magarao',  50);
+insArea.run('Naga City',  100);
+insArea.run('Pili',       150);
+insArea.run('Other Area',  200);
 // Family Package — 4 selections
 const fam = db.prepare('INSERT INTO packages (name, description, base_price, selections) VALUES (?, ?, ?, ?)')
   .run('Family Package', 'Choose 4 dishes', 2000, 4);

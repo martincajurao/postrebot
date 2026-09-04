@@ -22,13 +22,9 @@ export async function createOrderFromCart(
   }
 ) {
   let deliveryFee = 0;
-  if (details.order_type === 'delivery') {
-    if (details.delivery_area_id) {
-      const area = await one('SELECT fee FROM delivery_areas WHERE id = $1 AND active = 1', [details.delivery_area_id]) as any;
-      if (!area) throw new Error('Invalid delivery area');
-      deliveryFee = area.fee;
-    }
-  }
+  // Delivery fee is intentionally NOT auto-charged at order time — the admin enters
+  // the actual fare when confirming the order (POST /orders/:id/confirm). This way
+  // the customer is not billed a pre-set estimate before the order is reviewed.
   const items = await getCart(psid);
   if (items.length === 0) throw new Error('Cart is empty');
   const totals = await computeCartTotals(items, deliveryFee);

@@ -515,12 +515,12 @@ views.orders = async (main) => {
           <td><b>${esc(o.order_number)}</b><br><span class="muted">${esc((o.created_at || '').slice(0, 10))}</span></td>
           <td>${esc(o.customer_name || '—')}<br><span class="muted">${esc(o.phone || '')}</span></td>
           <td>${(o.items || []).map((i) => `${esc(i.name)} ×${i.quantity}`).join('<br>')}</td>
-          <td>${peso(o.total)}${o.additional_discount ? `<br><span class="muted">− ${peso(o.additional_discount)} disc.</span>` : ''}</td>
+          <td>${peso(o.total)}${o.delivery_fee ? `<br><span class="muted">incl. delivery ${peso(o.delivery_fee)}</span>` : ''}${o.additional_discount ? `<br><span class="muted">− ${peso(o.additional_discount)} disc.</span>` : ''}</td>
           <td>${o.order_type === 'delivery' ? '🚚 ' + esc(o.address || '') : '🏬 Pickup'}<br><span class="muted">${esc(o.fulfillment_date || '')} ${esc(o.time_slot || '')}</span></td>
           <td><span class="badge b-${esc(o.payment_status)}">${esc(o.payment_status)}</span><br><span class="muted">${esc(o.payment_method || '')}</span></td>
           <td><span class="badge b-${esc(o.status)}">${esc(o.status)}</span></td>
           <td><div class="row-actions">
-            ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
+            ${o.status === 'PENDING' ? `<button class="btn ok sm" data-confirm="${o.id}">✓ Confirm + Fee</button>` : NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
             ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
             ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
@@ -561,6 +561,21 @@ views.orders = async (main) => {
       const totalDisc = (o.additional_discount || 0) + amount;
       await api(`/orders/${o.id}/discount`, { method: 'POST', body: { additional_discount: totalDisc } });
       closeModal(); toast(`Deducted ${peso(amount)} from total`); navigate('orders');
+    }));
+  }));
+  // Confirm a PENDING order — the admin provides the actual delivery fee here.
+  main.querySelectorAll('[data-confirm]').forEach((b) => b.addEventListener('click', () => {
+    const o = orders.find((x) => x.id == b.dataset.confirm);
+    modal(`<h3>Confirm Order — ${esc(o.order_number)}</h3>
+      <p class="muted">Subtotal: <b>${peso(o.subtotal)}</b>${o.additional_discount ? ` · Discount: −${peso(o.additional_discount)}` : ''}<br>Total before delivery: <b>${peso(o.total)}</b></p>
+      <div class="field"><label>Delivery fee (₱) — enter the actual fare for this address</label>
+        <input type="number" id="oc-fee" min="0" value="0" placeholder="e.g. 100"></div>
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn ok" id="oc-save">✓ Confirm Order</button></div>`);
+    document.getElementById('oc-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      const fee = Math.max(0, Number(document.getElementById('oc-fee').value) ||  0);
+      await api(`/orders/${o.id}/confirm`, { method: 'POST', body: { delivery_fee: fee } });
+      closeModal(); toast(`Confirmed — delivery fee ${peso(fee)}`); navigate('orders');
     }));
   }));
 };

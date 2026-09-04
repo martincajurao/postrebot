@@ -104,11 +104,32 @@ Then in Meta:
 ## 6. Enable Messaging on the Page
 
 1. In Messenger settings → **Built-in NPP (Get Started button)** → enable it, and add a **postback** with payload `GET_STARTED` (the bot's main menu handles this payload).
-2. Optional: add a **Persistent Menu** with postback payloads:
+2. **Persistent Menu** (recommended — gives users a permanent, always-on shortcut bar): add postback payloads:
    - "🛒 Order Now" → `MENU_ORDER`
-   - "🔥 Packages" → `MENU_PACKAGES`
+   - "🎁 Packages" → `MENU_PACKAGES`
    - "📅 Reservation" → `MENU_RESERVE`
    - "🛒 My Cart" → `MENU_CART`
+
+> The in-chat **main menu** shows 4 primary options (View Menu, Order Now, Food Packs,
+> Packages) plus shortcut chips (Cart, Track Order, Reservation, History, Contact).
+> Messenger button templates are capped at **3 buttons**, so the in-chat menu uses
+> quick replies (cap 13) — keep any `sendButtons(psid, ...)` list at 3 or fewer.
+
+---
+
+## 6b. Configurable text (payment / contact / order alerts)
+
+Placeholder payment/contact details and optional new-order alerts are read from
+`.env` — edit these instead of the code:
+
+| Variable | Purpose |
+|---|---|
+| `PAYMENT_GCASH` | GCash instructions shown after an order |
+| `PAYMENT_BANK` | Bank-transfer instructions shown after an order |
+| `CONTACT_PHONE` / `CONTACT_EMAIL` / `CONTACT_ADDRESS` / `CONTACT_HOURS` | Shown in **Contact Us** |
+| `ADMIN_PSID` | (optional) the owner's Messenger PSID — the bot texts them a summary on every new order |
+
+Add `ADMIN_PSID` to receive instant new-order notifications without opening the admin panel.
 
 ---
 

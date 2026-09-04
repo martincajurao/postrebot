@@ -8,7 +8,7 @@ import {
   rescheduleReservation, slotAvailability, isDateOpen,
 } from '../services/reservations';
 import { computeCartTotals } from '../services/pricing';
-import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest } from '../messenger/send';
+import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText } from '../messenger/send';
 
 const r = Router();
 r.use(authMiddleware);
@@ -283,6 +283,25 @@ r.post('/orders/:id/status', async (req, res) => {
 });
 // Set a fixed additional discount (₱) on an order; total is recomputed as
 // stored_total + previous discount - new discount, never below zero.
+// Admin confirms a PENDING order and sets the actual delivery fee (₱) at that point.
+// The fee is provided BY the admin — it is not auto-charged from the area estimates.
+r.post('/orders/:id/confirm', async (req, res) => {
+  const fee = Math.max(0, Math.round(Number(req.body?.delivery_fee) ||  0));
+  const order = await one('SELECT * FROM orders WHERE id = $1', [req.params.id]) as any;
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.status !== 'PENDING') return res.status(400).json({ error: 'Only pending orders can be confirmed' });
+  const newTotal = Math.max(0,(Number(order.subtotal) ||  0) - (Number(order.additional_discount) ||  0) + fee);
+  await query('UPDATE orders SET status = $1, delivery_fee = $2, total = $3 WHERE id = $4', ['CONFIRMED', fee, newTotal, order.id]);
+  await run('INSERT INTO order_status_history (order_id, status) VALUES ($1,$2)', [order.id, 'CONFIRMED']);
+  if (order.customer_id) {
+    const customer = await one('SELECT psid FROM customers WHERE id = $1', [order.customer_id]) as any;
+    if (customer?.psid) {
+      await notifyOrderStatus(customer.psid, 'CONFIRMED', order.order_number);
+      await sendText(customer.psid, '🚚 Delivery fee: ₱' + fee.toLocaleString('en-PH') + '\n💰 New total: ₱' + newTotal.toLocaleString('en-PH'));
+    }
+  }
+  res.json({ ok: true, total: newTotal, delivery_fee: fee });
+});
 r.post('/orders/:id/discount', async (req, res) => {
   const discount = Math.max(0, Math.round(Number(req.body?.additional_discount) || 0));
   const order = await one('SELECT * FROM orders WHERE id = $1', [req.params.id]) as any;

@@ -8,6 +8,26 @@ import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } fro
 
 const r = Router();
 
+// ---------- env-driven configurables (payment/contact/admin) ----------
+// Set these in .env so real accounts live in one place, not buried in code.
+const PAYMENT_INFO: Record<string, string> = {
+  cod: 'Pay in cash when your order arrives.',
+  gcash: process.env.PAYMENT_GCASH || 'GCash: 09753122085 (M*rt*n N*ko C.). Send the receipt to confirm.',
+  bank: process.env.PAYMENT_BANK || 'BDO: 0000-0000-0000 (Not Available). Send the receipt to confirm.',
+};
+const CONTACT_INFO = {
+  phone: process.env.CONTACT_PHONE || '0917-000-0000',
+  email: process.env.CONTACT_EMAIL || 'hello@postre.example',
+  address: process.env.CONTACT_ADDRESS || '123 Sample St.',
+  hours: process.env.CONTACT_HOURS || 'Mon-Sat, 10AM-7PM',
+};
+const ADMIN_PSID = process.env.ADMIN_PSID || '';
+
+/** Fire-and-forget send that never breaks the flow — a failed message is logged only. */
+function safeSend(p: Promise<any>): Promise<void> {
+  return p.catch((e) => { console.error('[webhook] send failed', e); return undefined; });
+}
+
 // ---------- public base URL for image links ----------
 // Messenger requires absolute https URLs for images. Resolution order:
 //   1. BASE_URL env var (explicit override, e.g. a custom domain)
@@ -123,6 +143,38 @@ export function parseTimeInput(raw: string): { ok: boolean; label?: string } {
   return { ok: true, label: `${h12}:${String(mm).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` };
 }
 
+function isoDay(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Today / tomorrow / +3 days as quick replies. 'ck' = checkout, 'res' = reservation. */
+function dateQuickReplies(kind: 'ck' | 'res'): { title: string; payload: string }[] {
+  const now = new Date();
+  const day = (offset: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+  const prefix = kind === 'ck' ? 'CKDATE' : 'RESDATE';
+  return [
+    { title: `Today (${isoDay(day(0))})`, payload: `${prefix}:${isoDay(day(0))}` },
+    { title: `Tomorrow (${isoDay(day(1))})`, payload: `${prefix}:${isoDay(day(1))}` },
+    { title: `In 3 days (${isoDay(day(3))})`, payload: `${prefix}:${isoDay(day(3))}` },
+  ];
+}
+
+async function askCheckoutDate(psid: string, ctx: any) {
+  await setState(psid, 'CHECKOUT_DATE', ctx);
+  return sendQuickReplies(psid, '📅 When would you like your order? (pick a date below or type YYYY-MM-DD):', dateQuickReplies('ck'));
+}
+
+async function showReservationSlots(psid: string, ctx: any) {
+  await setState(psid, 'RESERVE_SLOT', { ...ctx, res_date: ctx.res_date });
+  const slots = await slotAvailability(ctx.res_date);
+  return sendQuickReplies(psid, `Choose a slot for ${ctx.res_date}:`, [
+    ...slots.filter((s: any) => !s.full).map((s: any) => ({ title: `${s.label} (${s.capacity - s.used} left)`.slice(0, 20), payload: `RESSLOT:${s.label}` })),
+  ]);
+}
+
 async function mainMenu(psid: string) {
   await setState(psid, 'MAIN_MENU');
   // Messenger button templates hold a MAXIMUM of 3 buttons (sendButtons drops
@@ -151,7 +203,12 @@ async function showCart(psid: string) {
   }
   let totals: any;
   try {
-    totals = await cartTotals(psid);
+    // If the customer already chose a delivery area during checkout, show its fee.
+    const stateNow = await getState(psid);
+    const fee = (stateNow.ctx?.delivery_type === 'delivery' && stateNow.ctx?.delivery_fee)
+      ? stateNow.ctx.delivery_fee
+      : 0;
+    totals = await cartTotals(psid, fee);
   } catch {
     // A stale item (dish no longer allowed in its slot, changed price, etc.)
     // must not take down the whole cart view — price item by item instead.
@@ -197,10 +254,11 @@ async function showCart(psid: string) {
     `${totals.discount > 0 ? `🏷️ Discount: -${money(totals.discount)}\n` : ''}` +
     `💰 TOTAL: ${money(totals.total)}`
   );
-  return sendButtons(psid, 'What would you like to do?', [
+  return sendQuickReplies(psid, 'What would you like to do?', [
     { title: '✅ Checkout', payload: 'CART_CHECKOUT' },
     { title: '📋 Add More', payload: 'MENU_ORDER' },
     { title: '❌ Remove Item', payload: 'CART_REMOVE' },
+    { title: '🔢 Change Qty', payload: 'CART_QTY' },
   ]);
 }
 
@@ -239,7 +297,7 @@ async function showCategories(psid: string, backPayload = 'MAIN_MENU_BACK') {
   ]);
 }
 
-async function showProducts(psid: string, categoryId: number) {
+async function showProducts(psid: string, categoryId: number, page = 0) {
   const products = await many(
     'SELECT * FROM products WHERE category_id = $1 AND active = 1 AND unavailable = 0 ORDER BY sort_order',
     [categoryId]
@@ -247,8 +305,12 @@ async function showProducts(psid: string, categoryId: number) {
   if (products.length === 0) {
     return sendText(psid, 'No products in this category yet.').then(() => showCategories(psid));
   }
-  await setState(psid, 'ORDER_PRODUCT', { category_id: categoryId });
-  await sendCarousel(psid, await Promise.all(products.map(async (p: any) => {
+  const PAGE = 10;
+  const pages = Math.ceil(products.length / PAGE);
+  const safePage = Math.max(0, Math.min(page, pages - 1));
+  const slice = products.slice(safePage * PAGE, safePage * PAGE + PAGE);
+  await setState(psid, 'ORDER_PRODUCT', { category_id: categoryId, page: safePage });
+  await sendCarousel(psid, await Promise.all(slice.map(async (p: any) => {
     const variants = await many('SELECT * FROM product_variants WHERE product_id = $1', [p.id]) as any[];
     const subtitle = variants.map((v) => `${v.size} ${money(v.price)}`).join(' - ');
     return {
@@ -258,10 +320,11 @@ async function showProducts(psid: string, categoryId: number) {
       buttons: [{ title: 'Order', payload: `PROD:${p.id}` }],
     };
   })));
-  return sendQuickReplies(psid, 'Or pick from the list:', [
-    ...products.slice(0, 10).map((p: any) => ({ title: p.name.slice(0, 20), payload: `PROD:${p.id}` })),
-    { title: 'Categories', payload: 'MENU_ORDER' },
-  ]);
+  const replies: any[] = slice.map((p: any) => ({ title: p.name.slice(0, 20), payload: `PROD:${p.id}` }));
+  if (safePage + 1 < pages) replies.push({ title: 'More products...', payload: `PRODPG:${categoryId}:${safePage + 1}` });
+  if (safePage > 0) replies.push({ title: 'Previous page', payload: `PRODPG:${categoryId}:${safePage - 1}` });
+  replies.push({ title: 'Categories', payload: 'MENU_ORDER' });
+  return sendQuickReplies(psid, `Page ${safePage + 1} of ${pages}. Or pick from the list:`, replies);
 }
 
 async function showVariants(psid: string, productId: number): Promise<SendResult | void> {
@@ -561,6 +624,29 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       return showProducts(psid, Number(rest[0]));
     case 'CAT':
       return showProducts(psid, Number(rest[0]));
+    case 'PRODPG':
+      return showProducts(psid, Number(rest[0]), Number(rest[1] || 0));
+    case 'CKDATE': {
+      const d = rest[0];
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return sendText(psid, 'Invalid date. Please try again.');
+      const dateOpen = await isDateOpen(d);
+      if (!dateOpen.open) {
+        return sendText(psid, `We are closed on ${d}. Please pick another date.`)
+          .then(async () => askCheckoutDate(psid, (await getState(psid)).ctx));
+      }
+      await setState(psid, 'CHECKOUT_TIME', { ...(await getState(psid)).ctx, fulfillment_date: d });
+      return sendText(psid, '⏰ What time? (e.g. 2:30 PM or 14:30)');
+    }
+    case 'RESDATE': {
+      const d = rest[0];
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return sendText(psid, 'Invalid date. Please try again.');
+      const dateOpen = await isDateOpen(d);
+      if (!dateOpen.open) {
+        return sendText(psid, `We are closed on ${d}. Please pick another date.`).then(() =>
+          sendQuickReplies(psid, 'Pick a date:', dateQuickReplies('res')));
+      }
+      return showReservationSlots(psid, { ...(await getState(psid)).ctx, res_date: d });
+    }
     case 'PROD':
       return showVariants(psid, Number(rest[0]));
     case 'SIZE': {
@@ -599,10 +685,41 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       await removeItem(psid, lineId);
       return showCart(psid);
     }
+    case 'CART_QTY': {
+      const items = await getCart(psid);
+      if (items.length === 0) return sendText(psid, 'Your cart is empty.');
+      await setState(psid, 'CART_QTY_SELECT');
+      return sendQuickReplies(psid, 'Change quantity for which item?', [
+        ...items.slice(0, 10).map((i: any) => ({ title: `${i.name}`.slice(0, 20), payload: `QTYCHG:${i.id}` })),
+        { title: 'Cancel', payload: 'MENU_CART' },
+      ]);
+    }
+    case 'QTYCHG': {
+      const itemId = Number(rest[0]);
+      const item = (await getCart(psid)).find((i: any) => i.id === itemId);
+      if (!item) return showCart(psid);
+      await setState(psid, 'CART_QTY_SET', { item_id: itemId });
+      return sendQuickReplies(psid, `${item.name} — current qty ${item.quantity}. New quantity?`, [
+        { title: '1', payload: `QTYCHGSET:${itemId}:1` },
+        { title: '2', payload: `QTYCHGSET:${itemId}:2` },
+        { title: '3', payload: `QTYCHGSET:${itemId}:3` },
+        { title: '5', payload: `QTYCHGSET:${itemId}:5` },
+        { title: 'Cancel', payload: 'MENU_CART' },
+      ]);
+    }
+    case 'QTYCHGSET': {
+      const itemId = Number(rest[0]);
+      const qty = Number(rest[1]);
+      if (!Number.isFinite(qty) || qty <= 0) return showCart(psid);
+      await updateQuantity(psid, itemId, qty);
+      return showCart(psid);
+    }
     case 'CART_CHECKOUT':
       return checkoutStart(psid);
     case 'TYPE': {
       const type = rest[0];
+      // No delivery fee is charged here — the admin sets the actual fare when
+      // confirming the order, so the customer just provides the address.
       await setState(psid, 'CHECKOUT_ADDRESS', { delivery_type: type });
       if (type === 'pickup') return handlePayload(psid, 'ASK_PHONE');
       return sendText(psid, 'Please type your delivery address (house #, street, barangay, city):');
@@ -642,24 +759,49 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
           payment_method: method,
         });
         await setState(psid, 'ORDER_CONFIRMED', { order_id: order.orderId });
-        const payInfo = {
-          cod: 'Pay in cash when your order arrives.',
-          gcash: 'GCash: 0917-000-0000 (Postre Foods). Send the receipt to confirm.',
-          bank: 'BDO: 1234-5678-9012 (Postre Foods). Send the receipt to confirm.',
-        }[method as 'cod'] || '';
+        const payInfo = PAYMENT_INFO[method as 'cod'] || '';
         // Get order items for detailed confirmation
         const orderItems = await getOrderItems(order.orderId);
         await sendOrderConfirmation(psid, { ...order, order_number: order.orderNumber }, orderItems);
         await sendText(psid, payInfo);
+        // Notify the owner about the new order (optional ADMIN_PSID in .env).
+        if (ADMIN_PSID) {
+          safeSend(sendText(ADMIN_PSID,
+            `🆕 New order ${order.orderNumber} (${method.toUpperCase()})\n` +
+            `${st.ctx.delivery_type || 'delivery'}${st.ctx.address ? '\n📍 ' + st.ctx.address : ''}\n` +
+            `💰 Total: ${money(order.total)}`));
+        }
         return mainMenu(psid);
       } catch (e: any) {
-        sendText(psid, 'Sorry, something went wrong placing your order. Please try again.').then(() => mainMenu(psid));
+        safeSend(sendText(psid, 'Sorry, something went wrong placing your order. Please try again.').then(() => mainMenu(psid)));
       }
       return;
     }
     case 'TRACK_ORDER': {
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const recent = cust ? await getCustomerOrders(cust.id, 5) : [];
+      if (recent.length > 0) {
+        await setState(psid, 'TRACK_ORDER_INPUT');
+        return sendQuickReplies(psid, 'Track which order? (or type the number, e.g. PP-1001):', [
+          ...recent.map((o: any) => ({ title: `${o.order_number}`.slice(0, 20), payload: `TRACKNUM:${o.order_number}` })),
+          { title: '⌨️ Type number', payload: 'TRACK_MANUAL' },
+        ]);
+      }
       await setState(psid, 'TRACK_ORDER_INPUT');
       return sendText(psid, 'Please enter your order number (e.g., PP-1001):');
+    }
+    case 'TRACK_MANUAL':
+      await setState(psid, 'TRACK_ORDER_INPUT');
+      return sendText(psid, 'Please enter your order number (e.g., PP-1001):');
+    case 'TRACKNUM': {
+      const orderNumber = rest[0];
+      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      if (!cust) return sendText(psid, 'Customer not found.');
+      const order = await one('SELECT * FROM orders WHERE order_number = $1 AND customer_id = $2', [orderNumber, cust.id]) as any;
+      if (!order) return sendText(psid, 'Order not found. Please check the number and try again.');
+      const statusHistory = await getOrderStatusHistory(order.id);
+      await sendOrderStatus(psid, order, statusHistory);
+      return mainMenu(psid);
     }
     case 'ORDER_HISTORY': {
       const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
@@ -697,18 +839,24 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'RESTYPE': {
       const type = rest[0];
       await setState(psid, 'RESERVE_DATE', { res_type: type });
-      return sendText(psid, 'What date? (format: YYYY-MM-DD)');
+      return sendQuickReplies(psid, 'What date? (pick below or type YYYY-MM-DD):', dateQuickReplies('res'));
+    }
+    case 'REORDER_CONFIRM':
+      return reorderPreviousOrder(psid, Number(rest[0]));
+    case 'RES_PHONE_ASK': {
+      await setState(psid, 'RESERVE_PHONE', (await getState(psid)).ctx);
+      return sendText(psid, 'Contact number for the reservation?');
     }
     case 'MENU_CONTACT':
       setState(psid, 'CONTACT_MENU');
       return sendText(psid,
         '📞 CONTACT US\n' +
         '━━━━━━━━━━━━━━━━━━━\n' +
-        '📱 Phone: 0917-000-0000\n' +
-        '📧 Email: hello@postre.example\n' +
-        '📍 Address: 123 Sample St.\n' +
+        `📱 Phone: ${CONTACT_INFO.phone}\n` +
+        `📧 Email: ${CONTACT_INFO.email}\n` +
+        `📍 Address: ${CONTACT_INFO.address}\n` +
         '━━━━━━━━━━━━━━━━━━━\n' +
-        '⏰ Open: Mon-Sat, 10AM-7PM'
+        `⏰ Open: ${CONTACT_INFO.hours}`
       ).then(() => mainMenu(psid));
     default:
       return mainMenu(psid);
@@ -728,12 +876,15 @@ async function handleText(psid: string, text: string) {
       if (!/^[0-9+\-\s()]{7,15}$/.test(text.trim())) {
         return sendText(psid, 'That does not look like a valid phone number. Please try again:');
       }
-      await setState(psid, 'CHECKOUT_DATE', { ...ctx, phone: text.trim() });
-      return sendText(psid, '📅 What date would you like your order? (format: YYYY-MM-DD, e.g. 2026-09-10)');
+      return askCheckoutDate(psid, { ...ctx, phone: text.trim() });
     case 'CHECKOUT_DATE': {
       const d = text.trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
         return sendText(psid, 'Please use the date format YYYY-MM-DD, e.g. 2026-09-10:');
+      }
+      const dateOpen = await isDateOpen(d);
+      if (!dateOpen.open) {
+        return sendText(psid, `We are closed on ${d}. Please pick another date.`).then(() => askCheckoutDate(psid, ctx));
       }
       await setState(psid, 'CHECKOUT_TIME', { ...ctx, fulfillment_date: d });
       return sendText(psid, '⏰ What time? (e.g. 2:30 PM or 14:30)');
@@ -769,30 +920,85 @@ async function handleText(psid: string, text: string) {
       }
       const dateOpen = await isDateOpen(text.trim());
       if (!dateOpen.open) {
-        return sendText(psid, 'We are closed on that day. Please pick another date (YYYY-MM-DD):');
+        return sendText(psid, 'We are closed on that day. Please pick another date:').then(() =>
+          sendQuickReplies(psid, 'Pick a date:', dateQuickReplies('res')));
       }
-      await setState(psid, 'RESERVE_TIME', { ...ctx, res_date: text.trim() });
-      return sendText(psid, 'What time? (e.g. 2:30 PM)');
-    }
-    case 'RESERVE_TIME': {
-      const parsed = parseTimeInput(text);
-      if (!parsed.ok) {
-        return sendText(psid, 'Please enter a valid time, e.g. 2:30 PM or 14:30:');
-      }
-      const slots = await slotAvailability(ctx.res_date);
-      await setState(psid, 'RESERVE_SLOT', { ...ctx, res_time: parsed.label! });
-      return sendQuickReplies(psid, 'Choose a slot:', [
-        ...slots.filter((s: any) => !s.full).map((s: any) => ({ title: `${s.label} (${s.capacity - s.used} left)`.slice(0, 20), payload: `RESSLOT:${s.label}` })),
-      ]);
+      // Slots ARE the time — no redundant free-text time step.
+      return showReservationSlots(psid, { ...ctx, res_date: text.trim() });
     }
     case 'RESERVE_NAME':
       await setState(psid, 'RESERVE_NAME_DONE', { ...ctx, res_name: text.trim() });
       return handlePayload(psid, 'RES_PHONE_ASK');
+    case 'RESERVE_PHONE': {
+      // Fixes the dead-end: typed phone numbers were ignored because this state
+      // had no text handler, so reservations could never be completed.
+      if (!/^[0-9+\-\s()]{7,15}$/.test(text.trim())) {
+        return sendText(psid, 'That does not look like a valid phone number. Please try again:');
+      }
+      try {
+        const res = await createReservation({ customer_name: ctx.res_name, phone: text.trim(), res_date: ctx.res_date, time_slot: ctx.res_time, notes: ctx.res_type });
+        await setState(psid, 'RESERVE_CONFIRMED', { res_id: res });
+        await sendText(psid, `Reservation confirmed! Reference: RES-${res}\n${ctx.res_type} on ${ctx.res_date} at ${ctx.res_time}.`);
+        return mainMenu(psid);
+      } catch (e: any) {
+        await sendText(psid, 'Could not complete the reservation. Please try again.');
+        return mainMenu(psid);
+      }
+    }
     default:
       // unknown text -> main menu
       if (text.toLowerCase().includes('menu') || text.toLowerCase().startsWith('hi')) return mainMenu(psid);
       return sendText(psid, 'Sorry, I did not understand that.').then(() => mainMenu(psid));
   }
+}
+
+/** Rebuild the cart from a previous order (used by Reorder + after confirmation). */
+async function reorderPreviousOrder(psid: string, orderId: number): Promise<void> {
+  const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+  if (!cust) { await sendText(psid, 'Customer not found.'); return; }
+  const order = await getOrderById(orderId);
+  if (!order || order.customer_id !== cust.id) { await sendText(psid, 'Order not found.'); return; }
+  const items = await getOrderItems(orderId);
+  await clearCart(psid);
+  for (const item of items) {
+    if (item.package_id) {
+      // Rebuild slot choices from the stored order items; fall back to the
+      // package defaults for any slot whose dish can no longer be resolved.
+      const pkgChoices: Record<number, number> = {};
+      for (const p of item.package_items?.filter(Boolean) || []) {
+        if (p.product_id) pkgChoices[Number(p.slot_number)] = Number(p.product_id);
+      }
+      if (Object.keys(pkgChoices).length !== Number(item.selections ?? 0) && !Object.keys(pkgChoices).length) {
+        for (const d of await packageDefaults(item.package_id)) pkgChoices[d.slot_number] = d.product_id;
+      }
+      const arr = Object.entries(pkgChoices).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
+      try {
+        await pricePackage(item.package_id, arr, item.variant_size);
+      } catch {
+        await sendText(psid, `⚠️ ${item.name} from your previous order is no longer available as-is — it was skipped. You can customize it again from Packages.`);
+        continue;
+      }
+      await addItem(psid, {
+        package_id: item.package_id,
+        variant_size: item.variant_size,
+        quantity: item.quantity,
+        slot_choices: arr,
+      });
+    } else if (item.food_pack_id) {
+      await addItem(psid, {
+        food_pack_id: item.food_pack_id,
+        quantity: item.quantity,
+      });
+    } else {
+      await addItem(psid, {
+        product_id: item.product_id,
+        variant_size: item.variant_size,
+        quantity: item.quantity,
+      });
+    }
+  }
+  await sendText(psid, 'Items from your previous order have been added to your cart!');
+  await showCart(psid);
 }
 
 export async function handleMessage(messaging: any) {
@@ -864,48 +1070,15 @@ export async function handleMessage(messaging: any) {
       if (!cust) return sendText(psid, 'Customer not found.');
       const order = await getOrderById(orderId);
       if (!order || order.customer_id !== cust.id) return sendText(psid, 'Order not found.');
-      const items = await getOrderItems(orderId);
-      // Clear current cart and add items from previous order
-      await clearCart(psid);
-      for (const item of items) {
-        if (item.package_id) {
-          // Rebuild slot choices from the stored order items; fall back to the
-          // package defaults for any slot whose dish can no longer be resolved.
-          const pkgChoices: Record<number, number> = {};
-          for (const p of item.package_items?.filter(Boolean) || []) {
-            if (p.product_id) pkgChoices[Number(p.slot_number)] = Number(p.product_id);
-          }
-          if (Object.keys(pkgChoices).length !== Number(item.selections ?? 0) && !Object.keys(pkgChoices).length) {
-            for (const d of await packageDefaults(item.package_id)) pkgChoices[d.slot_number] = d.product_id;
-          }
-          const arr = Object.entries(pkgChoices).map(([k, v]) => ({ slot_number: Number(k), product_id: Number(v) }));
-          try {
-            await pricePackage(item.package_id, arr, item.variant_size);
-          } catch {
-            await sendText(psid, `⚠️ ${item.name} from your previous order is no longer available as-is — it was skipped. You can customize it again from Packages.`);
-            continue;
-          }
-          await addItem(psid, {
-            package_id: item.package_id,
-            variant_size: item.variant_size,
-            quantity: item.quantity,
-            slot_choices: arr,
-          });
-        } else if (item.food_pack_id) {
-          await addItem(psid, {
-            food_pack_id: item.food_pack_id,
-            quantity: item.quantity,
-          });
-        } else {
-          await addItem(psid, {
-            product_id: item.product_id,
-            variant_size: item.variant_size,
-            quantity: item.quantity,
-          });
-        }
+      const currentCart = await getCart(psid);
+      // Only warn when the current cart would be wiped.
+      if (currentCart.length > 0) {
+        return sendQuickReplies(psid, '⚠️ Reordering will REPLACE your current cart. Proceed?', [
+          { title: '✅ Yes, replace cart', payload: `REORDER_CONFIRM:${orderId}` },
+          { title: '❌ Cancel', payload: 'MENU_CART' },
+        ]);
       }
-      await sendText(psid, 'Items from your previous order have been added to your cart!');
-      return showCart(psid);
+      return reorderPreviousOrder(psid, orderId);
     }
     // Cancel order
     if (payload.startsWith('CANCEL:')) {
