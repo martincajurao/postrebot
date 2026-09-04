@@ -59,7 +59,8 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => { if (
 
 // ---------- auth --assad--------
 function logout() {
-  unsubscribePush().catch(() => {});
+  // NOTE: do NOT unsubscribe here — push notifications are permanently enabled
+  // for this browser once allowed, and survive logout / page closes.
   TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
   localStorage.clear();
   location.hash = '';
@@ -1577,35 +1578,33 @@ async function setupPush() {
       return;
     }
     // Drop any stale subscription that was created with a different key.
-    const existing = await reg.pushManager.getSubscription();
-    if (existing && keyToBase64Url(existing.options && existing.options.applicationServerKey) !== pk) {
-      await api('/push/unsubscribe?endpoint=' + encodeURIComponent(existing.endpoint), { method: 'POST' }).catch(() => {});
-      await existing.unsubscribe().catch(() => {});
-    } else if (existing) {
-      pushSub = existing; // already subscribed with the correct key
+    let sub = await reg.pushManager.getSubscription();
+    let created = false;
+    if (sub && keyToBase64Url(sub.options && sub.options.applicationServerKey) !== pk) {
+      await api('/push/unsubscribe?endpoint=' + encodeURIComponent(sub.endpoint), { method: 'POST' }).catch(() => {});
+      await sub.unsubscribe().catch(() => {});
+      sub = null;
+    } else if (sub) {
+      pushSub = sub; // already subscribed with the correct key
     }
-    if (!pushSub) {
-      // 4. Subscribe the browser to push.
-      pushSub = await reg.pushManager.subscribe({
+    if (!sub) {
+      // 4. Subscribe the browser to push (first time, or after a key rotation).
+      sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(pk),
       });
+      created = true;
     }
+    pushSub = sub;
     // 5. Send subscription to the server for persistence.
-    await api('/push/subscribe', { method: 'POST', body: pushSub });
+    await api('/push/subscribe', { method: 'POST', body: sub });
     console.log('[push] Subscription saved on server.');
-    toast('Order notifications enabled ✓');
+    // One-time feedback only — the subscription is now permanent: it survives
+    // logout, page closes and server restarts until browser site data is cleared.
+    if (created) toast('Order notifications enabled ✓ (permanent — no need to enable again)');
   } catch (err) {
     console.error('[push] Setup failed:', err);
     toast('Could not enable push notifications: ' + (err && err.message ? err.message : err), true);
-  }
-}
-
-async function unsubscribePush() {
-  if (pushSub) {
-    await api('/push/unsubscribe?endpoint=' + encodeURIComponent(pushSub.endpoint), { method: 'POST' }).catch(() => {});
-    await pushSub.unsubscribe().catch(() => {});
-    pushSub = null;
   }
 }
 

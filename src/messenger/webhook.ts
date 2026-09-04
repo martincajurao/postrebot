@@ -144,6 +144,89 @@ export function parseTimeInput(raw: string): { ok: boolean; label?: string } {
   return { ok: true, label: `${h12}:${String(mm).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` };
 }
 
+const MONTH_NAMES: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7,
+  sep: 8, sept: 8, oct: 9, nov: 10, dec: 11,
+};
+
+/** Look up a month by full name ("september"), 4-letter ("sept") or 3-letter ("sep"). */
+function monthFrom(word: string): number | undefined {
+  return MONTH_NAMES[word] ?? MONTH_NAMES[word.slice(0, 4)] ?? MONTH_NAMES[word.slice(0, 3)];
+}
+
+/**
+ * Parse a free-text date from the customer into canonical YYYY-MM-DD.
+ * Accepts (case-insensitive):
+ *   2026-09-25                    ISO format
+ *   09/25   9-25   09.25          month/day (no year → this year, or next if past)
+ *   09/25/2026   9-25-26          with year (2- or 4-digit)
+ *   Sep 25   September 25 2026    month-name forms, both orders, "25th" ok
+ *   today / tomorrow              relative words
+ * Day-first input is auto-detected ("25/09" → 25 Sep).
+ */
+export function parseDateInput(raw: string): { ok: boolean; date?: string } {
+  const t = raw.trim().toLowerCase().replace(/\s+/g, ' ').replace(/,/g, '');
+  if (!t) return { ok: false };
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const fmt = (d: Date) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const mk = (y: number, mo: number, day: number) => {
+    const d = new Date(y, mo, day);
+    if (isNaN(d.getTime()) || d.getFullYear() !== y || d.getMonth() !== mo || d.getDate() !== day) return { ok: false };
+    return { ok: true, date: fmt(d) };
+  };
+  const rollYear = (y: number, mo: number, day: number) => {
+    const cand = new Date(y, mo, day);
+    return cand < today ? y + 1 : y;
+  };
+
+  // Relative words
+  if (t === 'today' || t === 'ngayon') return mk(now.getFullYear(), now.getMonth(), now.getDate());
+  if (t === 'tomorrow' || t === 'bukas') return mk(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+  // ISO: YYYY-MM-DD (also 2026/09/25)
+  let m = t.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (m) return mk(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+  // Numeric with separators: MM/DD, MM/DD/YYYY (auto-swaps if day comes first)
+  m = t.match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?$/);
+  if (m) {
+    let mo = Number(m[1]) - 1;
+    let day = Number(m[2]);
+    let year = m[3] ? Number(m[3]) : now.getFullYear();
+    if (m[3] && year < 100) year += 2000;
+    if (mo > 11 && day <= 12) { const tmp = mo; mo = day - 1; day = tmp + 1; }
+    if (!m[3]) year = rollYear(year, mo, day);
+    return mk(year, mo, day);
+  }
+
+  // "september 25" / "september 25 2026"
+  m = t.match(/^([a-z]{3,9})\.? (\d{1,2})(?:st|nd|rd|th)?(?: (\d{4}))?$/);
+  if (m) {
+    const mo = monthFrom(m[1]);
+    if (mo !== undefined) {
+      const day = Number(m[2]);
+      let year = m[3] ? Number(m[3]) : now.getFullYear();
+      if (!m[3]) year = rollYear(year, mo, day);
+      return mk(year, mo, day);
+    }
+  }
+
+  // "25 september" / "25 sep 2026"
+  m = t.match(/^(\d{1,2})(?:st|nd|rd|th)? ([a-z]{3,9})\.?(?: (\d{4}))?$/);
+  if (m) {
+    const mo = monthFrom(m[2]);
+    if (mo !== undefined) {
+      const day = Number(m[1]);
+      let year = m[3] ? Number(m[3]) : now.getFullYear();
+      if (!m[3]) year = rollYear(year, mo, day);
+      return mk(year, mo, day);
+    }
+  }
+
+  return { ok: false };
+}
+
 function isoDay(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -151,21 +234,22 @@ function isoDay(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Today / tomorrow / +3 days as quick replies. 'ck' = checkout, 'res' = reservation. */
+/** Today / tomorrow / +3 days / +1 week as quick replies. 'ck' = checkout, 'res' = reservation. */
 function dateQuickReplies(kind: 'ck' | 'res'): { title: string; payload: string }[] {
   const now = new Date();
   const day = (offset: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
   const prefix = kind === 'ck' ? 'CKDATE' : 'RESDATE';
   return [
-    { title: `Today (${isoDay(day(0))})`, payload: `${prefix}:${isoDay(day(0))}` },
-    { title: `Tomorrow (${isoDay(day(1))})`, payload: `${prefix}:${isoDay(day(1))}` },
-    { title: `In 3 days (${isoDay(day(3))})`, payload: `${prefix}:${isoDay(day(3))}` },
+    { title: 'Today', payload: `${prefix}:${isoDay(day(0))}` },
+    { title: 'Tomorrow', payload: `${prefix}:${isoDay(day(1))}` },
+    { title: 'In 3 days', payload: `${prefix}:${isoDay(day(3))}` },
+    { title: 'In 1 week', payload: `${prefix}:${isoDay(day(7))}` },
   ];
 }
 
 async function askCheckoutDate(psid: string, ctx: any) {
   await setState(psid, 'CHECKOUT_DATE', ctx);
-  return sendQuickReplies(psid, '📅 When would you like your order? (pick a date below or type YYYY-MM-DD):', dateQuickReplies('ck'));
+  return sendQuickReplies(psid, '📅 When would you like your order? (pick below, or type any date — e.g. 09/25, Sep 25, tomorrow):', dateQuickReplies('ck'));
 }
 
 async function showReservationSlots(psid: string, ctx: any) {
@@ -635,8 +719,8 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
         return sendText(psid, `We are closed on ${d}. Please pick another date.`)
           .then(async () => askCheckoutDate(psid, (await getState(psid)).ctx));
       }
-      await setState(psid, 'CHECKOUT_TIME', { ...(await getState(psid)).ctx, fulfillment_date: d });
-      return sendText(psid, '⏰ What time? (e.g. 2:30 PM or 14:30)');
+            await setState(psid, 'CHECKOUT_TIME', { ...(await getState(psid)).ctx, fulfillment_date: d });
+      return sendText(psid, `✅ Date set: ${d}\n⏰ What time? (e.g. 2:30 PM or 14:30)`);
     }
     case 'RESDATE': {
       const d = rest[0];
@@ -852,7 +936,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'RESTYPE': {
       const type = rest[0];
       await setState(psid, 'RESERVE_DATE', { res_type: type });
-      return sendQuickReplies(psid, 'What date? (pick below or type YYYY-MM-DD):', dateQuickReplies('res'));
+      return sendQuickReplies(psid, 'What date? (tap below, or type any date — e.g. Sep 25, 09/25, tomorrow):', dateQuickReplies('res'));
     }
     case 'REORDER_CONFIRM':
       return reorderPreviousOrder(psid, Number(rest[0]));
@@ -891,16 +975,19 @@ async function handleText(psid: string, text: string) {
       }
       return askCheckoutDate(psid, { ...ctx, phone: text.trim() });
     case 'CHECKOUT_DATE': {
-      const d = text.trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-        return sendText(psid, 'Please use the date format YYYY-MM-DD, e.g. 2026-09-10:');
+      const parsed = parseDateInput(text);
+      if (!parsed.ok || !parsed.date) {
+        return sendText(psid, 'Please enter a valid date — e.g. 2026-09-25, 09/25, Sep 25, or "tomorrow":').then(() => askCheckoutDate(psid, ctx));
       }
-      const dateOpen = await isDateOpen(d);
+      if (parsed.date < isoDay(new Date())) {
+        return sendText(psid, 'That date is in the past. Please pick today or a later date.').then(() => askCheckoutDate(psid, ctx));
+      }
+      const dateOpen = await isDateOpen(parsed.date);
       if (!dateOpen.open) {
-        return sendText(psid, `We are closed on ${d}. Please pick another date.`).then(() => askCheckoutDate(psid, ctx));
+        return sendText(psid, `We are closed on ${parsed.date}. Please pick another date.`).then(() => askCheckoutDate(psid, ctx));
       }
-      await setState(psid, 'CHECKOUT_TIME', { ...ctx, fulfillment_date: d });
-      return sendText(psid, '⏰ What time? (e.g. 2:30 PM or 14:30)');
+      await setState(psid, 'CHECKOUT_TIME', { ...ctx, fulfillment_date: parsed.date });
+      return sendText(psid, `✅ Date set: ${parsed.date}\n⏰ What time? (e.g. 2:30 PM or 14:30)`);
     }
     case 'CHECKOUT_TIME': {
       const parsed = parseTimeInput(text);
@@ -935,16 +1022,22 @@ async function handleText(psid: string, text: string) {
       return mainMenu(psid);
     }
     case 'RESERVE_DATE': {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(text.trim())) {
-        return sendText(psid, 'Please use the date format YYYY-MM-DD, e.g. 2025-06-15:');
+      const parsed = parseDateInput(text);
+      if (!parsed.ok || !parsed.date) {
+        return sendText(psid, 'Please enter a valid date — e.g. 2026-09-25, 09/25, Sep 25, or "tomorrow":').then(() =>
+          sendQuickReplies(psid, 'Pick a date:', dateQuickReplies('res')));
       }
-      const dateOpen = await isDateOpen(text.trim());
+      if (parsed.date < isoDay(new Date())) {
+        return sendText(psid, 'That date is in the past. Please pick another date:').then(() =>
+          sendQuickReplies(psid, 'Pick a date:', dateQuickReplies('res')));
+      }
+      const dateOpen = await isDateOpen(parsed.date);
       if (!dateOpen.open) {
         return sendText(psid, 'We are closed on that day. Please pick another date:').then(() =>
           sendQuickReplies(psid, 'Pick a date:', dateQuickReplies('res')));
       }
       // Slots ARE the time — no redundant free-text time step.
-      return showReservationSlots(psid, { ...ctx, res_date: text.trim() });
+      return showReservationSlots(psid, { ...ctx, res_date: parsed.date });
     }
     case 'RESERVE_NAME':
       await setState(psid, 'RESERVE_NAME_DONE', { ...ctx, res_name: text.trim() });

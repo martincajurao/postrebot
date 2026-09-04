@@ -188,7 +188,10 @@ even when the admin page is in the background — using the Web Push protocol.
    3. Open `https://<your-app>.onrender.com/admin`, log in, then go to
       **Settings → 🔔 Push Notifications**. The card shows server status, browser
       permission, and subscribed-device count. Click **Enable on this device** and
-      choose *Allow* on the permission prompt.
+      choose *Allow* on the permission prompt. This is **one-time** — after Allow,
+      notifications and the chime + voice are permanently enabled: they survive
+      logout, page closes and server restarts (the device stays subscribed until
+      the browser's site data is cleared). Voice announcements are ON by default.
    4. Click **Send test notification** — a notification must appear within seconds.
       If it does not, the card text + Render logs tell you exactly why.
    5. iPhone/iPad note: Safari only supports web push for sites **installed to the Home

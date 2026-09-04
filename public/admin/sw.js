@@ -14,6 +14,7 @@ self.addEventListener('push', (event) => {
     tag: data.tag || 'new-order',
     data: data.data || {},
     requireInteraction: true,
+    vibrate: [200, 100, 200],
     actions: [{ action: 'open', title: 'Open Admin' }],
   };
   // OS notifications cannot run JS or TTS, so also forward the payload to every
