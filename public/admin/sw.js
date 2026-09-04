@@ -16,12 +16,21 @@ self.addEventListener('push', (event) => {
     requireInteraction: true,
     actions: [{ action: 'open', title: 'Open Admin' }],
   };
-  event.waitUntil(
-    self.registration.showNotification(title, options).catch((err) => {
-      console.error('[sw] showNotification failed:', err);
-      return self.registration.showNotification('Postre Admin', { body: 'New activity' });
-    }),
-  );
+  // OS notifications cannot run JS or TTS, so also forward the payload to every
+  // open admin page — the page plays a chime and speaks the order aloud.
+  const pushId = (self.crypto && self.crypto.randomUUID)
+    ? self.crypto.randomUUID()
+    : String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+  const notify = self.registration.showNotification(title, options).catch((err) => {
+    console.error('[sw] showNotification failed:', err);
+    return self.registration.showNotification('Postre Admin', { body: 'New activity' });
+  });
+  const forward = self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    for (const client of clientList) {
+      client.postMessage({ type: 'push-order', id: pushId, title, body: options.body, tag: options.tag });
+    }
+  });
+  event.waitUntil(Promise.all([notify, forward]));
 });
 
 self.addEventListener('notificationclick', (event) => {

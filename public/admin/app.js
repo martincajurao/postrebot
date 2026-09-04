@@ -1238,6 +1238,13 @@ views.settings = async (main) => {
         <button class="btn sm" id="push-enable">Enable on this device</button>
         <button class="btn ghost sm" id="push-test">Send test notification</button>
       </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="push-voice"> 🔊 Read orders aloud (text-to-speech)
+        </label>
+        <button class="btn ghost sm" id="push-voice-test">Test voice</button>
+      </div>
+      <p class="muted" style="margin-top:8px">Voice announces new orders in this browser while the page is open — even in the background. Click anywhere once to unlock audio.</p>
     </div>`;
 
   // ---- Push notifications status + controls ----
@@ -1259,6 +1266,22 @@ views.settings = async (main) => {
     if (r.sent > 0) toast('Test push sent to ' + r.sent + ' device(s) ✓');
     else if (r.total === 0) toast('No subscribed devices yet — click Enable first', true);
     else toast('Send failed for ' + r.failed + ' device(s) — check the server logs', true);
+  }));
+  // Voice announcement controls (toggle persisted in localStorage).
+  const voiceCb = main.querySelector('#push-voice');
+  if (voiceCb) {
+    voiceCb.checked = voiceEnabled();
+    voiceCb.addEventListener('change', () => {
+      localStorage.setItem('pushVoice', voiceCb.checked ? '1' : '0');
+      if (voiceCb.checked) { unlockAudio(); toast('Voice announcements on 🔊'); }
+      else { try { speechSynthesis.cancel(); } catch (_) {} toast('Voice announcements off'); }
+    });
+  }
+  const voiceTestBtn = main.querySelector('#push-voice-test');
+  if (voiceTestBtn) voiceTestBtn.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    unlockAudio();
+    await playChime(1);
+    await speakText('Voice test. A new order would be announced like this. New order P P 1042, delivery, total: 450 pesos.');
   }));
   main.querySelectorAll('[data-bh-edit]').forEach((b) => b.addEventListener('click', () => {
     const h = hours.find((x) => x.day_of_week == b.dataset.bhEdit);
@@ -1584,6 +1607,102 @@ async function unsubscribePush() {
     await pushSub.unsubscribe().catch(() => {});
     pushSub = null;
   }
+}
+
+/* ================= VOICE ANNOUNCEMENTS (chime + text-to-speech) =================
+ * OS-rendered push notifications cannot run JS or TTS themselves, so the
+ * service worker forwards each push to this page (postMessage), which then
+ * plays a chime and speaks the order aloud — even when the tab is in the
+ * background. Browsers allow this once the admin has interacted with the
+ * page at least once (any click — logging in counts). */
+let audioCtx = null;
+
+function unlockAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!audioCtx) audioCtx = new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (_) { /* audio unavailable */ }
+}
+document.addEventListener('pointerdown', unlockAudio);
+
+function voiceEnabled() {
+  return localStorage.getItem('pushVoice') !== '0'; // default: ON
+}
+
+/** Short two-tone chime, repeated `times` times. Resolves when finished. */
+function playChime(times) {
+  return new Promise((resolve) => {
+    try {
+      unlockAudio();
+      if (!audioCtx || audioCtx.state !== 'running') return resolve();
+      const notes = [880, 1174.66]; // A5 → D6
+      const t0 = audioCtx.currentTime;
+      for (let i = 0; i < (times || 2); i++) {
+        notes.forEach((f, j) => {
+          const o = audioCtx.createOscillator();
+          const g = audioCtx.createGain();
+          o.type = 'sine';
+          o.frequency.value = f;
+          const start = t0 + i * 0.42 + j * 0.16;
+          g.gain.setValueAtTime(0.0001, start);
+          g.gain.exponentialRampToValueAtTime(0.22, start + 0.03);
+          g.gain.exponentialRampToValueAtTime(0.0001, start + 0.36);
+          o.connect(g).connect(audioCtx.destination);
+          o.start(start);
+          o.stop(start + 0.4);
+        });
+      }
+      setTimeout(resolve, (times || 2) * 420 + 460);
+    } catch (_) { resolve(); }
+  });
+}
+
+/** Speak text with the browser's built-in TTS (emojis stripped, ₱ → "pesos"). */
+function speakText(raw) {
+  return new Promise((resolve) => {
+    try {
+      if (!('speechSynthesis' in window)) return resolve();
+      const clean = String(raw)
+        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, ' ')
+        .replace(/₱\s*/g, 'pesos ')
+        .replace(/•/g, ',')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!clean) return resolve();
+      const u = new SpeechSynthesisUtterance(clean);
+      u.rate = 1;
+      u.pitch = 1;
+      u.lang = 'en-US';
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      u.onend = finish;
+      u.onerror = finish;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+      setTimeout(finish, 15000); // safety timeout
+    } catch (_) { resolve(); }
+  });
+}
+
+/** Play the chime and speak a push payload. Deduped across open admin tabs. */
+async function announcePush(title, body, pushId) {
+  if (!voiceEnabled()) return;
+  if (pushId) {
+    if (localStorage.getItem('lastAnnouncedPushId') === pushId) return; // another tab announced it
+    localStorage.setItem('lastAnnouncedPushId', pushId);
+  }
+  await playChime(2);
+  await speakText((title || '') + '. ' + (body || ''));
+}
+
+// Receive push payloads forwarded by the service worker.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const msg = event.data || {};
+    if (msg.type === 'push-order') announcePush(msg.title, msg.body, msg.id);
+  });
 }
 
 /* ================= APP BOOT =================

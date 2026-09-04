@@ -201,6 +201,19 @@ even when the admin page is in the background — using the Web Push protocol.
    - If the browser subscribed before the server keys were set/changed, the admin UI
      detects the key mismatch and re-subscribes automatically.
 
+7. **Voice announcements (text-to-speech):**
+   - When a push arrives, the admin page plays a two-tone chime and **reads the order
+     aloud** using the browser's built-in text-to-speech ("New Order P P 1042. Delivery.
+     Total: 450 pesos"). Emojis are stripped and `₱` is spoken as "pesos".
+   - Toggle: **Settings → 🔔 Push Notifications → "Read orders aloud"** (on by default,
+     per browser). Use **Test voice** to hear it instantly.
+   - **How it works:** OS notifications cannot run JS or TTS, so the service worker
+     forwards each push to the open admin page (`postMessage`), and the page speaks it.
+     This means the voice works while the admin page is open — even in a background tab —
+     but not when the page is fully closed (you still get the standard push notification).
+   - **Audio unlock:** browsers only allow audio/TTS after the user has interacted with
+     the page at least once — logging in (any click) satisfies this.
+
 ---
 
 ## 7. Set Up the Get Started Postback
