@@ -82,6 +82,14 @@
   .btn.ok { background: var(--ok); }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+  /* button busy/loader state */
+  .btn .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.45);
+    border-top-color: #fff; border-radius: 50%; margin-right: 6px; vertical-align: -2px;
+    animation: btnspin .7s linear infinite; }
+  .btn.ghost .spin, .btn[data-style-ghost] .spin { border-color: rgba(0,0,0,.18); border-top-color: var(--ink); }
+  .btn.loading { opacity: .75; pointer-events: none; }
+  @keyframes btnspin { to { transform: rotate(360deg); } }
+
   /* modal */
   .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 50; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
   .overlay.show { display: flex; }

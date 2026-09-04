@@ -1,4 +1,4 @@
-﻿﻿﻿/* Postre Admin SPA */
+﻿/* Postre Admin SPA */
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('token') || '';
 let ME = localStorage.getItem('me') || '';
@@ -29,6 +29,32 @@ function toast(msg, err = false) {
 }
 function modal(html) { document.getElementById('modal').innerHTML = html; document.getElementById('modal-overlay').classList.add('show'); }
 function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+
+/**
+ * Button loader: disables the button, shows a spinner while `fn` runs,
+ * then restores it. Prevents double-clicks on slow API calls.
+ * Usage: button.addEventListener('click', (e) => withBtn(e.currentTarget, async () => { ... }));
+ */
+async function withBtn(btn, fn) {
+  if (!btn) return fn();
+  if (btn.dataset.busy) return; // already running
+  btn.dataset.busy = '1';
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.classList.add('loading');
+  const label = (btn.textContent || '').trim().replace(/^[+→❌✕✅📁📂⬆️➕\s]+/, '') || 'Working';
+  btn.innerHTML = `<span class="spin"></span>${esc(label)}`;
+  try {
+    await fn();
+  } catch (err) {
+    toast(err.message || String(err), true);
+  } finally {
+    delete btn.dataset.busy;
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.innerHTML = orig;
+  }
+}
 document.getElementById('modal-overlay').addEventListener('click', (e) => { if (e.target.id === 'modal-overlay') closeModal(); });
 
 // ---------- auth --assad--------
@@ -506,23 +532,19 @@ views.orders = async (main) => {
     sessionStorage.setItem('orderFilter', e.target.value);
     navigate('orders');
   });
-  main.querySelectorAll('[data-advance]').forEach((b) => b.addEventListener('click', async () => {
-    try { await api(`/orders/${b.dataset.advance}/status`, { method: 'PUT', body: { status: b.dataset.next } }); toast('Order → ' + b.dataset.next); navigate('orders'); }
-    catch (err) { toast(err.message, true); }
-  }));
-  main.querySelectorAll('[data-otw]').forEach((b) => b.addEventListener('click', async () => {
-    try { await api(`/orders/${b.dataset.otw}/on-the-way`, { method: 'POST' }); toast('Customer notified: order is on the way 🛵'); }
-    catch (err) { toast(err.message, true); }
-  }));
-  main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', async () => {
+  main.querySelectorAll('[data-advance]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    await api(`/orders/${b.dataset.advance}/status`, { method: 'PUT', body: { status: b.dataset.next } }); toast('Order → ' + b.dataset.next); navigate('orders');
+  })));
+  main.querySelectorAll('[data-otw]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    await api(`/orders/${b.dataset.otw}/on-the-way`, { method: 'POST' }); toast('Customer notified: order is on the way 🛵');
+  })));
+  main.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     if (!confirm('Cancel this order?')) return;
-    try { await api(`/orders/${b.dataset.cancel}/status`, { method: 'PUT', body: { status: 'CANCELLED' } }); toast('Order cancelled'); navigate('orders'); }
-    catch (err) { toast(err.message, true); }
-  }));
-  main.querySelectorAll('[data-paid]').forEach((b) => b.addEventListener('click', async () => {
-    try { await api(`/orders/${b.dataset.paid}/payment`, { method: 'PUT', body: { payment_status: 'PAID' } }); toast('Marked as paid'); navigate('orders'); }
-    catch (err) { toast(err.message, true); }
-  }));
+    await api(`/orders/${b.dataset.cancel}/status`, { method: 'PUT', body: { status: 'CANCELLED' } }); toast('Order cancelled'); navigate('orders');
+  })));
+  main.querySelectorAll('[data-paid]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    await api(`/orders/${b.dataset.paid}/payment`, { method: 'PUT', body: { payment_status: 'PAID' } }); toast('Marked as paid'); navigate('orders');
+  })));
 };
 
 /* ================= RESERVATIONS ================= */
@@ -563,15 +585,15 @@ views.reservations = async (main) => {
           </div></td>
         </tr>`).join('') || '<tr><td colspan="6" class="muted">No reservations for this date.</td></tr>'}
       </tbody></table></div>`;
-    main.querySelectorAll('[data-resv-ok]').forEach((b) => b.addEventListener('click', async () => {
+    main.querySelectorAll('[data-resv-ok]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
       await api(`/reservations/${b.dataset.resvOk}/status`, { method: 'PUT', body: { status: 'CONFIRMED' } });
       toast('Reservation confirmed'); navigate('reservations');
-    }));
-    main.querySelectorAll('[data-resv-cancel]').forEach((b) => b.addEventListener('click', async () => {
+    })));
+    main.querySelectorAll('[data-resv-cancel]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
       if (!confirm('Cancel this reservation?')) return;
       await api(`/reservations/${b.dataset.resvCancel}/cancel`, { method: 'PUT' });
       toast('Cancelled'); navigate('reservations');
-    }));
+    })));
     main.querySelectorAll('[data-resv-move]').forEach((b) => b.addEventListener('click', () => {
       const r = resvs.find((x) => x.id == b.dataset.resvMove);
       modal(`<h3>Reschedule reservation</h3>
@@ -579,12 +601,10 @@ views.reservations = async (main) => {
         <div class="field"><label>Time slot</label><input id="mv-time" value="${esc(r.time_slot)}" placeholder="e.g. 10:00 AM"></div>
         <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
         <button class="btn" id="mv-save">Save</button></div>`);
-      document.getElementById('mv-save').addEventListener('click', async () => {
-        try {
-          await api(`/reservations/${r.id}/reschedule`, { method: 'PUT', body: { res_date: document.getElementById('mv-date').value, time_slot: document.getElementById('mv-time').value } });
-          closeModal(); toast('Rescheduled'); navigate('reservations');
-        } catch (err) { toast(err.message, true); }
-      });
+      document.getElementById('mv-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+        await api(`/reservations/${r.id}/reschedule`, { method: 'PUT', body: { res_date: document.getElementById('mv-date').value, time_slot: document.getElementById('mv-time').value } });
+        closeModal(); toast('Rescheduled'); navigate('reservations');
+      }));
     }));
   };
   main.querySelector('#resv-date').addEventListener('change', (e) => { sessionStorage.setItem('resvDate', e.target.value); navigate('reservations'); });
@@ -599,18 +619,16 @@ views.reservations = async (main) => {
       <div class="field"><label>Notes</label><textarea id="nr-notes" rows="2"></textarea></div>
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="nr-save">Create</button></div>`);
-    document.getElementById('nr-save').addEventListener('click', async () => {
-      try {
-        await api('/reservations', { method: 'POST', body: {
-          customer_name: document.getElementById('nr-name').value,
-          phone: document.getElementById('nr-phone').value,
-          res_date: document.getElementById('nr-date').value,
-          time_slot: document.getElementById('nr-time').value,
-          notes: document.getElementById('nr-notes').value,
-        }});
-        closeModal(); toast('Reservation created'); navigate('reservations');
-      } catch (err) { toast(err.message, true); }
-    });
+    document.getElementById('nr-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      await api('/reservations', { method: 'POST', body: {
+        customer_name: document.getElementById('nr-name').value,
+        phone: document.getElementById('nr-phone').value,
+        res_date: document.getElementById('nr-date').value,
+        time_slot: document.getElementById('nr-time').value,
+        notes: document.getElementById('nr-notes').value,
+      }});
+      closeModal(); toast('Reservation created'); navigate('reservations');
+    }));
   });
   await reload();
 };
@@ -652,13 +670,16 @@ views.menu = async (main) => {
     <div class="field"><label>Mark unavailable?</label><select id="pf-un"><option value="0">No</option><option value="1" ${p?.unavailable ? 'selected' : ''}>Yes</option></select></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
     <button class="btn" id="pf-save">Save</button></div>`);
+  const bindProductSave = (p) => {
+    document.getElementById('pf-save').addEventListener('click', (e) => withBtn(e.currentTarget, () => saveProduct(p)));
+  };
   const openProductForm = (p) => {
     productForm(p);
     bindPhotoField('pf-photo');
-    document.getElementById('pf-save').addEventListener('click', () => saveProduct(p));
+    bindProductSave(p);
     window.__modalRebind = () => {
       bindPhotoField('pf-photo');
-      document.getElementById('pf-save').addEventListener('click', () => saveProduct(p));
+      bindProductSave(p);
     };
   };
   const saveProduct = async (p) => {
@@ -687,28 +708,26 @@ views.menu = async (main) => {
       </div>
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="vp-save">Save</button></div>`);
-    document.getElementById('vp-save').addEventListener('click', async () => {
-      try {
-        await api(`/products/${p.id}/variants`, { method: 'PUT', body: { variants: [
-          { size: 'M', price: Number(document.getElementById('vp-m').value) },
-          { size: 'L', price: Number(document.getElementById('vp-l').value) },
-        ] }});
-        closeModal(); toast('Prices updated'); navigate('menu');
-      } catch (err) { toast(err.message, true); }
-    });
+    document.getElementById('vp-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      await api(`/products/${p.id}/variants`, { method: 'PUT', body: { variants: [
+        { size: 'M', price: Number(document.getElementById('vp-m').value) },
+        { size: 'L', price: Number(document.getElementById('vp-l').value) },
+      ] }});
+      closeModal(); toast('Prices updated'); navigate('menu');
+    }));
   }));
-  main.querySelectorAll('[data-deact]').forEach((b) => b.addEventListener('click', async () => {
+  main.querySelectorAll('[data-deact]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     const p = products.find((x) => x.id == b.dataset.deact);
     await api(`/products/${p.id}`, { method: 'PUT', body: { active: p.active ? 0 : 1 } });
     toast(p.active ? 'Product disabled' : 'Product enabled'); navigate('menu');
-  }));
+  })));
   main.querySelector('#cat-new').addEventListener('click', () => {
     modal(`<h3>New Category</h3><div class="field"><label>Name</label><input id="cn-name"></div>
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="cn-save">Add</button></div>`);
-    document.getElementById('cn-save').addEventListener('click', async () => {
+    document.getElementById('cn-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
       await api('/categories', { method: 'POST', body: { name: document.getElementById('cn-name').value } });
       closeModal(); toast('Category added'); navigate('menu');
-    });
+    }));
   });
 };
 
@@ -759,18 +778,27 @@ views.foodpacks = async (main) => {
       photo_url: document.getElementById('fp-photo').value || null,
     };
     if (!body.name || !(body.price > 0)) { toast('Name and a price above ₱0 are required.', true); return; }
-    try {
-      if (fp) await api(`/food-packs/${fp.id}`, { method: 'PUT', body });
-      else await api('/food-packs', { method: 'POST', body });
-      closeModal(); toast('Food pack saved'); navigate('foodpacks');
-    } catch (err) { toast(err.message, true); }
+    if (fp) await api(`/food-packs/${fp.id}`, { method: 'PUT', body });
+    else await api('/food-packs', { method: 'POST', body });
+    closeModal(); toast('Food pack saved'); navigate('foodpacks');
   };
-  main.querySelector('#fp-new').addEventListener('click', () => { packForm(null); bindPhotoField('fp-photo'); document.getElementById('fp-save').addEventListener('click', () => savePack(null)); });
+  // Central open helper: binds the photo field AND the Save button, and records
+  // a rebind for when the image-library picker replaces the modal HTML (that
+  // swap destroys the Save listener — without this the Save button stops working).
+  const openPackForm = (fp) => {
+    packForm(fp);
+    bindPhotoField('fp-photo');
+    document.getElementById('fp-save').addEventListener('click', (e) => withBtn(e.currentTarget, () => savePack(fp)));
+    window.__modalRebind = () => {
+      bindPhotoField('fp-photo');
+      document.getElementById('fp-save').addEventListener('click', (e) => withBtn(e.currentTarget, () => savePack(fp)));
+    };
+  };
+  main.querySelector('#fp-new').addEventListener('click', () => openPackForm(null));
   main.querySelectorAll('[data-fp-edit]').forEach((b) => b.addEventListener('click', () => {
-    const fp = packs.find((x) => x.id == b.dataset.fpEdit);
-    packForm(fp); bindPhotoField('fp-photo'); document.getElementById('fp-save').addEventListener('click', () => savePack(fp));
+    openPackForm(packs.find((x) => x.id == b.dataset.fpEdit));
   }));
-  main.querySelectorAll('[data-fp-toggle]').forEach((b) => b.addEventListener('click', async () => {
+  main.querySelectorAll('[data-fp-toggle]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     const fp = packs.find((x) => x.id == b.dataset.fpToggle);
     await api(`/food-packs/${fp.id}`, { method: 'PUT', body: { active: fp.active ? 0 : 1 } });
     toast(fp.active ? 'Food pack disabled' : 'Food pack enabled'); navigate('foodpacks');
@@ -917,28 +945,32 @@ views.packages = async (main) => {
       });
       refreshBase();
     }
-    document.getElementById('pn-save').addEventListener('click', async () => {
+    const onPnSave = (e) => withBtn(e.currentTarget, async () => {
       const infoBody = readInfo();
       // Recompute base price from the current slots right before saving.
       if (!p.is_custom) infoBody.base_price = computeBase(readSlots(infoBody.selections));
-      try {
-        if (!infoBody.name.trim()) throw new Error('Package name is required.');
-        const slotsPayload = readSlots(infoBody.selections).map((s) => {
-          const upgrade_prices = {}, size_upgrade_prices = {};
-          s.options.forEach((o) => { upgrade_prices[o.product_id] = o.upgrade_price; size_upgrade_prices[o.product_id] = o.size_upgrade_price; });
-          if (s.default_product_id && !s.options.some((o) => o.product_id === s.default_product_id)) {
-            throw new Error(`Slot ${s.n}: the default dish must be one of the slot's dish options.`);
-          }
-          if (!p.is_custom && s.options.length === 0) {
-            throw new Error(`Slot ${s.n}: add at least one dish option (or mark the package as custom).`);
-          }
-          return { slot_number: s.n, product_ids: s.options.map((o) => o.product_id), upgrade_prices, size_upgrade_prices, default_product_id: s.default_product_id ?? undefined };
-        });
-        await api(`/packages/${p.id}`, { method: 'PUT', body: infoBody });
-        await api(`/packages/${p.id}/slots`, { method: 'PUT', body: { slots: slotsPayload } });
-        closeModal(); toast('Package saved'); navigate('packages');
-      } catch (err) { toast(err.message, true); }
+      if (!infoBody.name.trim()) throw new Error('Package name is required.');
+      const slotsPayload = readSlots(infoBody.selections).map((s) => {
+        const upgrade_prices = {}, size_upgrade_prices = {};
+        s.options.forEach((o) => { upgrade_prices[o.product_id] = o.upgrade_price; size_upgrade_prices[o.product_id] = o.size_upgrade_price; });
+        if (s.default_product_id && !s.options.some((o) => o.product_id === s.default_product_id)) {
+          throw new Error(`Slot ${s.n}: the default dish must be one of the slot's dish options.`);
+        }
+        if (!p.is_custom && s.options.length === 0) {
+          throw new Error(`Slot ${s.n}: add at least one dish option (or mark the package as custom).`);
+        }
+        return { slot_number: s.n, product_ids: s.options.map((o) => o.product_id), upgrade_prices, size_upgrade_prices, default_product_id: s.default_product_id ?? undefined };
+      });
+      await api(`/packages/${p.id}`, { method: 'PUT', body: infoBody });
+      await api(`/packages/${p.id}/slots`, { method: 'PUT', body: { slots: slotsPayload } });
+      closeModal(); toast('Package saved'); navigate('packages');
     });
+    document.getElementById('pn-save').addEventListener('click', onPnSave);
+    // The image-library picker replaces the modal HTML — rebind photo + Save after restore.
+    window.__modalRebind = () => {
+      bindPhotoField('pn-photo');
+      document.getElementById('pn-save').addEventListener('click', onPnSave);
+    };
   }
 
   main.querySelector('#pkg-new').addEventListener('click', () => {
@@ -954,9 +986,8 @@ views.packages = async (main) => {
       <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
         <input type="checkbox" id="np-fixed" style="width:auto"> Fixed package (dishes pre-set — customers cannot change them)</label></div>
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="np-save">Create &amp; Add Dishes</button></div>`);
-    bindPhotoField('np-photo');
-    document.getElementById('np-save').addEventListener('click', async () => {
-      try {
+    const bindNpSave = () => {
+      document.getElementById('np-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
         const name = document.getElementById('np-name').value.trim();
         if (!name) throw new Error('Package name is required.');
         const created = await api('/packages', { method: 'POST', body: {
@@ -972,14 +1003,17 @@ views.packages = async (main) => {
         const fresh = await api('/packages');
         const p = fresh.find((x) => x.id === created.id);
         if (p) openPackageEditor(p); else navigate('packages');
-      } catch (err) { toast(err.message, true); }
-    });
+      }));
+    };
+    bindPhotoField('np-photo');
+    bindNpSave();
+    window.__modalRebind = () => { bindPhotoField('np-photo'); bindNpSave(); };
   });
   main.querySelectorAll('[data-pkg-edit]').forEach((b) => b.addEventListener('click', () => {
     const p = packages.find((x) => x.id == b.dataset.pkgEdit);
     openPackageEditor(p);
   }));
-  main.querySelectorAll('[data-pkg-toggle]').forEach((b) => b.addEventListener('click', async () => {
+  main.querySelectorAll('[data-pkg-toggle]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     const p = packages.find((x) => x.id == b.dataset.pkgToggle);
     await api(`/packages/${p.id}`, { method: 'PUT', body: { active: p.active ? 0 : 1 } });
     navigate('packages');
