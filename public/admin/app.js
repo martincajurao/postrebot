@@ -128,7 +128,102 @@ function showApp() {
 const views = {};
 
 // ---------- image upload helper ----------
+const MAX_IMAGE_DIMENSION = 1200;
+const JPEG_QUALITY = 0.7;
+
+/**
+ * Compress an image file by resizing and converting to JPEG.
+ * @param {File} file - Original image file
+ * @returns {Promise<File>} Compressed image file
+ */
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    // Skip compression for small files (< 100KB) or non-image types
+    if (file.size < 100 * 1024 || !file.type.startsWith('image/')) {
+      resolve(file);
+      return;
+    }
+
+    // Skip GIFs to preserve animation
+    if (file.type === 'image/gif') {
+      resolve(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const { width, height } = img;
+
+        // Skip if already small enough
+        if (width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION) {
+          // Still re-encode to JPEG for better compression
+          if (file.type === 'image/jpeg' && file.size < 200 * 1024) {
+            resolve(file);
+            return;
+          }
+        }
+
+        // Calculate new dimensions
+        let newWidth = width;
+        let newHeight = height;
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+          if (width > height) {
+            newWidth = MAX_IMAGE_DIMENSION;
+            newHeight = Math.round((height / width) * MAX_IMAGE_DIMENSION);
+          } else {
+            newHeight = MAX_IMAGE_DIMENSION;
+            newWidth = Math.round((width / height) * MAX_IMAGE_DIMENSION);
+          }
+        }
+
+        // Draw to canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, newWidth, newHeight);
+        ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+        // Convert to blob
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Failed to compress image'));
+              return;
+            }
+            const newName = file.name.replace(/\.[^.]+$/, '.jpg');
+            const compressedFile = new File([blob], newName, { type: 'image/jpeg' });
+            resolve(compressedFile);
+          },
+          'image/jpeg',
+          JPEG_QUALITY
+        );
+      };
+      img.onerror = () => reject(new Error('Failed to load image for compression'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Format file size for display
+ */
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 async function uploadImage(file) {
+  // Compress image before upload
+  const originalSize = file.size;
+  file = await compressImage(file);
+  
   const fd = new FormData();
   fd.append('image', file);
   const res = await fetch(API + '/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: fd });
@@ -144,11 +239,55 @@ function photoField(id, value) {
     <div class="field"><label>Photo</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input type="file" id="${id}-file" accept="image/*" style="flex:1;min-width:150px">
+        <button type="button" class="btn ghost sm" id="${id}-library-btn">📁 From Library</button>
         <img id="${id}-prev" src="${esc(bustImg(value))}" style="height:44px;width:44px;object-fit:cover;border-radius:8px;display:${value ? 'block' : 'none'}">
       </div>
       <input type="hidden" id="${id}" value="${esc(value || '')}">
       <p class="muted" id="${id}-url" style="margin-top:4px;word-break:break-all">${esc(value || 'No photo')}</p>
     </div>`;
+}
+
+function openImageLibrary(selectedId) {
+  let files = [];
+  const content = `
+    <div style="max-height:60vh;overflow-y:auto">
+      <h3>📁 Select Image</h3>
+      <p class="muted" style="margin-bottom:12px">Loading images...</p>
+      <div id="library-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px"></div>
+    </div>`;
+  modal(content);
+
+  const grid = document.getElementById('library-grid');
+
+  async function loadImages() {
+    try {
+      files = await api('/uploads-list');
+      if (files.length === 0) {
+        grid.innerHTML = '<p class="muted" style="grid-column:1/-1;text-align:center;padding:20px">No images uploaded yet. Upload images from the Images tab.</p>';
+        return;
+      }
+      grid.innerHTML = files.map((f) => `
+        <div style="background:#fafbfc;border-radius:10px;padding:8px;text-align:center;cursor:pointer" class="library-img" data-url="${esc(f.url)}">
+          <img src="${esc(f.url)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px" loading="lazy">
+          <p class="muted" style="margin:4px 0;font-size:10px;word-break:break-all">${esc(f.name)}</p>
+        </div>`).join('');
+      grid.querySelectorAll('.library-img').forEach((el) => {
+        el.addEventListener('click', () => {
+          const url = el.dataset.url;
+          document.getElementById(selectedId).value = url;
+          document.getElementById(selectedId + '-url').textContent = url;
+          const prev = document.getElementById(selectedId + '-prev');
+          prev.src = url;
+          prev.style.display = 'block';
+          closeModal();
+          toast('Image selected');
+        });
+      });
+    } catch (err) {
+      grid.innerHTML = `<p class="muted" style="grid-column:1/-1;color:var(--bad)">Error loading images: ${esc(err.message)}</p>`;
+    }
+  }
+  loadImages();
 }
 function bindPhotoField(id) {
   const input = document.getElementById(id + '-file');
@@ -157,8 +296,9 @@ function bindPhotoField(id) {
     if (!file) return;
     openCropper(file, async (croppedBlob) => {
       try {
-        toast('Uploading image…');
-        const url = await uploadImage(new File([croppedBlob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }));
+        const croppedFile = new File([croppedBlob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+        toast(`Compressing ${formatFileSize(croppedFile.size)}...`);
+        const url = await uploadImage(croppedFile);
         document.getElementById(id).value = url;
         document.getElementById(id + '-url').textContent = url;
         const prev = document.getElementById(id + '-prev');
@@ -168,6 +308,11 @@ function bindPhotoField(id) {
     });
     input.value = ''; // allow picking the same file again
   });
+  // Bind the "From Library" button
+  const libraryBtn = document.getElementById(id + '-library-btn');
+  if (libraryBtn) {
+    libraryBtn.addEventListener('click', () => openImageLibrary(id));
+  }
 }
 
 /* ================= IMAGE CROPPER =================
@@ -1060,6 +1205,20 @@ views.images = async (main) => {
       </div>
       <p class="muted" style="margin-top:6px">JPG, PNG, WebP or GIF · max 5 MB. Cropping available when used via Menu/Packages photo fields.</p>
     </div>
+    <div class="card">
+      <h3>📦 Batch upload</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="img-batch-file" accept="image/*" multiple style="flex:1;min-width:180px">
+        <button class="btn sm" id="img-batch-upload">Upload All</button>
+      </div>
+      <p class="muted" style="margin-top:6px">Select multiple images at once. Files are uploaded sequentially.</p>
+      <div id="batch-progress" style="margin-top:10px;display:none">
+        <div style="background:#e5e7eb;border-radius:8px;height:8px;overflow:hidden">
+          <div id="batch-progress-bar" style="background:var(--brand);height:100%;width:0%;transition:width 0.3s"></div>
+        </div>
+        <p class="muted" id="batch-progress-text" style="margin-top:4px;font-size:12px">Uploading...</p>
+      </div>
+    </div>
     <div class="card"><h3>🖼️ Library (${files.length})</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px" id="img-grid">
         ${files.map((f) => `
@@ -1077,11 +1236,58 @@ views.images = async (main) => {
     const file = main.querySelector('#img-file').files[0];
     if (!file) return toast('Choose a file first', true);
     try {
-      toast('Uploading…');
-      await uploadImage(file);
-      toast('Image uploaded');
+      const originalSize = file.size;
+      toast(`Compressing ${formatFileSize(originalSize)}...`);
+      const compressedFile = await compressImage(file);
+      const saved = originalSize - compressedFile.size;
+      await uploadImage(compressedFile);
+      const savedText = saved > 0 ? ` · Saved ${formatFileSize(saved)}` : '';
+      toast(`Image uploaded${savedText}`);
       navigate('images');
     } catch (err) { toast(err.message, true); }
+  });
+  // Batch upload handler
+  main.querySelector('#img-batch-upload').addEventListener('click', async () => {
+    const fileInput = main.querySelector('#img-batch-file');
+    const files = fileInput.files;
+    if (!files || files.length === 0) return toast('Choose files first', true);
+
+    const progressDiv = main.querySelector('#batch-progress');
+    const progressBar = main.querySelector('#batch-progress-bar');
+    const progressText = main.querySelector('#batch-progress-text');
+    progressDiv.style.display = 'block';
+
+    let uploaded = 0;
+    let failed = 0;
+    let totalSaved = 0;
+    const total = files.length;
+
+    for (let i = 0; i < total; i++) {
+      const file = files[i];
+      const originalSize = file.size;
+      progressText.textContent = `Processing ${i + 1} of ${total}: ${file.name} (${formatFileSize(originalSize)})`;
+      progressBar.style.width = `${((i) / total) * 100}%`;
+      try {
+        const compressedFile = await compressImage(file);
+        totalSaved += (originalSize - compressedFile.size);
+        await uploadImage(compressedFile);
+        uploaded++;
+      } catch (err) {
+        failed++;
+        console.error('Upload failed for', file.name, err);
+      }
+    }
+
+    progressBar.style.width = '100%';
+    const savedText = totalSaved > 0 ? ` · Saved ${formatFileSize(totalSaved)}` : '';
+    progressText.textContent = `Complete! ${uploaded} uploaded, ${failed} failed${savedText}`;
+
+    if (uploaded > 0) {
+      toast(`Batch upload complete: ${uploaded} uploaded${failed > 0 ? `, ${failed} failed` : ''}${savedText}`);
+      setTimeout(() => navigate('images'), 1500);
+    } else {
+      toast('All uploads failed', true);
+    }
   });
   main.querySelectorAll('[data-img-copy]').forEach((b) => b.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(b.dataset.imgCopy); toast('URL copied'); }
