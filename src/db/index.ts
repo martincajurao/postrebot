@@ -9,9 +9,22 @@
  */
 
 import { isConfigured } from './pg';
+import * as pg from './pg';
+import * as sqlite from './database';
 
-// Re-export the async Postgres helpers as the primary interface
-export { one, many, run, query, insertReturningId, tx, poolOf } from './pg';
+// Use Postgres when DATABASE_URL is set, otherwise use SQLite
+const backend = isConfigured() ? pg : sqlite;
+
+// Re-export the async helpers from the appropriate backend
+export const one = backend.one;
+export const many = backend.many;
+export const run = backend.run;
+export const query = backend.query;
+export const insertReturningId = backend.insertReturningId;
+export const tx = backend.tx;
+export const poolOf = (backend as any).poolOf;
+
+// Re-export migrate from the appropriate backend
 export { migrate } from './postgres';
 
 /**

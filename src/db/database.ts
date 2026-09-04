@@ -33,6 +33,55 @@ export function transaction<T>(fn: () => T): () => T {
 // Attach as a method so db.transaction(fn) works like better-sqlite3 callers expect.
 (db as any).transaction = transaction;
 
+// ---------- SQLite-compatible async wrappers ----------
+
+/** First row or undefined (replaces sqlite .get()). */
+export async function one<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
+  const stmt = db.prepare(sql);
+  const row = stmt.get(...params) as any;
+  return row ? row as T : undefined;
+}
+
+/** All rows (replaces sqlite .all()). */
+export async function many<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  const stmt = db.prepare(sql);
+  return stmt.all(...params) as T[];
+}
+
+/** Execute INSERT/UPDATE/DELETE (replaces sqlite .run()); returns rowCount. */
+export async function run(sql: string, params: any[] = []): Promise<number> {
+  const stmt = db.prepare(sql);
+  const result = stmt.run(...params);
+  return Number(result.changes) || 0;
+}
+
+/** Raw query when you need rows + rowCount together. */
+export async function query(sql: string, params: any[] = []): Promise<any> {
+  const stmt = db.prepare(sql);
+  const rows = stmt.all(...params);
+  return { rows, rowCount: rows.length };
+}
+
+/** INSERT ... RETURNING id helper — replaces sqlite out.lastInsertRowid. */
+export async function insertReturningId(sql: string, params: any[] = []): Promise<number> {
+  const stmt = db.prepare(sql);
+  const result = stmt.run(...params);
+  return Number(result.lastInsertRowid);
+}
+
+/** Transaction wrapper. fn receives a client bound to the transaction. */
+export async function tx<T>(fn: (client: any) => Promise<T>): Promise<T> {
+  db.exec('BEGIN');
+  try {
+    const out = await fn(db);
+    db.exec('COMMIT');
+    return out;
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
 export function migrate(): void {
   db.exec(`
   CREATE TABLE IF NOT EXISTS admins (

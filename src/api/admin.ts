@@ -93,6 +93,25 @@ r.post('/products/:id/variants', async (req, res) => {
     res.json({ id });
   }
 });
+r.put('/products/:id/variants', async (req, res) => {
+  const { variants } = req.body;
+  if (!Array.isArray(variants)) return res.status(400).json({ error: 'variants must be an array' });
+
+  await tx(async (client) => {
+    // Delete existing variants for this product
+    await client.query('DELETE FROM product_variants WHERE product_id = $1', [req.params.id]);
+
+    // Insert new variants
+    for (const v of variants) {
+      await client.query(
+        'INSERT INTO product_variants (product_id, size, price) VALUES ($1, $2, $3)',
+        [req.params.id, v.size, v.price]
+      );
+    }
+  });
+
+  res.json({ ok: true });
+});
 r.delete('/variants/:id', async (req, res) => {
   await run('DELETE FROM product_variants WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
@@ -138,6 +157,44 @@ r.post('/packages/:id/slots', async (req, res) => {
   const pkgId = req.params.id;
   const id = await insertReturningId('INSERT INTO package_slots (package_id, slot_number) VALUES ($1, $2) RETURNING id', [pkgId, slot_number]);
   res.json({ id });
+});
+r.put('/packages/:id/slots', async (req, res) => {
+  const pkgId = req.params.id;
+  const { slots } = req.body;
+  if (!Array.isArray(slots)) return res.status(400).json({ error: 'slots must be an array' });
+
+  await tx(async (client) => {
+    // Delete existing options and slots for this package
+    const existingSlots = await client.query('SELECT id FROM package_slots WHERE package_id = $1', [pkgId]);
+    for (const s of existingSlots.rows) {
+      await client.query('DELETE FROM package_options WHERE slot_id = $1', [s.id]);
+    }
+    await client.query('DELETE FROM package_slots WHERE package_id = $1', [pkgId]);
+
+    // Insert new slots with options
+    for (const slot of slots) {
+      const slotRes = await client.query(
+        'INSERT INTO package_slots (package_id, slot_number) VALUES ($1, $2) RETURNING id',
+        [pkgId, slot.slot_number]
+      );
+      const slotId = Number(slotRes.rows[0].id);
+
+      // Insert options for this slot
+      if (Array.isArray(slot.product_ids)) {
+        for (const productId of slot.product_ids) {
+          const upgradePrice = slot.upgrade_prices?.[productId] ?? 0;
+          const sizeUpgradePrice = slot.size_upgrade_prices?.[productId] ?? 0;
+          const isDefault = slot.default_product_id === productId ? 1 : 0;
+          await client.query(
+            'INSERT INTO package_options (slot_id, product_id, upgrade_price, size_upgrade_price, is_default) VALUES ($1, $2, $3, $4, $5)',
+            [slotId, productId, upgradePrice, sizeUpgradePrice, isDefault]
+          );
+        }
+      }
+    }
+  });
+
+  res.json({ ok: true });
 });
 r.delete('/slots/:id', async (req, res) => {
   await run('DELETE FROM package_slots WHERE id = $1', [req.params.id]);
