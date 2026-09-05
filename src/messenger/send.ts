@@ -84,13 +84,29 @@ export function sendButtons(psid: string, text: string, buttons: { title: string
   });
 }
 
-/** Send a URL button that opens a web page inside Messenger's built-in in-app browser.
+/** Build a web_url button that opens INSIDE Messenger's full-height webview. */
+export function webviewButton(url: string, title: string) {
+  return {
+    type: 'web_url',
+    url,
+    title: title.slice(0, 20),
+    webview_height_ratio: 'full',
+    // messenger_extensions only validates on HTTPS — ensureWebviewWhitelisted()
+    // gates this flag against the Messenger Profile whitelist before sending.
+    messenger_extensions: url.startsWith('https://'),
+    webview_shareable: true,
+  };
+}
+
+/** Send a URL button that opens INSIDE Messenger's built-in in-app browser.
  *  messenger_extensions: true makes it a true in-Messenger webview (closes back into
  *  the chat thread) and loads the MessengerExtensions JS SDK on the page so the webview
  *  can call requestCloseBrowser(). The URL must be HTTPS and whitelisted in the Meta app
- *  dashboard under Messenger > Webview Domains. */
-export function sendUrlButton(psid: string, text: string, title: string, url: string, messengerExt = true): Promise<SendResult> {
-  return sendApi({
+ *  dashboard under Messenger > Webview Domains — verified here before sending, with an
+ *  external fallback (instead of a rejected message) when it can't be confirmed. */
+export async function sendUrlButton(psid: string, text: string, title: string, url: string, messengerExt = true): Promise<SendResult> {
+  const https = messengerExt && url.startsWith('https://');
+  const sendWith = (ext: boolean) => sendApi({
     recipient: { id: psid },
     messaging_type: 'RESPONSE',
     message: {
@@ -101,46 +117,170 @@ export function sendUrlButton(psid: string, text: string, title: string, url: st
           text: text.slice(0, 640),
           buttons: [{
             type: 'web_url',
+            url,
             title: title.slice(0, 20),
-            url: url,
             webview_height_ratio: 'full',
-            messenger_extensions: messengerExt,
+            messenger_extensions: ext,
+            webview_shareable: true,
           }],
         },
       },
     },
   });
+
+  if (!https) return sendWith(false);
+
+  // Verify the button URL's origin is whitelisted so Meta actually opens the
+  // in-app webview instead of silently demoting the button to an external page.
+  const whitelisted = await ensureWebviewWhitelisted(url);
+  if (whitelisted) return sendWith(true);
+
+  // Whitelist API check failed (transient error?) — try optimistic: the domain
+  // may already be whitelisted manually in the Meta dashboard. If Meta rejects
+  // the message because the domain isn't whitelisted, fall back to external.
+  const result = await sendWith(true);
+  if (result.ok) return result;
+
+  const err = (result.body || '').toLowerCase();
+  if (err.includes('whitelisted') || err.includes('messenger_extensions') || err.includes('invalid key')) {
+    console.warn('[messenger] webview origin NOT whitelisted — sending external fallback link:', originOf(url));
+    return sendWith(false);
+  }
+  return result; // unrelated error — surface it as-is
+}
+
+// ---------- Webview domain whitelisting ----------
+// Meta only honors messenger_extensions for URLs whose ORIGIN is whitelisted in
+// the Messenger Profile. Origins are cached per process; the whitelist is
+// verified/refreshed lazily before every webview button is sent.
+const whitelistedOrigins = new Set<string>();
+const whitelistInFlight = new Map<string, Promise<boolean>>();
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url.replace(/\/+$/, '');
+  }
+}
+
+async function fetchWhitelistedDomains(): Promise<string[]> {
+  const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?fields=whitelisted_domains&access_token=${PAGE_TOKEN}`);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`whitelist lookup failed (${res.status}): ${text}`);
+  const json = JSON.parse(text) as { data?: Array<{ whitelisted_domains?: string[] }> };
+  return json.data?.[0]?.whitelisted_domains || [];
 }
 
 /**
- * Whitelist a domain with the Messenger Profile API so buttons with
- * messenger_extensions: true are accepted and open INSIDE Messenger's
- * webview instead of the external browser. Required for the webview to:
- *  - render as an in-chat browser window (not an external link)
- *  - load the MessengerExtensions JS SDK (requestCloseBrowser / getUserID)
- * Must be HTTPS. Safe to call repeatedly (idempotent on Meta's side).
+ * Ensure the button URL's origin is whitelisted, then cache the result.
+ * - Extracts the origin from the button URL itself (never a mismatched BASE_URL).
+ * - MERGES into the existing whitelist — POSTing a single domain would silently
+ *   REPLACE the whole list on Meta's side.
+ * - Retried lazily on every send until it succeeds; safe to call concurrently.
  */
-export async function whitelistWebviewDomain(baseUrl: string): Promise<boolean> {
+export function ensureWebviewWhitelisted(buttonUrl: string): Promise<boolean> {
+  return whitelistWebviewDomain(buttonUrl);
+}
+
+/**
+ * Ensure the button URL's origin is whitelisted in the Messenger Profile.
+ * Alias for ensureWebviewWhitelisted — see that function for details.
+ */
+export function whitelistWebviewDomain(buttonUrl: string): Promise<boolean> {
+  if (!PAGE_TOKEN) return Promise.resolve(false);
+  if (!buttonUrl.startsWith('https://')) return Promise.resolve(false);
+
+  const origin = originOf(buttonUrl);
+  if (whitelistedOrigins.has(origin)) return Promise.resolve(true);
+
+  const inFlight = whitelistInFlight.get(origin);
+  if (inFlight) return inFlight;
+
+  const job = (async () => {
+    try {
+      // Already whitelisted (earlier boot / dashboard)?
+      const existing = await fetchWhitelistedDomains();
+      const normalized = existing.map((d) => d.replace(/\/+$/, ''));
+      if (normalized.includes(origin)) {
+        whitelistedOrigins.add(origin);
+        return true;
+      }
+      // Merge — keep every other whitelisted domain intact.
+      const merged = Array.from(new Set([...normalized, origin]));
+      const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ whitelisted_domains: merged }),
+      });
+      const text = await res.text();
+      if (res.ok) {
+        console.log(`[messenger] webview domain whitelisted (merged, ${merged.length} domain[s]): ${origin}`);
+        whitelistedOrigins.add(origin);
+        return true;
+      }
+      console.error(`[messenger] whitelist failed (${res.status}): ${text}`);
+      return false;
+    } catch (e: any) {
+      console.error('[messenger] whitelist error:', e?.message || e);
+      return false;
+    } finally {
+      whitelistInFlight.delete(origin);
+    }
+  })();
+  whitelistInFlight.set(origin, job);
+  return job;
+}
+
+/**
+ * Register a persistent menu (☰ next to the composer) with the web store entry
+ * point, so customers always have an in-Messenger way to open the webview.
+ * Uses the same whitelisting gate as message buttons.
+ */
+export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean> {
   if (!PAGE_TOKEN) {
-    console.log('[messenger] skip whitelist (no PAGE_ACCESS_TOKEN configured)');
+    console.log('[messenger] skip persistent menu (no PAGE_ACCESS_TOKEN configured)');
     return false;
   }
+  const webviewUrl = webviewBaseUrl.replace(/\/+$/, '') + '/webview';
+  const whitelisted = await ensureWebviewWhitelisted(webviewUrl);
+  const payload = {
+    persistent_menu: [
+      {
+        locale: 'default',
+        composer_input_disabled: false,
+        call_to_actions: [
+          {
+            type: 'web_url',
+            title: '🌐 Order Online',
+            url: webviewUrl,
+            webview_height_ratio: 'full',
+            messenger_extensions: whitelisted,
+          },
+          {
+            type: 'postback',
+            title: '📋 Main Menu',
+            payload: 'MAIN_MENU',
+          },
+        ],
+      },
+    ],
+  };
   try {
-    const origin = baseUrl.replace(/\/+$/, '');
     const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ whitelisted_domains: [origin] }),
+      body: JSON.stringify(payload),
     });
     const text = await res.text();
     if (res.ok) {
-      console.log(`[messenger] webview domain whitelisted: ${origin}`);
+      console.log(`[messenger] persistent menu set (webview: ${webviewUrl}, extensions: ${whitelisted})`);
       return true;
     }
-    console.error(`[messenger] whitelist failed (${res.status}): ${text}`);
+    console.error(`[messenger] persistent menu failed (${res.status}): ${text}`);
     return false;
   } catch (e: any) {
-    console.error('[messenger] whitelist error:', e?.message || e);
+    console.error('[messenger] persistent menu error:', e?.message || e);
     return false;
   }
 }
