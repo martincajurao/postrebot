@@ -1,13 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
+<html lang="en"><head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order</title>
-  <link rel="stylesheet" href="style.css?v=20260905-7">
+  <link rel="stylesheet" href="style.css?v=20260905-4">
   <!-- Messenger Extensions SDK: required for in-Messenger webview features like requestCloseBrowser() -->
   <script src="https://connect.facebook.net/en_US/MessengerExtensions.js"></script>
   <!-- Supabase JS: optional fallback data source (primary is the /api/webview REST API) -->
@@ -21,19 +17,15 @@
         <div class="header-logo">🍽️</div>
         <div class="header-text">
           <h1>Postre Food Products</h1>
-          <p class="header-sub" id="header-sub">Order online</p>
+          <p class="header-sub">Order online</p>
         </div>
-      </div>
-      <div class="contact-strip" id="contact-strip">
-        <a class="contact-item" id="contact-phone" href="#"><span>📞</span><span id="contact-phone-text"></span></a>
-        <span class="contact-item" id="contact-hours"><span>🕘</span><span id="contact-hours-text"></span></span>
       </div>
     </header>
 
     <!-- Loading state -->
-    <div id="loading-view" class="view active" style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:60px 20px">
+    <div id="loading-view" class="view" style="flex: 1 1 0%; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 16px; padding: 60px 20px;">
       <div class="spinner"></div>
-      <p id="loading-text" style="color:#999;font-size:0.9rem">Loading menu...</p>
+      <p style="color:#999;font-size:0.9rem">Loading menu...</p>
     </div>
 
     <!-- Disabled message (shown when admin turns off webview) -->
@@ -57,33 +49,38 @@
     </div>
 
     <!-- Main content -->
-    <main class="main hidden" id="main-content">
+    <main class="main" id="main-content">
       <!-- Categories view -->
       <section id="view-categories" class="view active">
         <div class="section-header">
           <h2>Our Menu</h2>
           <p class="section-sub">Choose a category to start ordering</p>
         </div>
-        <div id="categories-list" class="categories-grid"></div>
-        <div class="section-header section-spaced">
-          <h2>More to Explore</h2>
-        </div>
-        <div class="promo-grid">
-          <div class="promo-tile" onclick="showPackages()">
-            <div class="promo-icon">🎁</div>
-            <div class="promo-title">Packages</div>
-            <div class="promo-sub" id="promo-packages">Combos &amp; bundles</div>
-          </div>
-          <div class="promo-tile" onclick="showFoodPacks()">
-            <div class="promo-icon">🍱</div>
-            <div class="promo-title">Food Packs</div>
-            <div class="promo-sub" id="promo-foodpacks">Ready-to-go meals</div>
-          </div>
-        </div>
-        <div class="store-info-card" id="store-info-card" style="display:none">
-          <h3>📍 Visit us</h3>
-          <div id="store-info"></div>
-        </div>
+        <div id="categories-list" class="categories-grid"><div class="category-card" onclick="showProducts(1)">
+      <div class="icon">🍴</div>
+      <div class="name">Chicken</div>
+    </div><div class="category-card" onclick="showProducts(2)">
+      <div class="icon">🍴</div>
+      <div class="name">Pork</div>
+    </div><div class="category-card" onclick="showProducts(3)">
+      <div class="icon">🍴</div>
+      <div class="name">Beef</div>
+    </div><div class="category-card" onclick="showProducts(10)">
+      <div class="icon">🍴</div>
+      <div class="name">Seafood</div>
+    </div><div class="category-card" onclick="showProducts(4)">
+      <div class="icon">🍴</div>
+      <div class="name">Noodles</div>
+    </div><div class="category-card" onclick="showProducts(5)">
+      <div class="icon">🍴</div>
+      <div class="name">Bilao</div>
+    </div><div class="category-card" onclick="showProducts(6)">
+      <div class="icon">🍴</div>
+      <div class="name">Desserts</div>
+    </div><div class="category-card" onclick="showProducts(12)">
+      <div class="icon">🍴</div>
+      <div class="name">Vegetables</div>
+    </div></div>
       </section>
 
       <!-- Products view -->
@@ -91,7 +88,6 @@
         <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
         <div class="section-header">
           <h2 id="products-title"></h2>
-          <p class="section-sub" id="products-sub"></p>
         </div>
         <div id="products-list" class="products-grid"></div>
       </section>
@@ -100,16 +96,6 @@
       <section id="view-product-detail" class="view hidden">
         <button class="btn btn-back" onclick="goBack()">← Back</button>
         <div id="product-detail"></div>
-      </section>
-
-      <!-- Packages (combos) list -->
-      <section id="view-packages" class="view hidden">
-        <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
-        <div class="section-header">
-          <h2>Packages</h2>
-          <p class="section-sub">Combos &amp; bundles for the whole family</p>
-        </div>
-        <div id="packages-list"></div>
       </section>
 
       <!-- Package customization -->
@@ -133,7 +119,6 @@
         <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
         <div class="section-header">
           <h2>Your Cart</h2>
-          <p class="section-sub" id="cart-sub"></p>
         </div>
         <div id="cart-items"></div>
         <div id="cart-totals"></div>
@@ -145,7 +130,6 @@
         <button class="btn btn-back" onclick="showCart()">← Back to Cart</button>
         <div class="section-header">
           <h2>Checkout</h2>
-          <p class="section-sub">Almost there!</p>
         </div>
         <div id="checkout-form"></div>
       </section>
@@ -155,15 +139,8 @@
         <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
         <div class="section-header">
           <h2>My Orders</h2>
-          <p class="section-sub">Track and manage your orders</p>
         </div>
         <div id="orders-list"></div>
-      </section>
-
-      <!-- Order detail view -->
-      <section id="view-order-detail" class="view hidden">
-        <button class="btn btn-back" onclick="showOrders()">← Back to Orders</button>
-        <div id="order-detail"></div>
       </section>
 
       <!-- Order success view -->
@@ -184,10 +161,6 @@
         <span class="nav-icon">📋</span>
         <span>Menu</span>
       </button>
-      <button class="nav-btn" onclick="showPackages()">
-        <span class="nav-icon">🎁</span>
-        <span>Packages</span>
-      </button>
       <button class="nav-btn" onclick="showFoodPacks()">
         <span class="nav-icon">🍱</span>
         <span>Food Packs</span>
@@ -207,6 +180,7 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260905-7"></script>
-</body>
-</html>
+  <script src="app.js?v=20260905-4"></script>
+
+
+</body></html>

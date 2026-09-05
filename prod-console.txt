@@ -1,0 +1,12 @@
+[14832:1660:0905/175952.731:INFO:components\enterprise\browser\controller\chrome_browser_cloud_management_controller.cc:241] No machine level policy manager exists.
+[14832:1660:0905/175953.128:WARNING:chrome\browser\extensions\external_registry_loader_win.cc:236] Error observing HKLM: Access is denied. (0x5)
+[14832:1660:0905/175955.420:INFO:CONSOLE:275] "[webview] data → config: [object Object]", source: https://postrebot.onrender.com/webview/app.js?v=20260905-4 (275)
+[14832:1660:0905/175955.628:INFO:CONSOLE:205] "[webview] data → products: 32 [object Object]", source: https://postrebot.onrender.com/webview/app.js?v=20260905-4 (205)
+[14832:1660:0905/175955.734:INFO:CONSOLE:248] "[webview] data → foodPacks: 1 [object Object]", source: https://postrebot.onrender.com/webview/app.js?v=20260905-4 (248)
+[14832:1660:0905/175955.747:INFO:CONSOLE:188] "[webview] data → categories: 8 [object Object],[object Object],[object Object],[object Object],[object Object],[object Object],[object Object],[object Object]", source: https://postrebot.onrender.com/webview/app.js?v=20260905-4 (188)
+[14832:1660:0905/175955.757:INFO:CONSOLE:232] "[webview] data → packages: 0 null", source: https://postrebot.onrender.com/webview/app.js?v=20260905-4 (232)
+[14832:14856:0905/175956.444:ERROR:google_apis\gcm\engine\registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+[14832:1660:0905/175956.825:INFO:CONSOLE:262] "[webview] data → cart items: 0 [object Object]", source: https://postrebot.onrender.com/webview/app.js?v=20260905-4 (262)
+[14832:1660:0905/175956.829:INFO:CONSOLE:783] "[webview] init complete → [object Object]", source: https://postrebot.onrender.com/webview/app.js?v=20260905-4 (783)
+[14832:1660:0905/175957.137:ERROR:chrome\browser\web_applications\os_integration\os_integration_manager.cc:261] Can't perform OS integration while the browser is shutting down.
+[14832:1660:0905/175957.162:ERROR:chrome\browser\web_applications\externally_managed_app_manager.cc:680] https://docs.google.com/presentation/installwebapp?usp=chrome_default from install source 1 failed to install with reason 21

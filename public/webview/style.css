@@ -689,6 +689,33 @@ body {
   display: none !important;
 }
 
+/* Disabled buttons (empty cart, submitting order, cancelling…) */
+.btn:disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Danger action — cancel a pending order */
+.btn-cancel {
+  width: 100%;
+  margin-top: 12px;
+  padding: 14px;
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Small info lines on order cards / detail */
+.order-meta {
+  font-size: 0.82rem;
+  color: #777;
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
 .empty-state {
   text-align: center;
   padding: 50px 20px;
