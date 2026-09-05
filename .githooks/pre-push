@@ -1,9 +1,0 @@
-#!/bin/sh
-# Runs before every `git push`: folds the SQLite WAL into data/postre.db so the
-# committed file contains the latest image links / menu edits.
-npm run --silent db:checkpoint
-if [ -n "$(git status --porcelain data/postre.db)" ]; then
-  echo "pre-push: data/postre.db had uncommitted changes after checkpoint." >&2
-  echo "  -> commit it and push again so the latest image links are deployed." >&2
-  exit 1
-fi

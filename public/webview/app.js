@@ -1,3 +1,8 @@
+// ===== Supabase client (fetch catalog directly — much faster than Express round-trip) =====
+const SUPABASE_URL = 'https://npftxbstixrhuiaqpmap.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnR4YnN0aXhyaHVpYXFwbWFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTQwMDQsImV4cCI6MjEwMzM5MDAwNH0.9NFykxXdzeVfNRd4KikObsCmNsW2Ex3mFjftMLuWxMU';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // Session management - when opened from Messenger we receive a ?psid= parameter
 // which identifies the customer. Use it as the session so orders link to their account.
 const urlParams = new URLSearchParams(window.location.search);
@@ -89,22 +94,33 @@ function updateCartBadge() {
   }
 }
 
-// ---- Load data ----
+// ---- Load data (direct from Supabase — fast) ----
 async function loadCategories() {
-  categories = await api('/categories');
+  const { data } = await sb.from('categories').select('*').eq('active', 1).order('sort_order');
+  categories = data || [];
   renderCategories();
 }
 
 async function loadProducts() {
-  products = await api('/products');
+  const { data } = await sb.from('products').select('*, product_variants(*)').eq('active', 1).order('category_id, sort_order');
+  products = data || [];
 }
 
 async function loadPackages() {
-  packages = await api('/packages');
+  const { data } = await sb.from('packages').select('*, package_slots:package_slots(*, package_options:package_options(*))').eq('active', 1).order('sort_order');
+  // Transform to match the rendering code's expected structure
+  packages = (data || []).map(pkg => ({
+    ...pkg,
+    slots: (pkg.package_slots || []).map(slot => ({
+      ...slot,
+      options: slot.package_options || [],
+    })),
+  }));
 }
 
 async function loadFoodPacks() {
-  foodPacks = await api('/food-packs');
+  const { data } = await sb.from('food_packs').select('*').eq('active', 1).order('sort_order');
+  foodPacks = data || [];
 }
 
 async function loadCart() {
@@ -142,7 +158,8 @@ function showProducts(categoryId) {
   const container = document.getElementById('products-list');
 
   container.innerHTML = catProducts.map(p => {
-    const variant = p.variants && p.variants[0];
+    const variants = p.product_variants || [];
+    const variant = variants[0];
     const price = variant ? formatMoney(variant.price) : '';
     const img = p.photo_url ? `<img src="${p.photo_url}" alt="${p.name}">` : `<img src="" alt="">`;
     return `<div class="product-card" onclick="showProductDetail(${p.id})">
@@ -161,17 +178,18 @@ function showProducts(categoryId) {
 function showProductDetail(productId) {
   const p = products.find(x => x.id === productId);
   if (!p) return;
-  selectedVariants[productId] = p.variants && p.variants[0]?.size || null;
+  const variants = p.product_variants || [];
+  selectedVariants[productId] = variants[0]?.size || null;
   selectedQty = 1;
 
   const container = document.getElementById('product-detail');
   const img = p.photo_url ? `<img class="detail-image" src="${p.photo_url}" alt="${p.name}">` : '';
 
   let variantsHtml = '';
-  if (p.variants && p.variants.length > 0) {
+  if (variants.length > 0) {
     variantsHtml = `<div class="variant-options">
       <label>Size:</label>
-      ${p.variants.map(v => `<button class="variant-btn ${v.size === selectedVariants[productId] ? 'selected' : ''}" onclick="selectVariant(${productId}, '${v.size}', this)">${v.size} - ${formatMoney(v.price)}</button>`).join('')}
+      ${variants.map(v => `<button class="variant-btn ${v.size === selectedVariants[productId] ? 'selected' : ''}" onclick="selectVariant(${productId}, '${v.size}', this)">${v.size} - ${formatMoney(v.price)}</button>`).join('')}
     </div>`;
   }
 
