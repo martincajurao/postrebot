@@ -57,4 +57,9 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 logConfig();
 configurePush();
 const PORT = Number(process.env.PORT || 3000);
-app.listen(PORT, () => console.log(`Postre server listening on http://localhost:${PORT} (db: ${dbType()})`));
+app.listen(PORT, () => {
+  const base = process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  console.log(`Postre server listening on http://localhost:${PORT} (db: ${dbType()})`);
+  console.log(`Web ordering URL: ${base}/webview`);
+  console.log(`⚠️  Remember to whitelist "${base}" in Meta App Dashboard → Messenger → Settings → Webview Domains`);
+});

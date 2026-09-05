@@ -2,22 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Postre Food Products - Order</title>
   <link rel="stylesheet" href="style.css">
+  <!-- Messenger Extensions SDK: required for in-Messenger webview features like requestCloseBrowser() -->
+  <script src="https://connect.facebook.net/en_US/MessengerExtensions.js"></script>
 </head>
 <body>
   <div id="app">
     <!-- Header -->
     <header class="header">
-      <h1>Postre Food Products</h1>
-      <p class="header-sub">Order online</p>
+      <div class="header-content">
+        <div class="header-logo">🍽️</div>
+        <div class="header-text">
+          <h1>Postre Food Products</h1>
+          <p class="header-sub">Order online</p>
+        </div>
+      </div>
     </header>
+
+    <!-- Loading state -->
+    <div id="loading-view" class="view active" style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:60px 20px">
+      <div class="spinner"></div>
+      <p style="color:#999;font-size:0.9rem">Loading menu...</p>
+    </div>
 
     <!-- Disabled message (shown when admin turns off webview) -->
     <div id="disabled-msg" class="view hidden" style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px 20px">
       <div>
-        <div style="font-size:3rem;margin-bottom:16px">\u{1F4F1}</div>
+        <div style="font-size:3rem;margin-bottom:16px">📱</div>
         <h2>Web ordering is currently unavailable</h2>
         <p style="color:#666;margin:12px 0">Please order through our Facebook Messenger bot instead.</p>
         <a id="messenger-link-disabled" href="https://m.me/postrefoodproducts" target="_blank" class="btn btn-primary">Order on Messenger</a>
@@ -25,43 +38,53 @@
     </div>
 
     <!-- Main content -->
-    <main class="main">
+    <main class="main hidden" id="main-content">
       <!-- Categories view -->
       <section id="view-categories" class="view active">
-        <h2>Menu</h2>
+        <div class="section-header">
+          <h2>Our Menu</h2>
+          <p class="section-sub">Choose a category to start ordering</p>
+        </div>
         <div id="categories-list" class="categories-grid"></div>
       </section>
 
       <!-- Products view -->
       <section id="view-products" class="view hidden">
-        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
-        <h2 id="products-title"></h2>
+        <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
+        <div class="section-header">
+          <h2 id="products-title"></h2>
+        </div>
         <div id="products-list" class="products-grid"></div>
       </section>
 
       <!-- Product detail / variant select -->
       <section id="view-product-detail" class="view hidden">
-        <button class="btn btn-back" onclick="goBack()">&larr; Back</button>
+        <button class="btn btn-back" onclick="goBack()">← Back</button>
         <div id="product-detail"></div>
       </section>
 
       <!-- Package customization -->
       <section id="view-package" class="view hidden">
-        <button class="btn btn-back" onclick="goBack()">&larr; Back</button>
+        <button class="btn btn-back" onclick="goBack()">← Back</button>
         <div id="package-detail"></div>
       </section>
 
       <!-- Food packs view -->
       <section id="view-food-packs" class="view hidden">
-        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
-        <h2>Food Packs</h2>
+        <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
+        <div class="section-header">
+          <h2>Food Packs</h2>
+          <p class="section-sub">Great value bundles for gatherings</p>
+        </div>
         <div id="food-packs-list" class="products-grid"></div>
       </section>
 
       <!-- Cart view -->
       <section id="view-cart" class="view hidden">
-        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
-        <h2>Your Cart</h2>
+        <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
+        <div class="section-header">
+          <h2>Your Cart</h2>
+        </div>
         <div id="cart-items"></div>
         <div id="cart-totals"></div>
         <button class="btn btn-primary btn-checkout" onclick="startCheckout()" id="checkout-btn">Proceed to Checkout</button>
@@ -69,39 +92,54 @@
 
       <!-- Checkout view -->
       <section id="view-checkout" class="view hidden">
-        <button class="btn btn-back" onclick="showCart()">&larr; Back to Cart</button>
-        <h2>Checkout</h2>
+        <button class="btn btn-back" onclick="showCart()">← Back to Cart</button>
+        <div class="section-header">
+          <h2>Checkout</h2>
+        </div>
         <div id="checkout-form"></div>
       </section>
 
       <!-- Orders view -->
       <section id="view-orders" class="view hidden">
-        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
-        <h2>My Orders</h2>
+        <button class="btn btn-back" onclick="showCategories()">← Back to Menu</button>
+        <div class="section-header">
+          <h2>My Orders</h2>
+        </div>
         <div id="orders-list"></div>
+      </section>
+
+      <!-- Order success view -->
+      <section id="view-success" class="view hidden">
+        <div class="success-container">
+          <div class="success-icon">✅</div>
+          <h2>Order Placed!</h2>
+          <p id="success-order-number" class="success-number"></p>
+          <p class="success-msg">Thank you for your order. We'll keep you updated on its status.</p>
+          <button class="btn btn-primary" onclick="closeWebview()">Done</button>
+        </div>
       </section>
     </main>
 
     <!-- Bottom navigation -->
-    <nav class="bottom-nav">
+    <nav class="bottom-nav" id="bottom-nav">
       <button class="nav-btn active" onclick="showCategories()">
-        <span class="nav-icon">&#9776;</span>
+        <span class="nav-icon">📋</span>
         <span>Menu</span>
       </button>
       <button class="nav-btn" onclick="showFoodPacks()">
-        <span class="nav-icon">&#127860;</span>
+        <span class="nav-icon">🍱</span>
         <span>Food Packs</span>
       </button>
       <button class="nav-btn" onclick="showCart()">
-        <span class="nav-icon">&#128722;</span>
+        <span class="nav-icon">🛒</span>
         <span>Cart</span>
         <span id="cart-badge" class="badge hidden">0</span>
       </button>
       <button class="nav-btn" onclick="showOrders()">
-        <span class="nav-icon">&#128203;</span>
+        <span class="nav-icon">📜</span>
         <span>Orders</span>
       </button>
-    </div>
+    </nav>
 
     <!-- Toast notification -->
     <div id="toast" class="toast hidden"></div>

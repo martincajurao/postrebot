@@ -1,5 +1,9 @@
-// Session management
-let sessionId = localStorage.getItem('webview_session');
+// Session management - when opened from Messenger we receive a ?psid= parameter
+// which identifies the customer. Use it as the session so orders link to their account.
+const urlParams = new URLSearchParams(window.location.search);
+const psidFromMessenger = urlParams.get('psid') || '';
+
+let sessionId = psidFromMessenger || localStorage.getItem('webview_session');
 if (!sessionId) {
   sessionId = 'wv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
   localStorage.setItem('webview_session', sessionId);
@@ -20,6 +24,7 @@ let selectedQty = 1;
 let orders = [];
 let config = { payment: {}, contact: {} };
 let messengerLink = '';
+let isInsideMessenger = false;
 
 // ---- Helpers ----
 async function api(path, opts = {}) {
@@ -45,6 +50,24 @@ function showView(id) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   currentView = id.replace('view-', '');
+  // Update bottom nav active state
+  updateBottomNav();
+}
+
+function updateBottomNav() {
+  const navMap = {
+    'categories': 0,
+    'products': 0,
+    'food-packs': 1,
+    'cart': 2,
+    'orders': 3,
+    'checkout': 2,
+  };
+  const idx = navMap[currentView];
+  if (idx === undefined) return;
+  document.querySelectorAll('.nav-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', i === idx);
+  });
 }
 
 function goBack() {
@@ -158,10 +181,9 @@ function showProductDetail(productId) {
     <div class="detail-desc">${p.description || ''}</div>
     ${variantsHtml}
     <div class="qty-selector">
-      <label>Quantity:</label>
-      <button onclick="changeQty(-1)">-</button>
-      <span id="qty-value">${selectedQty}</span>
-      <button onclick="changeQty(1)">+</button>
+      <button class="qty-btn" onclick="changeQty(-1)">−</button>
+      <span class="qty-value" id="qty-value">${selectedQty}</span>
+      <button class="qty-btn" onclick="changeQty(1)">+</button>
     </div>
     <button class="btn btn-primary btn-checkout" onclick="addToCartProduct(${productId})">Add to Cart</button>
   `;
@@ -225,10 +247,9 @@ function showPackageDetail(pkgId) {
     <div class="detail-desc">Base price: ${formatMoney(pkg.base_price)}</div>
     ${slotsHtml}
     <div class="qty-selector">
-      <label>Quantity:</label>
-      <button onclick="changeQty(-1)">-</button>
-      <span id="qty-value">${selectedQty}</span>
-      <button onclick="changeQty(1)">+</button>
+      <button class="qty-btn" onclick="changeQty(-1)">−</button>
+      <span class="qty-value" id="qty-value">${selectedQty}</span>
+      <button class="qty-btn" onclick="changeQty(1)">+</button>
     </div>
     <button class="btn btn-primary btn-checkout" onclick="addToCartPackage(${pkgId})">Add to Cart</button>
   `;
@@ -309,7 +330,7 @@ function showCart() {
   totals.innerHTML = `
     <div class="total-row"><span>Subtotal</span><span>${formatMoney(cart.totals.subtotal)}</span></div>
     <div class="total-row"><span>Delivery</span><span>${formatMoney(cart.totals.delivery)}</span></div>
-    <div class="total-row grand"><span>Total</span><span>${formatMoney(cart.totals.total)}</span></div>
+    <div class="total-row grand"><span>Total</span><span class="value">${formatMoney(cart.totals.total)}</span></div>
   `;
   showView('view-cart');
 }
@@ -385,7 +406,7 @@ function startCheckout() {
     if (!date) return;
     const data = await api('/slots?date=' + date);
     const slotSelect = document.getElementById('time-slot');
-    if (!data.open || !data.open.open) {
+    if (!data.open) {
       slotSelect.innerHTML = '<option value="">Date not available</option>';
       return;
     }
@@ -435,9 +456,14 @@ async function placeOrder() {
   });
 
   if (result.ok) {
-    showToast('Order placed! ' + result.order_number);
     await loadCart();
-    showOrders();
+    // Show success screen
+    document.getElementById('success-order-number').textContent = 'Order #' + result.order_number;
+    showView('view-success');
+    // Auto-close webview after delay when inside Messenger
+    if (isInsideMessenger) {
+      setTimeout(() => closeWebview(), 3000);
+    }
   } else {
     showToast(result.error || 'Failed to place order');
   }
@@ -472,17 +498,50 @@ function showCategories() {
   showView('view-categories');
 }
 
+// ---- Messenger Extensions integration ----
+/** Close the in-Messenger webview and return the user to the chat thread. */
+function closeWebview() {
+  if (isInsideMessenger && window.MessengerExtensions) {
+    try {
+      window.MessengerExtensions.requestCloseBrowser(function success() {
+        // Webview closed successfully
+      }, function error(err) {
+        console.error('[webview] requestCloseBrowser error:', err);
+      });
+    } catch (e) {
+      console.error('[webview] MessengerExtensions error:', e);
+    }
+  }
+}
+
 // ---- Init ----
 async function init() {
+  // Detect if we're running inside Messenger's webview
+  if (window.MessengerExtensions) {
+    try {
+      window.MessengerExtensions.getSupportedFeatures(function (result) {
+        isInsideMessenger = true;
+      }, function () {
+        isInsideMessenger = false;
+      });
+    } catch (e) {
+      isInsideMessenger = false;
+    }
+  }
+
   // Check if webview is enabled
   const enabledData = await api('/enabled');
   if (!enabledData.enabled) {
+    document.getElementById('loading-view').classList.remove('active');
     document.getElementById('disabled-msg').classList.remove('hidden');
-    document.querySelector('.main').style.display = 'none';
-    document.querySelector('.bottom-nav').style.display = 'none';
+    document.getElementById('main-content').classList.add('hidden');
+    document.getElementById('bottom-nav').style.display = 'none';
     return;
   }
+
   await Promise.all([loadCategories(), loadProducts(), loadPackages(), loadFoodPacks(), loadCart(), loadConfig()]);
+  document.getElementById('loading-view').classList.remove('active');
+  document.getElementById('main-content').classList.remove('hidden');
   renderCategories();
   showCategories();
 }

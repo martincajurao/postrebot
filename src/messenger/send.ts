@@ -72,8 +72,12 @@ export function sendButtons(psid: string, text: string, buttons: { title: string
   });
 }
 
-/** Send a URL button that opens a web page inside Messenger's built-in browser */
-export function sendUrlButton(psid: string, text: string, title: string, url: string): Promise<SendResult> {
+/** Send a URL button that opens a web page inside Messenger's built-in in-app browser.
+ *  messenger_extensions: true makes it a true in-Messenger webview (closes back into
+ *  the chat thread) and loads the MessengerExtensions JS SDK on the page so the webview
+ *  can call requestCloseBrowser(). The URL must be HTTPS and whitelisted in the Meta app
+ *  dashboard under Messenger > Webview Domains. */
+export function sendUrlButton(psid: string, text: string, title: string, url: string, messengerExt = true): Promise<SendResult> {
   return sendApi({
     recipient: { id: psid },
     messaging_type: 'RESPONSE',
@@ -88,6 +92,7 @@ export function sendUrlButton(psid: string, text: string, title: string, url: st
             title: title.slice(0, 20),
             url: url,
             webview_height_ratio: 'full',
+            messenger_extensions: messengerExt,
           }],
         },
       },

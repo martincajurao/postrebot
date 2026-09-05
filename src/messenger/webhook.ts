@@ -39,8 +39,14 @@ function safeSend(p: Promise<any>): Promise<void> {
 // warning) — those hosts are unreachable from Messenger and would silently
 // break every image.
 function envBaseUrl(): string {
-  const raw = (process.env.BASE_URL || '').replace(/\/+$/, '');
+  // 1. Explicit BASE_URL env var takes priority (set this in Render Dashboard)
+  let raw = (process.env.BASE_URL || '').replace(/\/+$/, '');
+  // 2. On Render, fall back to RENDER_EXTERNAL_URL if BASE_URL not set
+  if (!raw && process.env.RENDER_EXTERNAL_URL) {
+    raw = process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '');
+  }
   if (!raw) return '';
+  // Ignore localhost / tunnel hosts — unreachable from Messenger
   if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(raw) || /(^|\.)ngrok/i.test(raw)) {
     console.warn(`[webhook] ignoring BASE_URL="${raw}" (localhost/tunnel host, unreachable from Messenger) — using the webhook request origin instead`);
     return '';
@@ -703,7 +709,9 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'WEBVIEW': {
       const url = webviewUrl();
       if (url) {
-        return sendUrlButton(psid, '🌐 Order online through our web store!\n\nTap the button below to open the web ordering page:', '🌐 Open Web Store', url);
+        // Pass the PSID so the webview can identify the customer and link orders to their Messenger account.
+        const webviewLink = url + (url.includes('?') ? '&' : '?') + 'psid=' + encodeURIComponent(psid);
+        return sendUrlButton(psid, '🌐 Order online through our web store!\n\nTap the button below to open the web ordering page inside Messenger:', '🌐 Open Web Store', webviewLink);
       }
       return sendText(psid, '🌐 Web ordering is coming soon! For now, please use the menu below to order.');
     }
