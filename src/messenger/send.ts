@@ -72,7 +72,7 @@ export function sendButtons(psid: string, text: string, buttons: { title: string
   });
 }
 
-/** Send a URL button that opens a web page inside Messenger's built-in webview */
+/** Send a URL button that opens a web page inside Messenger's built-in browser */
 export function sendUrlButton(psid: string, text: string, title: string, url: string): Promise<SendResult> {
   return sendApi({
     recipient: { id: psid },
@@ -87,7 +87,6 @@ export function sendUrlButton(psid: string, text: string, title: string, url: st
             type: 'web_url',
             title: title.slice(0, 20),
             url: url,
-            messenger_extensions: true,
             webview_height_ratio: 'full',
           }],
         },
