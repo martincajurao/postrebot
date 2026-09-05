@@ -94,7 +94,6 @@ export function webviewButton(url: string, title: string) {
     // messenger_extensions only validates on HTTPS — ensureWebviewWhitelisted()
     // gates this flag against the Messenger Profile whitelist before sending.
     messenger_extensions: url.startsWith('https://'),
-    webview_shareable: true,
   };
 }
 
@@ -122,7 +121,6 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
             title: title.slice(0, 20),
             webview_height_ratio: 'full',
             messenger_extensions: ext,
-            webview_shareable: true,
           }],
         },
       },
