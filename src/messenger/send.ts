@@ -235,7 +235,10 @@ export function whitelistWebviewDomain(buttonUrl: string, opts: { force?: boolea
         return true;
       }
       // Not whitelisted — add it now (merge, never replace).
-      const merged = Array.from(new Set([...normalized, origin]));
+      // Add BOTH with and without trailing slash — Meta's whitelist matching
+      // is exact, and it may store the domain with a trailing slash while the
+      // button URL origin has none (or vice versa). Cover both forms.
+      const merged = Array.from(new Set([...normalized, origin, origin + '/']));
       console.log(`[whitelist] adding ${origin} to whitelist (merged list: [${merged.join(', ')}])`);
       const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
         method: 'POST',

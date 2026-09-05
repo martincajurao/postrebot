@@ -62,11 +62,15 @@ app.get('/whitelist', async (_req, res) => {
     const domains = await fetchWhitelistedDomains();
     const base = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
     const origin = base ? originOf(base) : null;
+    // Meta may store the domain with or without a trailing slash — check both.
+    const normalized = domains.map(d => d.replace(/\/+$/, ''));
+    const whitelisted = origin ? normalized.includes(origin) : false;
     res.json({
       whitelisted_domains: domains,
       our_origin: origin,
-      our_origin_whitelisted: origin ? domains.map(d => d.replace(/\/+$/, '')).includes(origin) : false,
+      our_origin_whitelisted: whitelisted,
       count: domains.length,
+      note: 'Meta matches by exact origin string — trailing slash matters. We add both forms to the whitelist.',
     });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || String(e) });
