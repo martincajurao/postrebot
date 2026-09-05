@@ -134,24 +134,26 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
 
   // Verify the button URL's origin is whitelisted so Meta actually opens the
   // in-app webview instead of silently demoting the button to an external page.
-  const whitelisted = await ensureWebviewWhitelisted(url);
+  // Force mode: always re-verify against Meta's actual whitelist (the cache can
+  // be stale if the domain was removed from the dashboard after boot).
+  const whitelisted = await ensureWebviewWhitelisted(url, { force: true });
   console.log(`[sendUrlButton] ensureWebviewWhitelisted=${whitelisted}`);
-  if (whitelisted) return sendWith(true);
-
-  // Whitelist API check failed (transient error?) — try optimistic: the domain
-  // may already be whitelisted manually in the Meta dashboard. If Meta rejects
-  // the message because the domain isn't whitelisted, fall back to external.
-  console.log('[sendUrlButton] whitelist check failed — trying optimistic send with messenger_extensions=true');
-  const result = await sendWith(true);
-  console.log(`[sendUrlButton] optimistic send ok=${result.ok} status=${result.status} body=${result.body?.slice(0, 200)}`);
-  if (result.ok) return result;
-
-  const err = (result.body || '').toLowerCase();
-  if (err.includes('whitelisted') || err.includes('messenger_extensions') || err.includes('invalid key')) {
-    console.warn('[messenger] webview origin NOT whitelisted — sending external fallback link:', originOf(url));
-    return sendWith(false);
+  if (whitelisted) {
+    const result = await sendWith(true);
+    console.log(`[sendUrlButton] sent with messenger_extensions=true ok=${result.ok} status=${result.status} body=${result.body?.slice(0, 200)}`);
+    if (result.ok) return result;
+    // Send failed — log and fall through to external fallback.
+    const err = (result.body || '').toLowerCase();
+    if (err.includes('whitelisted') || err.includes('messenger_extensions') || err.includes('invalid key')) {
+      console.warn('[messenger] messenger_extensions rejected by Meta — falling back to external link:', originOf(url));
+    } else {
+      console.warn('[messenger] webview send failed — falling back to external link:', result.body);
+    }
   }
-  return result; // unrelated error — surface it as-is
+
+  // Whitelist check failed OR messenger_extensions rejected — send external fallback.
+  console.log('[sendUrlButton] sending external fallback (messenger_extensions=false)');
+  return sendWith(false);
 }
 
 // ---------- Webview domain whitelisting ----------
@@ -161,7 +163,7 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
 const whitelistedOrigins = new Set<string>();
 const whitelistInFlight = new Map<string, Promise<boolean>>();
 
-function originOf(url: string): string {
+export function originOf(url: string): string {
   try {
     return new URL(url).origin;
   } catch {
@@ -169,7 +171,7 @@ function originOf(url: string): string {
   }
 }
 
-async function fetchWhitelistedDomains(): Promise<string[]> {
+export async function fetchWhitelistedDomains(): Promise<string[]> {
   const url = `https://graph.facebook.com/v19.0/me/messenger_profile?fields=whitelisted_domains&access_token=${PAGE_TOKEN}`;
   console.log(`[fetchWhitelistedDomains] GET ${url.replace(PAGE_TOKEN, '***')}`);
   const res = await fetch(url);
@@ -187,15 +189,15 @@ async function fetchWhitelistedDomains(): Promise<string[]> {
  *   REPLACE the whole list on Meta's side.
  * - Retried lazily on every send until it succeeds; safe to call concurrently.
  */
-export function ensureWebviewWhitelisted(buttonUrl: string): Promise<boolean> {
-  return whitelistWebviewDomain(buttonUrl);
+export function ensureWebviewWhitelisted(buttonUrl: string, opts: { force?: boolean } = {}): Promise<boolean> {
+  return whitelistWebviewDomain(buttonUrl, opts);
 }
 
 /**
  * Ensure the button URL's origin is whitelisted in the Messenger Profile.
  * Alias for ensureWebviewWhitelisted — see that function for details.
  */
-export function whitelistWebviewDomain(buttonUrl: string): Promise<boolean> {
+export function whitelistWebviewDomain(buttonUrl: string, opts: { force?: boolean } = {}): Promise<boolean> {
   if (!PAGE_TOKEN) {
     console.log('[whitelist] SKIP: PAGE_ACCESS_TOKEN not set');
     return Promise.resolve(false);
@@ -206,10 +208,14 @@ export function whitelistWebviewDomain(buttonUrl: string): Promise<boolean> {
   }
 
   const origin = originOf(buttonUrl);
-  console.log(`[whitelist] checking origin: ${origin}`);
-  if (whitelistedOrigins.has(origin)) {
+  console.log(`[whitelist] checking origin: ${origin} (force=${!!opts.force})`);
+  if (!opts.force && whitelistedOrigins.has(origin)) {
     console.log(`[whitelist] cache hit — already whitelisted: ${origin}`);
     return Promise.resolve(true);
+  }
+  // Force mode: verify Meta's actual whitelist instead of trusting cache.
+  if (opts.force) {
+    console.log(`[whitelist] force mode — bypassing cache, re-verifying with Meta`);
   }
 
   const inFlight = whitelistInFlight.get(origin);
@@ -220,15 +226,17 @@ export function whitelistWebviewDomain(buttonUrl: string): Promise<boolean> {
 
   const job = (async () => {
     try {
-      // Already whitelisted (earlier boot / dashboard)?
+      // Always verify against Meta's actual whitelist (source of truth).
       const existing = await fetchWhitelistedDomains();
       const normalized = existing.map((d) => d.replace(/\/+$/, ''));
+      console.log(`[whitelist] Meta whitelist: [${normalized.join(', ')}]`);
       if (normalized.includes(origin)) {
         whitelistedOrigins.add(origin);
         return true;
       }
-      // Merge — keep every other whitelisted domain intact.
+      // Not whitelisted — add it now (merge, never replace).
       const merged = Array.from(new Set([...normalized, origin]));
+      console.log(`[whitelist] adding ${origin} to whitelist (merged list: [${merged.join(', ')}])`);
       const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

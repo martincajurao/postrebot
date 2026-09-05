@@ -7,7 +7,7 @@ import { logConfig } from './api/supabase-storage';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
 import webviewApi from './api/webview';
-import { whitelistWebviewDomain, setPersistentMenu } from './messenger/send';
+import { whitelistWebviewDomain, setPersistentMenu, fetchWhitelistedDomains, originOf } from './messenger/send';
 import { configurePush } from './services/push';
 import path from 'path';
 import fs from 'fs';
@@ -50,6 +50,28 @@ app.get('/uploads/:file', async (req, res) => {
 app.use('/api/admin', uploadRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true, db: 'supabase' }));
+
+// Webview whitelist inspection — shows what Meta has registered and allows
+// force-refreshing the local cache (useful after manually editing the
+// Messenger Profile whitelist in the Meta dashboard).
+app.get('/whitelist', async (_req, res) => {
+  try {
+    if (!process.env.PAGE_ACCESS_TOKEN) {
+      return res.status(503).json({ error: 'PAGE_ACCESS_TOKEN not set' });
+    }
+    const domains = await fetchWhitelistedDomains();
+    const base = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
+    const origin = base ? originOf(base) : null;
+    res.json({
+      whitelisted_domains: domains,
+      our_origin: origin,
+      our_origin_whitelisted: origin ? domains.map(d => d.replace(/\/+$/, '')).includes(origin) : false,
+      count: domains.length,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   console.error(err);
