@@ -72,6 +72,27 @@ export function sendButtons(psid: string, text: string, buttons: { title: string
   });
 }
 
+/** Send a URL button that opens a web page (can be used for webview) */
+export function sendUrlButton(psid: string, text: string, title: string, url: string): Promise<SendResult> {
+  return sendApi({
+    recipient: { id: psid },
+    message: {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: text.slice(0, 640),
+          buttons: [{
+            type: 'web_url',
+            title: title.slice(0, 20),
+            url: url,
+          }],
+        },
+      },
+    },
+  });
+}
+
 /** Messenger must be able to download carousel images itself; drop any URL it cannot fetch. */
 async function imageUrlOk(url: string): Promise<boolean> {
   try {

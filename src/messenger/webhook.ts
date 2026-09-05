@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { one, many, run, insertReturningId } from '../db';
-import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
+import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, completeOrderByCustomer, rateOrder } from '../services/orders';
 import { sendPushToAdmins } from '../services/push';
@@ -49,6 +49,12 @@ function envBaseUrl(): string {
 }
 const ENV_BASE_URL = envBaseUrl();
 let requestBaseUrl = '';
+
+/** Public URL for the webview ordering page (BASE_URL or request origin + /webview) */
+function webviewUrl(): string {
+  const base = ENV_BASE_URL || requestBaseUrl;
+  return base ? base.replace(/\/+$/, '') + '/webview' : '';
+}
 
 /** Capture the public origin from each webhook request (call before handling). */
 export function setRequestOrigin(req: any): void {
@@ -266,6 +272,7 @@ async function mainMenu(psid: string) {
   // anything past the third), so the main menu renders as quick replies — up to
   // 13 can display, guaranteeing all 4 options are visible.
   return sendQuickReplies(psid, '🍽️ Welcome to Postre Food Products!\n\nHow can we help you today?', [
+    { title: '🌐 Order Online', payload: 'WEBVIEW' },
     { title: '🎁 Packages', payload: 'MENU_PACKAGES' },
     { title: '📖 View Menu', payload: 'MENU_BROWSE' },
     { title: '🍱 Food Packs', payload: 'MENU_FOODPACKS' },
@@ -693,6 +700,13 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'MAIN_MENU':
     case 'MAIN_MENU_BACK':
       return mainMenu(psid);
+    case 'WEBVIEW': {
+      const url = webviewUrl();
+      if (url) {
+        return sendUrlButton(psid, '🌐 Order online through our web store!\n\nTap the button below to open the web ordering page:', '🌐 Open Web Store', url);
+      }
+      return sendText(psid, '🌐 Web ordering is coming soon! For now, please use the menu below to order.');
+    }
     case 'MENU_ORDER':
       return showCategories(psid);
     case 'MENU_PACKAGES':

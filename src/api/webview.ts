@@ -175,9 +175,14 @@ r.get('/slots', async (req, res) => {
 // ---- Check if webview is enabled ----
 
 r.get('/enabled', async (_req, res) => {
-  const row = await one("SELECT value FROM app_settings WHERE key = 'webview_enabled'") as any;
-  const enabled = row ? row.value === '1' : true; // default to enabled
-  res.json({ enabled });
+  try {
+    const row = await one("SELECT value FROM app_settings WHERE key = 'webview_enabled'") as any;
+    const enabled = row ? row.value === '1' : true; // default to enabled
+    res.json({ enabled });
+  } catch {
+    // If table doesn't exist or any error, default to enabled
+    res.json({ enabled: true });
+  }
 });
 
 // ---- Config ----
