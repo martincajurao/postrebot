@@ -108,15 +108,19 @@ function showToast(msg) {
 // #loading-view has an inline display:flex that beats the .view{display:none} rule,
 // so toggling the 'active' class alone never hides the spinner. Set the inline
 // display explicitly instead.
-function showLoading() {
+function showLoading(msg) {
   const el = document.getElementById('loading-view');
   if (!el) return;
+  const txt = document.getElementById('loading-text');
+  if (txt && msg) txt.textContent = msg;
   el.classList.add('active');
   el.style.display = 'flex';
 }
 function hideLoading() {
   const el = document.getElementById('loading-view');
   if (!el) return;
+  const txt = document.getElementById('loading-text');
+  if (txt) txt.textContent = 'Loading...';
   el.classList.remove('active');
   el.style.display = 'none';
 }
@@ -314,7 +318,12 @@ function showProducts(categoryId) {
   const container = document.getElementById('products-list');
 
   if (catProducts.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">🍽️</div><p>No items in this category yet.</p></div>';
+    if (products.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">🍽️</div><p>Couldn't load the items. Check your connection and try again.</p></div>
+        <button class="btn btn-primary" style="width:100%" onclick="retryProducts(${categoryId})">Retry</button>`;
+    } else {
+      container.innerHTML = '<div class="empty-state"><div class="icon">🍽️</div><p>No items in this category yet.</p></div>';
+    }
     showView('view-products');
     return;
   }
@@ -334,6 +343,13 @@ function showProducts(categoryId) {
   }).join('');
 
   showView('view-products');
+}
+
+async function retryProducts(categoryId) {
+  showLoading('Loading items…');
+  await loadProducts();
+  hideLoading();
+  showProducts(categoryId);
 }
 
 // ---- Product Detail ----
@@ -467,7 +483,8 @@ function showFoodPacks() {
   console.log('[webview] showFoodPacks → foodPacks in state:', foodPacks.length, foodPacks.map(fp => ({ id: fp.id, name: fp.name, price: fp.price, active: fp.active })));
 
   if (foodPacks.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">🍱</div><p>No food packs available yet.</p></div>';
+    container.innerHTML = `<div class="empty-state"><div class="icon">🍱</div><p>Couldn't load food packs. Check your connection and try again.</p></div>
+      <button class="btn btn-primary" style="width:100%" onclick="retryFoodPacks()">Retry</button>`;
     showView('view-food-packs');
     return;
   }
@@ -483,6 +500,13 @@ function showFoodPacks() {
     </div>`;
   }).join('');
   showView('view-food-packs');
+}
+
+async function retryFoodPacks() {
+  showLoading('Loading food packs…');
+  await loadFoodPacks();
+  hideLoading();
+  showFoodPacks();
 }
 
 async function addToCartFoodPack(fpId) {
@@ -593,6 +617,7 @@ function startCheckout() {
     const date = this.value;
     if (!date) return;
     const slotSelect = document.getElementById('time-slot');
+    showLoading('Loading time slots…');
     try {
       const data = await api('/slots?date=' + date);
       if (!data.open) {
@@ -606,6 +631,8 @@ function startCheckout() {
       console.warn('[webview] /slots failed:', e && e.message);
       slotSelect.innerHTML = '<option value="">Could not load time slots</option>';
       showToast('Could not load time slots — check your connection');
+    } finally {
+      hideLoading();
     }
   });
 
@@ -636,18 +663,27 @@ async function placeOrder() {
   if (!timeSlot) return showToast('Please select a time slot');
   if (!paymentMethod) return showToast('Please select payment method');
 
-  const result = await api('/checkout', {
-    method: 'POST',
-    body: JSON.stringify({
-      session: sessionId,
-      order_type: orderType,
-      address,
-      phone,
-      fulfillment_date: fulfillDate,
-      time_slot: timeSlot,
-      payment_method: paymentMethod,
-    }),
-  });
+  showLoading('Placing your order…');
+  let result;
+  try {
+    result = await api('/checkout', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: sessionId,
+        order_type: orderType,
+        address,
+        phone,
+        fulfillment_date: fulfillDate,
+        time_slot: timeSlot,
+        payment_method: paymentMethod,
+      }),
+    });
+  } catch (e) {
+    hideLoading();
+    showToast((e && e.message) || 'Failed to place order');
+    return;
+  }
+  hideLoading();
 
   if (result.ok) {
     await loadCart();
@@ -666,6 +702,7 @@ async function placeOrder() {
 // ---- Orders ----
 async function showOrders() {
   const container = document.getElementById('orders-list');
+  showLoading('Loading your orders…');
   try {
     orders = await api('/orders?session=' + sessionId);
     if (!Array.isArray(orders)) orders = [];
@@ -673,6 +710,8 @@ async function showOrders() {
     console.warn('[webview] /orders failed:', e && e.message);
     orders = [];
     showToast('Could not load orders — check your connection');
+  } finally {
+    hideLoading();
   }
 
   if (orders.length === 0) {
@@ -743,6 +782,9 @@ function closeWebview() {
 
 // ---- Init ----
 async function init() {
+  // Show the spinner for the whole initial fetch.
+  showLoading('Loading menu...');
+
   // Detect Messenger in parallel — never let the SDK poll block catalog loading.
   const messengerDetection = detectMessenger();
 

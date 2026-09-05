@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order</title>
-  <link rel="stylesheet" href="style.css?v=20260905-4">
+  <link rel="stylesheet" href="style.css?v=20260905-5">
   <!-- Messenger Extensions SDK: required for in-Messenger webview features like requestCloseBrowser() -->
   <script src="https://connect.facebook.net/en_US/MessengerExtensions.js"></script>
   <!-- Supabase JS: optional fallback data source (primary is the /api/webview REST API) -->
@@ -26,7 +29,7 @@
     <!-- Loading state -->
     <div id="loading-view" class="view active" style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:60px 20px">
       <div class="spinner"></div>
-      <p style="color:#999;font-size:0.9rem">Loading menu...</p>
+      <p id="loading-text" style="color:#999;font-size:0.9rem">Loading menu...</p>
     </div>
 
     <!-- Disabled message (shown when admin turns off webview) -->
@@ -157,6 +160,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260905-4"></script>
+  <script src="app.js?v=20260905-5"></script>
 </body>
 </html>

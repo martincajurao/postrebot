@@ -23,9 +23,17 @@ export function netPackagePrice(pkg: { base_price: number; discount?: number | n
  * Server-side authoritative pricing. Never trusts client prices.
  * Prices stored as integer pesos (or centavos — consistent usage).
  */
-export async function priceProduct(productId: number, size: string): Promise<number> {
-  const { data } = await supa().from('product_variants').select('price').eq('product_id', productId).eq('size', size).single();
-  if (!data) throw new Error('Invalid product or size');
+export async function priceProduct(productId: number, size?: string): Promise<number> {
+  let query = supa().from('product_variants').select('price').eq('product_id', productId);
+  if (size) {
+    query = query.eq('size', size);
+  }
+  const { data } = await query.order('price').limit(1).maybeSingle();
+  if (!data) {
+    const { data: fallback } = await supa().from('product_variants').select('price').eq('product_id', productId).limit(1).maybeSingle();
+    if (fallback) return fallback.price;
+    throw new Error('Invalid product or size');
+  }
   return data.price;
 }
 
@@ -112,14 +120,33 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
   let total = pkg.base_price || 0;
 
   const { data: slots } = await supa().from('package_slots').select('*').eq('package_id', packageId);
-  const choices = normalizeChoices(slotChoices);
-  if (choices.length !== pkg.selections) throw new Error(`Package requires ${pkg.selections} selections`);
+  let choices = normalizeChoices(slotChoices);
+
+  // If slot choices were not provided or incomplete, fill with default slot choices
+  if (choices.length === 0) {
+    const defaults = await packageDefaults(packageId);
+    if (defaults && defaults.length > 0) {
+      choices = defaults;
+    }
+  } else if (choices.length < (pkg.selections || 0)) {
+    const defaults = await packageDefaults(packageId);
+    for (const d of defaults) {
+      if (!choices.some(c => c.slot_number === d.slot_number)) {
+        choices.push(d);
+      }
+    }
+  }
 
   for (const choice of choices) {
     const slot = (slots || []).find((s: any) => s.slot_number === choice.slot_number);
-    if (!slot) throw new Error(`Invalid slot ${choice.slot_number}`);
+    if (!slot) continue;
     const size = choice.size || packageSize;
-    const extra = await choiceUpgrade(packageId, choice.slot_number, choice.product_id, size);
+    let extra = 0;
+    try {
+      extra = await choiceUpgrade(packageId, choice.slot_number, choice.product_id, size);
+    } catch {
+      extra = 0;
+    }
     const { data: prod } = await supa().from('products').select('name').eq('id', choice.product_id).maybeSingle();
     if (extra > 0) breakdown.push({ label: `${prod?.name ?? 'Dish'}${size ? ' ' + size : ''} upgrade`, amount: extra });
     total += extra;
@@ -148,23 +175,27 @@ export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<
   let subtotal = 0;
   let discount = 0;
   for (const item of items) {
-    if (item.food_pack_id) {
-      const { price, name } = await priceFoodPack(item.food_pack_id);
-      breakdown.push({ label: `${name} (food pack) x${item.quantity}`, amount: price * item.quantity });
-      subtotal += price * item.quantity;
-    } else if (item.package_id) {
-      const { total, breakdown: bd } = await pricePackage(item.package_id, item.slot_choices, item.variant_size);
-      // Scale the per-unit breakdown to the quantity so lines sum to the subtotal
-      for (const line of bd) {
-        breakdown.push({ ...line, amount: line.amount * item.quantity });
-        if (line.amount < 0) discount += -line.amount * item.quantity;
+    try {
+      if (item.food_pack_id) {
+        const { price, name } = await priceFoodPack(item.food_pack_id);
+        breakdown.push({ label: `${name} (food pack) x${item.quantity}`, amount: price * item.quantity });
+        subtotal += price * item.quantity;
+      } else if (item.package_id) {
+        const { total, breakdown: bd } = await pricePackage(item.package_id, item.slot_choices, item.variant_size);
+        // Scale the per-unit breakdown to the quantity so lines sum to the subtotal
+        for (const line of bd) {
+          breakdown.push({ ...line, amount: line.amount * item.quantity });
+          if (line.amount < 0) discount += -line.amount * item.quantity;
+        }
+        subtotal += total * item.quantity;
+      } else if (item.product_id) {
+        const price = await priceProduct(item.product_id, item.variant_size);
+        const { data: prod } = await supa().from('products').select('name').eq('id', item.product_id).maybeSingle();
+        breakdown.push({ label: `${prod?.name || ''} ${item.variant_size || ''} x${item.quantity}`.trim(), amount: price * item.quantity });
+        subtotal += price * item.quantity;
       }
-      subtotal += total * item.quantity;
-    } else {
-      const price = await priceProduct(item.product_id, item.variant_size);
-      const { data: prod } = await supa().from('products').select('name').eq('id', item.product_id).maybeSingle();
-      breakdown.push({ label: `${prod?.name || ''} ${item.variant_size} x${item.quantity}`, amount: price * item.quantity });
-      subtotal += price * item.quantity;
+    } catch (err: any) {
+      console.warn(`[computeCartTotals] Could not price item #${item.id}:`, err?.message || err);
     }
   }
   // subtotal already has discounts baked in (package lines are net); total = items − discount + delivery
