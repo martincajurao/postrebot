@@ -6,6 +6,7 @@ import uploadRoutes from './api/upload';
 import { logConfig } from './api/supabase-storage';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
+import webviewApi from './api/webview';
 import { configurePush } from './services/push';
 import path from 'path';
 import fs from 'fs';
@@ -23,6 +24,12 @@ migrate()
 
 app.use('/webhook', messengerWebhook);
 app.post('/api/login', loginHandler);
+
+// Webview ordering interface (REST API + static frontend)
+app.use('/api/webview', webviewApi);
+app.use('/webview', express.static(path.join(__dirname, 'public', 'webview'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),

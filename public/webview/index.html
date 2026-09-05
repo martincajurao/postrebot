@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Postre Food Products - Order</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header with toggle -->
+    <header class="header">
+      <h1>Postre Food Products</h1>
+      <div class="toggle-container">
+        <span class="toggle-label">Web</span>
+        <label class="switch">
+          <input type="checkbox" id="mode-toggle">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label">Messenger</span>
+      </div>
+    </header>
+
+    <!-- Messenger link modal (shown when toggled) -->
+    <div id="messenger-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Order via Messenger</h2>
+        <p>Chat with our bot on Facebook Messenger to place your order!</p>
+        <a id="messenger-link" href="#" target="_blank" class="btn btn-primary">Open Messenger</a>
+        <button class="btn btn-secondary" onclick="closeModal()">Back to Web</button>
+      </div>
+    </div>
+
+    <!-- Main content -->
+    <main class="main">
+      <!-- Categories view -->
+      <section id="view-categories" class="view active">
+        <h2>Menu</h2>
+        <div id="categories-list" class="categories-grid"></div>
+      </section>
+
+      <!-- Products view -->
+      <section id="view-products" class="view hidden">
+        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
+        <h2 id="products-title"></h2>
+        <div id="products-list" class="products-grid"></div>
+      </section>
+
+      <!-- Product detail / variant select -->
+      <section id="view-product-detail" class="view hidden">
+        <button class="btn btn-back" onclick="goBack()">&larr; Back</button>
+        <div id="product-detail"></div>
+      </section>
+
+      <!-- Package customization -->
+      <section id="view-package" class="view hidden">
+        <button class="btn btn-back" onclick="goBack()">&larr; Back</button>
+        <div id="package-detail"></div>
+      </section>
+
+      <!-- Food packs view -->
+      <section id="view-food-packs" class="view hidden">
+        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
+        <h2>Food Packs</h2>
+        <div id="food-packs-list" class="products-grid"></div>
+      </section>
+
+      <!-- Cart view -->
+      <section id="view-cart" class="view hidden">
+        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
+        <h2>Your Cart</h2>
+        <div id="cart-items"></div>
+        <div id="cart-totals"></div>
+        <button class="btn btn-primary btn-checkout" onclick="startCheckout()" id="checkout-btn">Proceed to Checkout</button>
+      </section>
+
+      <!-- Checkout view -->
+      <section id="view-checkout" class="view hidden">
+        <button class="btn btn-back" onclick="showCart()">&larr; Back to Cart</button>
+        <h2>Checkout</h2>
+        <div id="checkout-form"></div>
+      </section>
+
+      <!-- Orders view -->
+      <section id="view-orders" class="view hidden">
+        <button class="btn btn-back" onclick="showCategories()">&larr; Back to Menu</button>
+        <h2>My Orders</h2>
+        <div id="orders-list"></div>
+      </section>
+    </main>
+
+    <!-- Bottom navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" onclick="showCategories()">
+        <span class="nav-icon">&#9776;</span>
+        <span>Menu</span>
+      </button>
+      <button class="nav-btn" onclick="showFoodPacks()">
+        <span class="nav-icon">&#127860;</span>
+        <span>Food Packs</span>
+      </button>
+      <button class="nav-btn" onclick="showCart()">
+        <span class="nav-icon">&#128722;</span>
+        <span>Cart</span>
+        <span id="cart-badge" class="badge hidden">0</span>
+      </button>
+      <button class="nav-btn" onclick="showOrders()">
+        <span class="nav-icon">&#128203;</span>
+        <span>Orders</span>
+      </button>
+    </div>
+
+    <!-- Toast notification -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
