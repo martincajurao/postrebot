@@ -7,7 +7,7 @@ import {
   getPackages, getPackageSlots, getPackageSlotByNumber, getSlotOptions,
   getCustomSlotOptions, getPackageOptionBySlotAndProduct,
 } from '../db';
-import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest, GRAPH_API_VERSION } from './send';
+import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest, GRAPH_API_VERSION, ensureWebviewWhitelisted } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, completeOrderByCustomer, rateOrder } from '../services/orders';
 import { sendPushToAdmins } from '../services/push';
@@ -290,8 +290,16 @@ async function mainMenu(psid: string) {
   const url = webviewUrl();
   if (url) {
     const webviewLink = url + (url.includes('?') ? '&' : '?') + 'psid=' + encodeURIComponent(psid);
+    console.log(`[mainMenu] webviewLink=${webviewLink}`);
+    // Force re-verification of whitelist (bypass cache) for diagnostics
+    const whitelisted = await ensureWebviewWhitelisted(webviewLink, { force: true });
+    console.log(`[mainMenu] WHITELIST STATUS: ${whitelisted}`);
     // Send a web_url button directly in the welcome message - opens WebView in one tap
-    await sendUrlButton(psid, '🍽️ Welcome to Postre Food Products!\n\nTap below to order online:', '🌐 Order Online', webviewLink);
+    const result = await sendUrlButton(psid, '🍽️ Welcome to Postre Food Products!\n\nTap below to order online:', '🌐 Order Online', webviewLink);
+    console.log(`[mainMenu] sendUrlButton RESULT: ok=${result.ok}, status=${result.status}, body=${result.body}`);
+    if (!result.ok) {
+      console.error(`[mainMenu] WEBVIEW BUTTON FAILED: ${result.body}`);
+    }
   } else {
     // Fallback if webview URL is not configured
     await sendText(psid, '🍽️ Welcome to Postre Food Products!');
