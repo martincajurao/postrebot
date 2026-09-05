@@ -7,7 +7,7 @@ import { logConfig } from './api/supabase-storage';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
 import webviewApi from './api/webview';
-import { whitelistWebviewDomain } from './messenger/send';
+import { whitelistWebviewDomain, setPersistentMenu } from './messenger/send';
 import { configurePush } from './services/push';
 import path from 'path';
 import fs from 'fs';
@@ -75,7 +75,15 @@ app.listen(PORT, () => {
     }).catch((e) => {
       console.error(`[boot] whitelistWebviewDomain rejected:`, e?.message || e);
     });
+    // Register persistent menu (☰ "Order Online" entry) so customers always have
+    // an in-Messenger way to open the webview, even without tapping a button.
+    console.log(`[boot] calling setPersistentMenu(${base})`);
+    setPersistentMenu(base).then((ok) => {
+      console.log(`[boot] setPersistentMenu resolved: ${ok}`);
+    }).catch((e) => {
+      console.error(`[boot] setPersistentMenu rejected:`, e?.message || e);
+    });
   } else {
-    console.log(`⚠️  BASE_URL is not HTTPS (${base}) — messenger_extensions webview requires HTTPS. Skipping auto-whitelist.`);
+    console.log(`⚠️  BASE_URL is not HTTPS (${base}) — messenger_extensions webview requires HTTPS. Skipping auto-whitelist and persistent menu.`);
   }
 });

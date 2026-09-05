@@ -106,6 +106,7 @@ export function webviewButton(url: string, title: string) {
  *  external fallback (instead of a rejected message) when it can't be confirmed. */
 export async function sendUrlButton(psid: string, text: string, title: string, url: string, messengerExt = true): Promise<SendResult> {
   const https = messengerExt && url.startsWith('https://');
+  console.log(`[sendUrlButton] url=${url} | https=${https} | messengerExt=${messengerExt}`);
   const sendWith = (ext: boolean) => sendApi({
     recipient: { id: psid },
     messaging_type: 'RESPONSE',
@@ -128,17 +129,23 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
     },
   });
 
-  if (!https) return sendWith(false);
+  if (!https) {
+    console.log('[sendUrlButton] not HTTPS — sending external');
+    return sendWith(false);
+  }
 
   // Verify the button URL's origin is whitelisted so Meta actually opens the
   // in-app webview instead of silently demoting the button to an external page.
   const whitelisted = await ensureWebviewWhitelisted(url);
+  console.log(`[sendUrlButton] ensureWebviewWhitelisted=${whitelisted}`);
   if (whitelisted) return sendWith(true);
 
   // Whitelist API check failed (transient error?) — try optimistic: the domain
   // may already be whitelisted manually in the Meta dashboard. If Meta rejects
   // the message because the domain isn't whitelisted, fall back to external.
+  console.log('[sendUrlButton] whitelist check failed — trying optimistic send with messenger_extensions=true');
   const result = await sendWith(true);
+  console.log(`[sendUrlButton] optimistic send ok=${result.ok} status=${result.status} body=${result.body?.slice(0, 200)}`);
   if (result.ok) return result;
 
   const err = (result.body || '').toLowerCase();
@@ -165,8 +172,11 @@ function originOf(url: string): string {
 }
 
 async function fetchWhitelistedDomains(): Promise<string[]> {
-  const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?fields=whitelisted_domains&access_token=${PAGE_TOKEN}`);
+  const url = `https://graph.facebook.com/v19.0/me/messenger_profile?fields=whitelisted_domains&access_token=${PAGE_TOKEN}`;
+  console.log(`[fetchWhitelistedDomains] GET ${url.replace(PAGE_TOKEN, '***')}`);
+  const res = await fetch(url);
   const text = await res.text();
+  console.log(`[fetchWhitelistedDomains] status=${res.status} body=${text.slice(0, 300)}`);
   if (!res.ok) throw new Error(`whitelist lookup failed (${res.status}): ${text}`);
   const json = JSON.parse(text) as { data?: Array<{ whitelisted_domains?: string[] }> };
   return json.data?.[0]?.whitelisted_domains || [];
