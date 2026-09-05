@@ -1,10 +1,12 @@
-﻿﻿﻿/* Postre Admin SPA */
+﻿/* Postre Admin SPA */
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('token') || '';
 let ME = localStorage.getItem('me') || '';
 let ME_ID = Number(localStorage.getItem('me_id')) || 0;
 let ROLE = localStorage.getItem('role') || 'ADMIN';
 let currentView = 'dashboard';
+
+
 
 // ---------- helpers ----------
 async function api(path, opts = {}) {
@@ -35,6 +37,15 @@ function closeModal() { document.getElementById('modal-overlay').classList.remov
  * then restores it. Prevents double-clicks on slow API calls.
  * Usage: button.addEventListener('click', (e) => withBtn(e.currentTarget, async () => { ... }));
  */
+// Add to app.js temporarily
+window.addEventListener('load', () => {
+  if (window.MessengerExtensions) {
+    console.log('SDK loaded correctly');
+  } else {
+    console.log('SDK NOT loaded - this is the problem');
+  }
+});
+
 async function withBtn(btn, fn) {
   if (!btn) return fn();
   if (btn.dataset.busy) return; // already running
@@ -59,8 +70,6 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => { if (
 
 // ---------- auth --assad--------
 function logout() {
-  // NOTE: do NOT unsubscribe here — push notifications are permanently enabled
-  // for this browser once allowed, and survive logout / page closes.
   TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
   localStorage.clear();
   location.hash = '';
@@ -74,7 +83,6 @@ function showApp() {
   document.getElementById('whoami').textContent = ME + (ROLE === 'ADMIN' ? ' · Admin' : ' · Staff');
   document.querySelectorAll('[data-view="admins"]').forEach((a) => { a.style.display = ROLE === 'ADMIN' ? '' : 'none'; });
   navigate('dashboard');
-  setupPush(); // enable web push notifications
 }
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -518,12 +526,12 @@ views.orders = async (main) => {
           <td><b>${esc(o.order_number)}</b><br><span class="muted">${esc((o.created_at || '').slice(0, 10))}</span></td>
           <td>${esc(o.customer_name || '—')}<br><span class="muted">${esc(o.phone || '')}</span></td>
           <td>${(o.items || []).map((i) => `${esc(i.name)} ×${i.quantity}`).join('<br>')}</td>
-          <td>${peso(o.total)}${o.delivery_fee ? `<br><span class="muted">incl. delivery ${peso(o.delivery_fee)}</span>` : ''}${o.additional_discount ? `<br><span class="muted">− ${peso(o.additional_discount)} disc.</span>` : ''}</td>
+          <td>${peso(o.total)}${o.additional_discount ? `<br><span class="muted">− ${peso(o.additional_discount)} disc.</span>` : ''}</td>
           <td>${o.order_type === 'delivery' ? '🚚 ' + esc(o.address || '') : '🏬 Pickup'}<br><span class="muted">${esc(o.fulfillment_date || '')} ${esc(o.time_slot || '')}</span></td>
           <td><span class="badge b-${esc(o.payment_status)}">${esc(o.payment_status)}</span><br><span class="muted">${esc(o.payment_method || '')}</span></td>
           <td><span class="badge b-${esc(o.status)}">${esc(o.status)}</span></td>
           <td><div class="row-actions">
-            ${o.status === 'PENDING' ? `<button class="btn ok sm" data-confirm="${o.id}">✓ Confirm + Fee</button>` : NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
+            ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
             ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
             ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
@@ -564,21 +572,6 @@ views.orders = async (main) => {
       const totalDisc = (o.additional_discount || 0) + amount;
       await api(`/orders/${o.id}/discount`, { method: 'POST', body: { additional_discount: totalDisc } });
       closeModal(); toast(`Deducted ${peso(amount)} from total`); navigate('orders');
-    }));
-  }));
-  // Confirm a PENDING order — the admin provides the actual delivery fee here.
-  main.querySelectorAll('[data-confirm]').forEach((b) => b.addEventListener('click', () => {
-    const o = orders.find((x) => x.id == b.dataset.confirm);
-    modal(`<h3>Confirm Order — ${esc(o.order_number)}</h3>
-      <p class="muted">Subtotal: <b>${peso(o.subtotal)}</b>${o.additional_discount ? ` · Discount: −${peso(o.additional_discount)}` : ''}<br>Total before delivery: <b>${peso(o.total)}</b></p>
-      <div class="field"><label>Delivery fee (₱) — enter the actual fare for this address</label>
-        <input type="number" id="oc-fee" min="0" value="0" placeholder="e.g. 100"></div>
-      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn ok" id="oc-save">✓ Confirm Order</button></div>`);
-    document.getElementById('oc-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-      const fee = Math.max(0, Number(document.getElementById('oc-fee').value) ||  0);
-      await api(`/orders/${o.id}/confirm`, { method: 'POST', body: { delivery_fee: fee } });
-      closeModal(); toast(`Confirmed — delivery fee ${peso(fee)}`); navigate('orders');
     }));
   }));
 };
@@ -1232,66 +1225,8 @@ views.settings = async (main) => {
         <input type="number" id="ts-cap" placeholder="capacity" style="width:110px" value="5">
         <button class="btn sm" id="ts-add">Add Slot</button>
       </div>
-    </div>
-    <div class="card"><h3>🔔 Push Notifications</h3>
-      <div id="push-status" class="muted">Checking…</div>
-      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="btn sm" id="push-enable">Enable on this device</button>
-        <button class="btn ghost sm" id="push-test">Send test notification</button>
-      </div>
-      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="push-voice"> 🔊 Read orders aloud (text-to-speech)
-        </label>
-        <button class="btn ghost sm" id="push-voice-test">Test voice</button>
-      </div>
-      <p class="muted" style="margin-top:8px">Voice announces new orders in this browser while the page is open — even in the background. Click anywhere once to unlock audio.</p>
-    </div>
-    <div class="card"><h3>🌐 Web Ordering (Webview)</h3>
-      <p class="muted" style="margin-bottom:12px">Allow customers to place orders directly from a web page instead of Facebook Messenger. When disabled, visitors will be directed to order via Messenger.</p>
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-        <input type="checkbox" id="webview-toggle" style="width:auto">
-        <span id="webview-label"><b>Enable web ordering</b></span>
-      </label>
-      <p class="muted" style="margin-top:10px">Webview URL: <code id="webview-url">/webview</code> &mdash; share this link with customers.</p>
     </div>`;
 
-  // ---- Push notifications status + controls ----
-  api('/push/status').then((st) => {
-    const el = main.querySelector('#push-status');
-    if (!el) return;
-    const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
-    el.innerHTML =
-      'Server: ' + (st.configured ? '✅ VAPID configured' : '❌ VAPID keys missing on server') +
-      ' · Subscribed devices: <b>' + st.subscriptions + '</b>' +
-      ' · This browser: ' + (perm === 'granted' ? '✅ permission granted' : perm === 'denied' ? '⛔ blocked in site settings' : '❔ not asked yet');
-  }).catch(() => {
-    const el = main.querySelector('#push-status');
-    if (el) el.textContent = 'Push status unavailable';
-  });
-  main.querySelector('#push-enable').addEventListener('click', (e) => withBtn(e.currentTarget, setupPush));
-  main.querySelector('#push-test').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-    const r = await api('/push/test', { method: 'POST' });
-    if (r.sent > 0) toast('Test push sent to ' + r.sent + ' device(s) ✓');
-    else if (r.total === 0) toast('No subscribed devices yet — click Enable first', true);
-    else toast('Send failed for ' + r.failed + ' device(s) — check the server logs', true);
-  }));
-  // Voice announcement controls (toggle persisted in localStorage).
-  const voiceCb = main.querySelector('#push-voice');
-  if (voiceCb) {
-    voiceCb.checked = voiceEnabled();
-    voiceCb.addEventListener('change', () => {
-      localStorage.setItem('pushVoice', voiceCb.checked ? '1' : '0');
-      if (voiceCb.checked) { unlockAudio(); toast('Voice announcements on 🔊'); }
-      else { try { speechSynthesis.cancel(); } catch (_) {} toast('Voice announcements off'); }
-    });
-  }
-  const voiceTestBtn = main.querySelector('#push-voice-test');
-  if (voiceTestBtn) voiceTestBtn.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-    unlockAudio();
-    await playChime(1);
-    await speakText('Voice test. A new order would be announced like this. New order P P 1042, delivery, total: 450 pesos.');
-  }));
   main.querySelectorAll('[data-bh-edit]').forEach((b) => b.addEventListener('click', () => {
     const h = hours.find((x) => x.day_of_week == b.dataset.bhEdit);
     modal(`<h3>${DAYS[h.day_of_week]} Hours</h3>
@@ -1346,27 +1281,6 @@ views.settings = async (main) => {
       closeModal(); toast('Saved'); navigate('settings');
     });
   }));
-
-  // ---- Webview toggle ----
-  const webviewToggle = main.querySelector('#webview-toggle');
-  const webviewUrl = main.querySelector('#webview-url');
-  if (webviewUrl) webviewUrl.textContent = location.origin + '/webview';
-  // Load current state
-  api('/settings').then((settings) => {
-    if (webviewToggle) {
-      webviewToggle.checked = settings.webview_enabled !== '0'; // default enabled
-    }
-  }).catch(() => {});
-  // Save on change
-  if (webviewToggle) {
-    webviewToggle.addEventListener('change', async () => {
-      await api('/settings/webview_enabled', {
-        method: 'PUT',
-        body: { value: webviewToggle.checked ? '1' : '0' },
-      });
-      toast(webviewToggle.checked ? 'Web ordering enabled' : 'Web ordering disabled');
-    });
-  }
 };
 
 /* ================= ADMINS (staff accounts) ================= */
@@ -1550,188 +1464,6 @@ views.images = async (main) => {
     } catch (err) { toast(err.message, true); }
   }));
 };
-
-/* ================= PUSH NOTIFICATIONS ================= */
-/**
- * Registers the service worker, asks for Notification permission,
- * then subscribes to web-push via VAPID and POSTs the subscription
- * to the admin API so the server can send new-order alerts even
- * when this page is in the background.
- */
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const raw = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const output = new Uint8Array(atob(raw).length);
-  for (let i = 0; i < atob(raw).length; i++) output[i] = atob(raw).charCodeAt(i);
-  return output;
-}
-
-/** Base64url-encode an applicationServerKey so it can be compared with the server key. */
-function keyToBase64Url(key) {
-  if (!key) return '';
-  const bytes = key instanceof Uint8Array ? key : new Uint8Array(key);
-  let s = '';
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-let pushSub = null; // active subscription for cleanup on logout
-
-/**
- * Registers the service worker, asks for Notification permission,
- * then subscribes to web-push via VAPID and POSTs the subscription
- * to the admin API so the server can send new-order alerts even
- * when this page is in the background. Every failure path shows a
- * visible toast so problems are easy to diagnose (e.g. on Render).
- */
-async function setupPush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-    toast('This browser does not support push notifications', true);
-    return;
-  }
-  try {
-    // 1. Register the service worker (lives next to this admin SPA).
-    const reg = await navigator.serviceWorker.register('/admin/sw.js');
-    await navigator.serviceWorker.ready; // make sure the SW is active before subscribing
-    // 2. Ask the user for Notification permission (only prompt if not decided yet).
-    let perm = Notification.permission;
-    if (perm === 'default') perm = await Notification.requestPermission();
-    if (perm !== 'granted') {
-      toast('Notifications are blocked — allow them in the browser site settings (padlock icon), then try again', true);
-      return;
-    }
-    // 3. Get the VAPID public key from the server.
-    const pk = await api('/push/vapid-public-key').then((d) => d.publicKey);
-    if (!pk) {
-      toast('Push not configured on the server — VAPID keys missing (add them to the environment)', true);
-      return;
-    }
-    // Drop any stale subscription that was created with a different key.
-    let sub = await reg.pushManager.getSubscription();
-    let created = false;
-    if (sub && keyToBase64Url(sub.options && sub.options.applicationServerKey) !== pk) {
-      await api('/push/unsubscribe?endpoint=' + encodeURIComponent(sub.endpoint), { method: 'POST' }).catch(() => {});
-      await sub.unsubscribe().catch(() => {});
-      sub = null;
-    } else if (sub) {
-      pushSub = sub; // already subscribed with the correct key
-    }
-    if (!sub) {
-      // 4. Subscribe the browser to push (first time, or after a key rotation).
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(pk),
-      });
-      created = true;
-    }
-    pushSub = sub;
-    // 5. Send subscription to the server for persistence.
-    await api('/push/subscribe', { method: 'POST', body: sub });
-    console.log('[push] Subscription saved on server.');
-    // One-time feedback only — the subscription is now permanent: it survives
-    // logout, page closes and server restarts until browser site data is cleared.
-    if (created) toast('Order notifications enabled ✓ (permanent — no need to enable again)');
-  } catch (err) {
-    console.error('[push] Setup failed:', err);
-    toast('Could not enable push notifications: ' + (err && err.message ? err.message : err), true);
-  }
-}
-
-/* ================= VOICE ANNOUNCEMENTS (chime + text-to-speech) =================
- * OS-rendered push notifications cannot run JS or TTS themselves, so the
- * service worker forwards each push to this page (postMessage), which then
- * plays a chime and speaks the order aloud — even when the tab is in the
- * background. Browsers allow this once the admin has interacted with the
- * page at least once (any click — logging in counts). */
-let audioCtx = null;
-
-function unlockAudio() {
-  try {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    if (!audioCtx) audioCtx = new AC();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-  } catch (_) { /* audio unavailable */ }
-}
-document.addEventListener('pointerdown', unlockAudio);
-
-function voiceEnabled() {
-  return localStorage.getItem('pushVoice') !== '0'; // default: ON
-}
-
-/** Short two-tone chime, repeated `times` times. Resolves when finished. */
-function playChime(times) {
-  return new Promise((resolve) => {
-    try {
-      unlockAudio();
-      if (!audioCtx || audioCtx.state !== 'running') return resolve();
-      const notes = [880, 1174.66]; // A5 → D6
-      const t0 = audioCtx.currentTime;
-      for (let i = 0; i < (times || 2); i++) {
-        notes.forEach((f, j) => {
-          const o = audioCtx.createOscillator();
-          const g = audioCtx.createGain();
-          o.type = 'sine';
-          o.frequency.value = f;
-          const start = t0 + i * 0.42 + j * 0.16;
-          g.gain.setValueAtTime(0.0001, start);
-          g.gain.exponentialRampToValueAtTime(0.22, start + 0.03);
-          g.gain.exponentialRampToValueAtTime(0.0001, start + 0.36);
-          o.connect(g).connect(audioCtx.destination);
-          o.start(start);
-          o.stop(start + 0.4);
-        });
-      }
-      setTimeout(resolve, (times || 2) * 420 + 460);
-    } catch (_) { resolve(); }
-  });
-}
-
-/** Speak text with the browser's built-in TTS (emojis stripped, ₱ → "pesos"). */
-function speakText(raw) {
-  return new Promise((resolve) => {
-    try {
-      if (!('speechSynthesis' in window)) return resolve();
-      const clean = String(raw)
-        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, ' ')
-        .replace(/₱\s*/g, 'pesos ')
-        .replace(/•/g, ',')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (!clean) return resolve();
-      const u = new SpeechSynthesisUtterance(clean);
-      u.rate = 1;
-      u.pitch = 1;
-      u.lang = 'en-US';
-      let done = false;
-      const finish = () => { if (!done) { done = true; resolve(); } };
-      u.onend = finish;
-      u.onerror = finish;
-      speechSynthesis.cancel();
-      speechSynthesis.speak(u);
-      setTimeout(finish, 15000); // safety timeout
-    } catch (_) { resolve(); }
-  });
-}
-
-/** Play the chime and speak a push payload. Deduped across open admin tabs. */
-async function announcePush(title, body, pushId) {
-  if (!voiceEnabled()) return;
-  if (pushId) {
-    if (localStorage.getItem('lastAnnouncedPushId') === pushId) return; // another tab announced it
-    localStorage.setItem('lastAnnouncedPushId', pushId);
-  }
-  await playChime(2);
-  await speakText((title || '') + '. ' + (body || ''));
-}
-
-// Receive push payloads forwarded by the service worker.
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('message', (event) => {
-    const msg = event.data || {};
-    if (msg.type === 'push-order') announcePush(msg.title, msg.body, msg.id);
-  });
-}
 
 /* ================= APP BOOT =================
  * Runs last so every view above is registered before the first navigate(). */
