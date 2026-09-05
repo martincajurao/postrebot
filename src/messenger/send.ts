@@ -188,14 +188,27 @@ export function ensureWebviewWhitelisted(buttonUrl: string): Promise<boolean> {
  * Alias for ensureWebviewWhitelisted — see that function for details.
  */
 export function whitelistWebviewDomain(buttonUrl: string): Promise<boolean> {
-  if (!PAGE_TOKEN) return Promise.resolve(false);
-  if (!buttonUrl.startsWith('https://')) return Promise.resolve(false);
+  if (!PAGE_TOKEN) {
+    console.log('[whitelist] SKIP: PAGE_ACCESS_TOKEN not set');
+    return Promise.resolve(false);
+  }
+  if (!buttonUrl.startsWith('https://')) {
+    console.log(`[whitelist] SKIP: URL not HTTPS: ${buttonUrl}`);
+    return Promise.resolve(false);
+  }
 
   const origin = originOf(buttonUrl);
-  if (whitelistedOrigins.has(origin)) return Promise.resolve(true);
+  console.log(`[whitelist] checking origin: ${origin}`);
+  if (whitelistedOrigins.has(origin)) {
+    console.log(`[whitelist] cache hit — already whitelisted: ${origin}`);
+    return Promise.resolve(true);
+  }
 
   const inFlight = whitelistInFlight.get(origin);
-  if (inFlight) return inFlight;
+  if (inFlight) {
+    console.log(`[whitelist] reusing in-flight check for: ${origin}`);
+    return inFlight;
+  }
 
   const job = (async () => {
     try {

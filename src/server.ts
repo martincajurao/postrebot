@@ -61,13 +61,20 @@ configurePush();
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => {
   const base = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
+  const hasToken = !!process.env.PAGE_ACCESS_TOKEN;
   console.log(`Postre server listening on http://localhost:${PORT} (db: supabase)`);
   console.log(`Web ordering URL: ${base}/webview`);
+  console.log(`[boot] BASE_URL=${process.env.BASE_URL || '(not set)'} | RENDER_EXTERNAL_URL=${process.env.RENDER_EXTERNAL_URL || '(not set)'} | resolved base=${base} | PAGE_ACCESS_TOKEN=${hasToken ? 'set' : 'NOT SET'}`);
   // Register the webview domain with the Messenger Profile API so the
   // "Open Web Store" button (messenger_extensions) opens INSIDE Messenger's
   // in-chat webview instead of being rejected / opening an external browser.
   if (base.startsWith('https://')) {
-    whitelistWebviewDomain(base).catch(() => { /* logged inside */ });
+    console.log(`[boot] base is HTTPS — calling whitelistWebviewDomain(${base})`);
+    whitelistWebviewDomain(base).then((ok) => {
+      console.log(`[boot] whitelistWebviewDomain resolved: ${ok}`);
+    }).catch((e) => {
+      console.error(`[boot] whitelistWebviewDomain rejected:`, e?.message || e);
+    });
   } else {
     console.log(`⚠️  BASE_URL is not HTTPS (${base}) — messenger_extensions webview requires HTTPS. Skipping auto-whitelist.`);
   }
