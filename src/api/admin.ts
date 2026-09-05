@@ -616,11 +616,14 @@ r.put('/settings/:key', async (req, res) => {
   const { key } = req.params;
   const { value } = req.body;
   if (value == null) return res.status(400).json({ error: 'Missing value' });
-  await run(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, now()::text)
-     ON CONFLICT(key) DO UPDATE SET value = $2, updated_at = now()::text`,
-    [key, String(value)]
-  );
+  const now = new Date().toISOString();
+  // Upsert: try update first, then insert if row doesn't exist
+  const existing = await one('SELECT key FROM app_settings WHERE key = $1', [key]);
+  if (existing) {
+    await run('UPDATE app_settings SET value = $1, updated_at = $2 WHERE key = $3', [String(value), now, key]);
+  } else {
+    await run('INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, $3)', [key, String(value), now]);
+  }
   res.json({ ok: true });
 });
 
