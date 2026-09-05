@@ -286,19 +286,19 @@ async function showReservationSlots(psid: string, ctx: any) {
 
 async function mainMenu(psid: string) {
   await setState(psid, 'MAIN_MENU');
-  // Messenger button templates hold a MAXIMUM of 3 buttons (sendButtons drops
-  // anything past the third), so the main menu renders as quick replies — up to
-  // 13 can display, guaranteeing all 4 options are visible.
-  return sendQuickReplies(psid, '🍽️ Welcome to Postre Food Products!\n\nHow can we help you today?', [
-    { title: '🌐 Order Online', payload: 'WEBVIEW' },
-    { title: '🎁 Packages', payload: 'MENU_PACKAGES' },
-    { title: '📖 View Menu', payload: 'MENU_BROWSE' },
-    { title: '🍱 Food Packs', payload: 'MENU_FOODPACKS' },
-    { title: '🛒 Order Now', payload: 'MENU_ORDER' },
-    { title: '🛒 My Cart', payload: 'MENU_CART' },
-    { title: '📍 Track Order', payload: 'TRACK_ORDER' },
+  // Get the webview URL with PSID for customer identification
+  const url = webviewUrl();
+  if (url) {
+    const webviewLink = url + (url.includes('?') ? '&' : '?') + 'psid=' + encodeURIComponent(psid);
+    // Send a web_url button directly in the welcome message - opens WebView in one tap
+    await sendUrlButton(psid, '🍽️ Welcome to Postre Food Products!\n\nTap below to order online:', '🌐 Order Online', webviewLink);
+  } else {
+    // Fallback if webview URL is not configured
+    await sendText(psid, '🍽️ Welcome to Postre Food Products!');
+  }
+  // Quick replies for actions NOT available in the webview
+  return sendQuickReplies(psid, 'Or choose an option below:', [
     { title: '📅 Reservation', payload: 'MENU_RESERVE' },
-    { title: '📜 Order History', payload: 'ORDER_HISTORY' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
