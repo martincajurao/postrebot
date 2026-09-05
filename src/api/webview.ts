@@ -172,6 +172,14 @@ r.get('/slots', async (req, res) => {
   res.json({ open, slots });
 });
 
+// ---- Check if webview is enabled ----
+
+r.get('/enabled', async (_req, res) => {
+  const row = await one("SELECT value FROM app_settings WHERE key = 'webview_enabled'") as any;
+  const enabled = row ? row.value === '1' : true; // default to enabled
+  res.json({ enabled });
+});
+
 // ---- Config ----
 
 r.get('/config', async (_req, res) => {

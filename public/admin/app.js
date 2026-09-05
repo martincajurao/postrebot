@@ -1246,6 +1246,14 @@ views.settings = async (main) => {
         <button class="btn ghost sm" id="push-voice-test">Test voice</button>
       </div>
       <p class="muted" style="margin-top:8px">Voice announces new orders in this browser while the page is open — even in the background. Click anywhere once to unlock audio.</p>
+    </div>
+    <div class="card"><h3>🌐 Web Ordering (Webview)</h3>
+      <p class="muted" style="margin-bottom:12px">Allow customers to place orders directly from a web page instead of Facebook Messenger. When disabled, visitors will be directed to order via Messenger.</p>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" id="webview-toggle" style="width:auto">
+        <span id="webview-label"><b>Enable web ordering</b></span>
+      </label>
+      <p class="muted" style="margin-top:10px">Webview URL: <code id="webview-url">/webview</code> &mdash; share this link with customers.</p>
     </div>`;
 
   // ---- Push notifications status + controls ----
@@ -1338,6 +1346,27 @@ views.settings = async (main) => {
       closeModal(); toast('Saved'); navigate('settings');
     });
   }));
+
+  // ---- Webview toggle ----
+  const webviewToggle = main.querySelector('#webview-toggle');
+  const webviewUrl = main.querySelector('#webview-url');
+  if (webviewUrl) webviewUrl.textContent = location.origin + '/webview';
+  // Load current state
+  api('/settings').then((settings) => {
+    if (webviewToggle) {
+      webviewToggle.checked = settings.webview_enabled !== '0'; // default enabled
+    }
+  }).catch(() => {});
+  // Save on change
+  if (webviewToggle) {
+    webviewToggle.addEventListener('change', async () => {
+      await api('/settings/webview_enabled', {
+        method: 'PUT',
+        body: { value: webviewToggle.checked ? '1' : '0' },
+      });
+      toast(webviewToggle.checked ? 'Web ordering enabled' : 'Web ordering disabled');
+    });
+  }
 };
 
 /* ================= ADMINS (staff accounts) ================= */

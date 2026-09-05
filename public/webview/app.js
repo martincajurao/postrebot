@@ -66,18 +66,6 @@ function updateCartBadge() {
   }
 }
 
-// ---- Toggle to Messenger ----
-document.getElementById('mode-toggle').addEventListener('change', function () {
-  if (this.checked) {
-    document.getElementById('messenger-modal').classList.remove('hidden');
-  }
-});
-
-function closeModal() {
-  document.getElementById('messenger-modal').classList.add('hidden');
-  document.getElementById('mode-toggle').checked = false;
-}
-
 // ---- Load data ----
 async function loadCategories() {
   categories = await api('/categories');
@@ -104,7 +92,8 @@ async function loadCart() {
 async function loadConfig() {
   config = await api('/config');
   messengerLink = 'https://m.me/postrefoodproducts';
-  document.getElementById('messenger-link').href = messengerLink;
+  const link = document.getElementById('messenger-link-disabled');
+  if (link) link.href = messengerLink;
 }
 
 // ---- Render Categories ----
@@ -485,6 +474,14 @@ function showCategories() {
 
 // ---- Init ----
 async function init() {
+  // Check if webview is enabled
+  const enabledData = await api('/enabled');
+  if (!enabledData.enabled) {
+    document.getElementById('disabled-msg').classList.remove('hidden');
+    document.querySelector('.main').style.display = 'none';
+    document.querySelector('.bottom-nav').style.display = 'none';
+    return;
+  }
   await Promise.all([loadCategories(), loadProducts(), loadPackages(), loadFoodPacks(), loadCart(), loadConfig()]);
   renderCategories();
   showCategories();

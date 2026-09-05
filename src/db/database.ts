@@ -523,4 +523,13 @@ export function migrate(): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
   `);
+
+  // v10: App settings (key-value store for toggles like webview)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
 }

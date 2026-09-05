@@ -176,6 +176,15 @@ export async function migrate(): Promise<void> {
     );
   `);
 
+  // v10: App settings (key-value store for toggles like webview)
+  await run(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (now()::text)
+    );
+  `);
+
   await seedDefaults();
 }
 

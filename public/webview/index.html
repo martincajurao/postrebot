@@ -8,26 +8,19 @@
 </head>
 <body>
   <div id="app">
-    <!-- Header with toggle -->
+    <!-- Header -->
     <header class="header">
       <h1>Postre Food Products</h1>
-      <div class="toggle-container">
-        <span class="toggle-label">Web</span>
-        <label class="switch">
-          <input type="checkbox" id="mode-toggle">
-          <span class="slider"></span>
-        </label>
-        <span class="toggle-label">Messenger</span>
-      </div>
+      <p class="header-sub">Order online</p>
     </header>
 
-    <!-- Messenger link modal (shown when toggled) -->
-    <div id="messenger-modal" class="modal hidden">
-      <div class="modal-content">
-        <h2>Order via Messenger</h2>
-        <p>Chat with our bot on Facebook Messenger to place your order!</p>
-        <a id="messenger-link" href="#" target="_blank" class="btn btn-primary">Open Messenger</a>
-        <button class="btn btn-secondary" onclick="closeModal()">Back to Web</button>
+    <!-- Disabled message (shown when admin turns off webview) -->
+    <div id="disabled-msg" class="view hidden" style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px 20px">
+      <div>
+        <div style="font-size:3rem;margin-bottom:16px">\u{1F4F1}</div>
+        <h2>Web ordering is currently unavailable</h2>
+        <p style="color:#666;margin:12px 0">Please order through our Facebook Messenger bot instead.</p>
+        <a id="messenger-link-disabled" href="https://m.me/postrefoodproducts" target="_blank" class="btn btn-primary">Order on Messenger</a>
       </div>
     </div>
 

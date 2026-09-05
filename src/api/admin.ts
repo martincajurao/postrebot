@@ -603,4 +603,25 @@ r.post('/push/test', async (_req, res) => {
   }
 });
 
+// ---- App Settings (webview toggle, etc.) ----
+
+r.get('/settings', async (_req, res) => {
+  const rows = await many('SELECT key, value FROM app_settings') as any[];
+  const settings: Record<string, string> = {};
+  for (const row of rows) settings[row.key] = row.value;
+  res.json(settings);
+});
+
+r.put('/settings/:key', async (req, res) => {
+  const { key } = req.params;
+  const { value } = req.body;
+  if (value == null) return res.status(400).json({ error: 'Missing value' });
+  await run(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, now()::text)
+     ON CONFLICT(key) DO UPDATE SET value = $2, updated_at = now()::text`,
+    [key, String(value)]
+  );
+  res.json({ ok: true });
+});
+
 export default r;
