@@ -1510,6 +1510,35 @@ function closeWebview() {
 }
 
 // ---------- Init ----------
+/**
+ * Ask MessengerExtensions for the current user's PSID (waits up to ~2.5s for the SDK).
+ * Used when the webview is opened without the ?psid= parameter so the cart and
+ * orders still bind to the Messenger customer account.
+ */
+function resolveMessengerUser() {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    // The SDK script can land late on flaky mobile connections — poll briefly.
+    let tries = 0;
+    (function attempt() {
+      const ext = window.MessengerExtensions;
+      if (ext && typeof ext.getUserID === 'function') {
+        try {
+          ext.getUserID(
+            (uids) => finish(uids && uids.psid ? String(uids.psid) : null),
+            () => finish(null),
+          );
+          return;
+        } catch { finish(null); return; }
+      }
+      if (++tries < 12) setTimeout(attempt, 200);
+      else finish(null);
+    })();
+    setTimeout(() => finish(null), 3000);
+  });
+}
+
 let initStarted = false;
 async function init() {
   if (initStarted) return;
@@ -1538,6 +1567,17 @@ async function init() {
     if (mainContent) mainContent.classList.add('hidden');
     if (nav) nav.style.display = 'none';
     return;
+  }
+
+  // When opened without ?psid (shared URL), resolve the PSID from the Messenger
+  // SDK BEFORE loading the cart so the local cart + orders bind to the customer.
+  if (!psidFromMessenger) {
+    const msgrPsid = await resolveMessengerUser();
+    if (msgrPsid && msgrPsid !== sessionId) {
+      console.log('[webview] PSID resolved from MessengerExtensions');
+      sessionId = msgrPsid;
+      storageSet('webview_session', sessionId);
+    }
   }
 
   // Load everything; settle all results so one failed loader can't blank the menu.
