@@ -517,35 +517,51 @@ function showCategories() {
 }
 
 // ---- Messenger Extensions integration ----
+/**
+ * True when the page is rendered inside Messenger's in-app browser.
+ * Checked two ways because MessengerExtensions.js availability can race page load:
+ *  1. window.MessengerExtensions — set when the SDK loaded (only works in-Messenger)
+ *  2. User agent — Messenger's webview UA contains "Messenger" / "FBAV" / "[FB_IAB]"
+ */
+function detectMessengerUserAgent() {
+  const ua = navigator.userAgent || '';
+  return /\b(FBAV|FB_IAB|MessengerForiOS|Messenger)\b/i.test(ua) || /\[FB_IAB\]/.test(ua);
+}
+
+/** Wait up to ~2s for the MessengerExtensions SDK, then resolve detection. */
+async function detectMessenger() {
+  if (window.MessengerExtensions) return true;
+  // The SDK script is synchronous, but on flaky mobile connections it can land late.
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    if (window.MessengerExtensions) return true;
+  }
+  return detectMessengerUserAgent();
+}
+
 /** Close the in-Messenger webview and return the user to the chat thread. */
 function closeWebview() {
-  if (isInsideMessenger && window.MessengerExtensions) {
+  if (window.MessengerExtensions) {
     try {
       window.MessengerExtensions.requestCloseBrowser(function success() {
         // Webview closed successfully
       }, function error(err) {
         console.error('[webview] requestCloseBrowser error:', err);
       });
+      return;
     } catch (e) {
       console.error('[webview] MessengerExtensions error:', e);
     }
   }
+  // Fallback when opened in a normal browser: try window.close(), else go home.
+  window.close();
+  setTimeout(() => { if (!window.closed) showCategories(); }, 300);
 }
 
 // ---- Init ----
 async function init() {
   // Detect if we're running inside Messenger's webview
-  if (window.MessengerExtensions) {
-    try {
-      window.MessengerExtensions.getSupportedFeatures(function (result) {
-        isInsideMessenger = true;
-      }, function () {
-        isInsideMessenger = false;
-      });
-    } catch (e) {
-      isInsideMessenger = false;
-    }
-  }
+  isInsideMessenger = await detectMessenger();
 
   // Check if webview is enabled
   const enabledData = await api('/enabled');

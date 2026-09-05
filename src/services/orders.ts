@@ -1,10 +1,11 @@
-﻿﻿import { one, many, run, query, tx } from '../db';
+﻿﻿import { supa } from '../db/supabase';
 import { computeCartTotals, choiceUpgrade } from './pricing';
 import { clearCart, getCart } from './cart';
 
 export async function nextOrderNumber(): Promise<string> {
-  const row = await one("SELECT COALESCE(MAX(id), 1000) + 1 AS next FROM orders") as any;
-  return `PP-${row.next}`;
+  const { data } = await supa().from('orders').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
+  const next = (data?.id || 1000) + 1;
+  return `PP-${next}`;
 }
 
 export async function createOrderFromCart(
@@ -29,131 +30,146 @@ export async function createOrderFromCart(
   if (items.length === 0) throw new Error('Cart is empty');
   const totals = await computeCartTotals(items, deliveryFee);
 
-  const result = await tx(async (client) => {
-    const orderNumber = await nextOrderNumber();
-    const res = await client.query(`INSERT INTO orders
-      (order_number, customer_id, order_type, address, delivery_fee, subtotal, total,
-       fulfillment_date, time_slot, payment_method, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-      [orderNumber, details.customer_id, details.order_type, details.address ?? null,
-        deliveryFee, totals.subtotal, totals.total,
-        details.fulfillment_date ?? null, details.time_slot ?? null,
-        details.payment_method ?? null, details.notes ?? null
-      ]);
-    const orderId = Number(res.rows[0].id);
-    for (const it of items) {
-      const line = await computeCartTotals([it], 0);
-      const unit = Math.round(line.subtotal / it.quantity);
-      const r = await client.query(`INSERT INTO order_items
-        (order_id, product_id, package_id, food_pack_id, name, variant_size, quantity, unit_price, line_total)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [orderId, it.product_id ?? null, it.package_id ?? null, it.food_pack_id ?? null, it.name,
-          it.variant_size ?? null, it.quantity, unit, line.subtotal]);
-      const orderItemId = Number(r.rows[0].id);
-      if (it.package_id && it.slot_choices) {
-        for (const c of it.slot_choices) {
-          const prod = await one('SELECT name FROM products WHERE id = $1', [c.product_id]) as any;
-          let extra = 0;
-          try { extra = await choiceUpgrade(it.package_id, c.slot_number, c.product_id, it.variant_size); } catch { extra = 0; }
-          await client.query(`INSERT INTO order_package_items
-            (order_item_id, slot_number, product_id, product_name, upgrade_price) VALUES ($1, $2, $3, $4, $5)`,
-            [orderItemId, c.slot_number, c.product_id, prod?.name ?? 'Unknown', extra]);
-        }
+  const db = supa();
+  const orderNumber = await nextOrderNumber();
+  const { data: orderRow, error: orderErr } = await db.from('orders').insert({
+    order_number: orderNumber,
+    customer_id: details.customer_id,
+    order_type: details.order_type,
+    address: details.address ?? null,
+    delivery_fee: deliveryFee,
+    subtotal: totals.subtotal,
+    total: totals.total,
+    fulfillment_date: details.fulfillment_date ?? null,
+    time_slot: details.time_slot ?? null,
+    payment_method: details.payment_method ?? null,
+    notes: details.notes ?? null,
+  }).select('id').single();
+  if (orderErr) throw new Error(`Order creation failed: ${orderErr.message}`);
+  const orderId = Number(orderRow!.id);
+
+  for (const it of items) {
+    const line = await computeCartTotals([it], 0);
+    const unit = Math.round(line.subtotal / it.quantity);
+    const { data: oiRow, error: oiErr } = await db.from('order_items').insert({
+      order_id: orderId,
+      product_id: it.product_id ?? null,
+      package_id: it.package_id ?? null,
+      food_pack_id: it.food_pack_id ?? null,
+      name: it.name,
+      variant_size: it.variant_size ?? null,
+      quantity: it.quantity,
+      unit_price: unit,
+      line_total: line.subtotal,
+    }).select('id').single();
+    if (oiErr) throw new Error(`Order item creation failed: ${oiErr.message}`);
+    const orderItemId = Number(oiRow!.id);
+
+    if (it.package_id && it.slot_choices) {
+      for (const c of it.slot_choices) {
+        const { data: prod } = await db.from('products').select('name').eq('id', c.product_id).maybeSingle();
+        let extra = 0;
+        try { extra = await choiceUpgrade(it.package_id, c.slot_number, c.product_id, it.variant_size); } catch { extra = 0; }
+        await db.from('order_package_items').insert({
+          order_item_id: orderItemId,
+          slot_number: c.slot_number,
+          product_id: c.product_id,
+          product_name: prod?.name ?? 'Unknown',
+          upgrade_price: extra,
+        });
       }
     }
-    await client.query('INSERT INTO order_status_history (order_id, status) VALUES ($1, $2)', [orderId, 'PENDING']);
-    // If reserved for a date/slot, create the reservation row
-    if (details.fulfillment_date && details.time_slot) {
-      const cust = await one('SELECT name, phone FROM customers WHERE id = $1', [details.customer_id]) as any;
-      await client.query(`INSERT INTO reservations (order_id, customer_name, phone, res_date, time_slot, status, notes)
-        VALUES ($1, $2, $3, $4, $5, 'PENDING', $6)`,
-        [orderId, cust?.name ?? 'Messenger customer', cust?.phone ?? null,
-          details.fulfillment_date, details.time_slot, details.notes ?? null]);
-    }
-    return { orderId, orderNumber, total: totals.total };
-  });
+  }
+
+  await db.from('order_status_history').insert({ order_id: orderId, status: 'PENDING' });
+
+  // If reserved for a date/slot, create the reservation row
+  if (details.fulfillment_date && details.time_slot) {
+    const { data: cust } = await db.from('customers').select('name, phone').eq('id', details.customer_id).maybeSingle();
+    await db.from('reservations').insert({
+      order_id: orderId,
+      customer_name: cust?.name ?? 'Messenger customer',
+      phone: cust?.phone ?? null,
+      res_date: details.fulfillment_date,
+      time_slot: details.time_slot,
+      status: 'PENDING',
+      notes: details.notes ?? null,
+    });
+  }
 
   await clearCart(psid);
-  return result;
+  return { orderId, orderNumber, total: totals.total };
 }
 
 export async function updateOrderStatus(orderId: number, status: string): Promise<void> {
   const allowed = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
   if (!allowed.includes(status)) throw new Error('Invalid status');
-  await run('UPDATE orders SET status = $1 WHERE id = $2', [status, orderId]);
-  await run('INSERT INTO order_status_history (order_id, status) VALUES ($1, $2)', [orderId, status]);
+  const db = supa();
+  await db.from('orders').update({ status }).eq('id', orderId);
+  await db.from('order_status_history').insert({ order_id: orderId, status });
 }
 
 export async function updatePaymentStatus(orderId: number, paymentStatus: string): Promise<void> {
   const allowed = ['UNPAID', 'PAYMENT_SUBMITTED', 'PAID'];
   if (!allowed.includes(paymentStatus)) throw new Error('Invalid payment status');
-  await run('UPDATE orders SET payment_status = $1 WHERE id = $2', [paymentStatus, orderId]);
+  await supa().from('orders').update({ payment_status: paymentStatus }).eq('id', orderId);
 }
 
 // ---------- Order History & Tracking ----------
 
 export async function getCustomerOrders(customerId: number, limit = 5): Promise<any[]> {
-  const orders = await many(
-    'SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT $2',
-    [customerId, limit]
-  ) as any[];
+  const db = supa();
+  const { data: orders } = await db.from('orders').select('*').eq('customer_id', customerId).order('created_at', { ascending: false }).limit(limit);
 
   // Fetch current status for each order
-  for (const order of orders) {
-    const statusRow = await one(
-      'SELECT status FROM order_status_history WHERE order_id = $1 ORDER BY id DESC LIMIT 1',
-      [order.id]
-    ) as any;
+  for (const order of orders || []) {
+    const { data: statusRow } = await db.from('order_status_history').select('status').eq('order_id', order.id).order('id', { ascending: false }).limit(1).maybeSingle();
     order.current_status = statusRow?.status || order.status;
   }
 
-  return orders;
+  return orders || [];
 }
 
 export async function getOrderById(orderId: number): Promise<any> {
-  return await one('SELECT * FROM orders WHERE id = $1', [orderId]);
+  const { data } = await supa().from('orders').select('*').eq('id', orderId).maybeSingle();
+  return data;
 }
 
 export async function getOrderByNumber(orderNumber: string): Promise<any> {
-  return await one('SELECT * FROM orders WHERE order_number = $1', [orderNumber]);
+  const { data } = await supa().from('orders').select('*').eq('order_number', orderNumber).maybeSingle();
+  return data;
 }
 
 export async function getOrderItems(orderId: number): Promise<any[]> {
-  const items = await many(
-    'SELECT * FROM order_items WHERE order_id = $1',
-    [orderId]
-  ) as any[];
+  const db = supa();
+  const { data: items } = await db.from('order_items').select('*').eq('order_id', orderId);
 
   // Fetch package items for each order item
-  for (const item of items) {
+  for (const item of items || []) {
     if (item.package_id) {
-      item.package_items = await many(
-        'SELECT slot_number, product_id, product_name, upgrade_price FROM order_package_items WHERE order_item_id = $1 ORDER BY slot_number',
-        [item.id]
-      );
+      const { data: pkgItems } = await db.from('order_package_items').select('slot_number, product_id, product_name, upgrade_price').eq('order_item_id', item.id).order('slot_number');
+      item.package_items = pkgItems || [];
     } else {
       item.package_items = [];
     }
   }
 
-  return items;
+  return items || [];
 }
 
 export async function getOrderStatusHistory(orderId: number): Promise<any[]> {
-  return await many(
-    'SELECT * FROM order_status_history WHERE order_id = $1 ORDER BY created_at ASC',
-    [orderId]
-  );
+  const { data } = await supa().from('order_status_history').select('*').eq('order_id', orderId).order('created_at');
+  return data || [];
 }
 
 // ---------- Order Cancellation ----------
 
 export async function cancelOrder(orderId: number, customerId: number): Promise<{ ok: boolean; message: string }> {
-  const order = await one('SELECT * FROM orders WHERE id = $1 AND customer_id = $2', [orderId, customerId]);
+  const { data: order } = await supa().from('orders').select('*').eq('id', orderId).eq('customer_id', customerId).maybeSingle();
   if (!order) {
     return { ok: false, message: 'Order not found' };
   }
-  const status = (order as any).status;
+  const status = order.status;
   if (!['PENDING'].includes(status)) {
     return { ok: false, message: `Order can no longer be cancelled (current status: ${status})` };
   }
@@ -163,11 +179,11 @@ export async function cancelOrder(orderId: number, customerId: number): Promise<
 
 /** Customer-side completion: allowed only once the order is READY (received). */
 export async function completeOrderByCustomer(orderId: number, customerId: number): Promise<{ ok: boolean; message: string }> {
-  const order = await one('SELECT * FROM orders WHERE id = $1 AND customer_id = $2', [orderId, customerId]);
+  const { data: order } = await supa().from('orders').select('*').eq('id', orderId).eq('customer_id', customerId).maybeSingle();
   if (!order) {
     return { ok: false, message: 'Order not found' };
   }
-  const status = (order as any).status;
+  const status = order.status;
   if (status !== 'READY') {
     return { ok: false, message: `The order can be marked as received once it is READY (current status: ${status})` };
   }
@@ -179,23 +195,20 @@ export async function completeOrderByCustomer(orderId: number, customerId: numbe
 
 export async function rateOrder(orderId: number, customerId: number, rating: number, feedback?: string): Promise<void> {
   if (rating < 1 || rating > 5) throw new Error('Rating must be between 1 and 5');
-  const order = await one('SELECT * FROM orders WHERE id = $1 AND customer_id = $2', [orderId, customerId]);
+  const db = supa();
+  const { data: order } = await db.from('orders').select('*').eq('id', orderId).eq('customer_id', customerId).maybeSingle();
   if (!order) throw new Error('Order not found');
-  if ((order as any).status !== 'COMPLETED') throw new Error('Can only rate completed orders');
+  if (order.status !== 'COMPLETED') throw new Error('Can only rate completed orders');
   // Check if already rated
-  const existing = await one('SELECT id FROM order_ratings WHERE order_id = $1', [orderId]);
+  const { data: existing } = await db.from('order_ratings').select('id').eq('order_id', orderId).maybeSingle();
   if (existing) throw new Error('Order already rated');
-  await run(
-    'INSERT INTO order_ratings (order_id, rating, feedback) VALUES ($1, $2, $3)',
-    [orderId, rating, feedback ?? null]
-  );
+  await db.from('order_ratings').insert({ order_id: orderId, rating, feedback: feedback ?? null });
 }
 
 // ---------- Cart Expiration Cleanup ----------
 
 export async function cleanupAbandonedCarts(hoursOld = 24): Promise<number> {
-  const result = await run(
-    `DELETE FROM carts WHERE updated_at < (now()::text::timestamp - interval '${hoursOld} hours')`
-  );
-  return result;
+  const cutoff = new Date(Date.now() - hoursOld * 60 * 60 * 1000).toISOString();
+  const { data } = await supa().from('carts').delete().lt('updated_at', cutoff).select('id');
+  return data?.length || 0;
 }

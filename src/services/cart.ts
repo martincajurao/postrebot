@@ -1,54 +1,54 @@
-﻿﻿import { one, many, run, insertReturningId } from '../db';
+﻿﻿import { supa } from '../db/supabase';
 import { computeCartTotals, normalizeChoices } from './pricing';
 
 export async function getOrCreateCart(psid: string): Promise<number> {
-  let cart = await one('SELECT id FROM carts WHERE psid = $1', [psid]) as any;
-  if (!cart) {
-    await run('INSERT INTO carts (psid) VALUES ($1)', [psid]);
-    cart = await one('SELECT id FROM carts WHERE psid = $1', [psid]) as any;
-  }
-  return cart.id;
+  const db = supa();
+  const { data: existing } = await db.from('carts').select('id').eq('psid', psid).maybeSingle();
+  if (existing) return existing.id;
+  const { data: created } = await db.from('carts').insert({ psid }).select('id').single();
+  return created!.id;
 }
 
 export async function addItem(psid: string, item: any): Promise<void> {
+  const db = supa();
   const cartId = await getOrCreateCart(psid);
-  await run(`INSERT INTO cart_items (cart_id, product_id, package_id, food_pack_id, variant_size, quantity, slot_choices)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [cartId,
-      item.product_id ?? null,
-      item.package_id ?? null,
-      item.food_pack_id ?? null,
-      item.variant_size ?? null,
-      item.quantity || 1,
-      item.slot_choices ? JSON.stringify(item.slot_choices) : null
-    ]);
-  await run('UPDATE carts SET updated_at = now()::text WHERE id = $1', [cartId]);
+  await db.from('cart_items').insert({
+    cart_id: cartId,
+    product_id: item.product_id ?? null,
+    package_id: item.package_id ?? null,
+    food_pack_id: item.food_pack_id ?? null,
+    variant_size: item.variant_size ?? null,
+    quantity: item.quantity || 1,
+    slot_choices: item.slot_choices ? JSON.stringify(item.slot_choices) : null,
+  });
+  await db.from('carts').update({ updated_at: new Date().toISOString() }).eq('id', cartId);
 }
 
 export async function removeItem(psid: string, itemId: number): Promise<void> {
+  const db = supa();
   const cartId = await getOrCreateCart(psid);
-  await run('DELETE FROM cart_items WHERE id = $1 AND cart_id = $2', [itemId, cartId]);
+  await db.from('cart_items').delete().eq('id', itemId).eq('cart_id', cartId);
 }
 
 export async function updateQuantity(psid: string, itemId: number, quantity: number): Promise<void> {
+  const db = supa();
   const cartId = await getOrCreateCart(psid);
   if (quantity <= 0) return removeItem(psid, itemId);
-  await run('UPDATE cart_items SET quantity = $1 WHERE id = $2 AND cart_id = $3', [quantity, itemId, cartId]);
+  await db.from('cart_items').update({ quantity }).eq('id', itemId).eq('cart_id', cartId);
 }
 
 export async function getCart(psid: string) {
+  const db = supa();
   const cartId = await getOrCreateCart(psid);
-  const items = await many(`
-    SELECT ci.*, p.name AS product_name, pk.name AS package_name, fp.name AS food_pack_name
-    FROM cart_items ci
-    LEFT JOIN products p ON p.id = ci.product_id
-    LEFT JOIN packages pk ON pk.id = ci.package_id
-    LEFT JOIN food_packs fp ON fp.id = ci.food_pack_id
-    WHERE ci.cart_id = $1`, [cartId]) as any[];
-  return items.map((it: any) => ({
+  const { data: items } = await db
+    .from('cart_items')
+    .select('*, product:products(name), package:packages(name), food_pack:food_packs(name)')
+    .eq('cart_id', cartId)
+    .order('id');
+  return (items || []).map((it: any) => ({
     id: it.id,
-    name: it.food_pack_name ? `${it.food_pack_name} (food pack)`
-      : it.package_name ? `${it.package_name} (package)` : `${it.product_name} ${it.variant_size || ''}`.trim(),
+    name: it.food_pack?.name ? `${it.food_pack.name} (food pack)`
+      : it.package?.name ? `${it.package.name} (package)` : `${it.product?.name || ''} ${it.variant_size || ''}`.trim(),
     quantity: it.quantity,
     slot_choices: it.slot_choices ? normalizeChoices(JSON.parse(it.slot_choices)) : null,
     product_id: it.product_id,
@@ -59,8 +59,9 @@ export async function getCart(psid: string) {
 }
 
 export async function clearCart(psid: string): Promise<void> {
+  const db = supa();
   const cartId = await getOrCreateCart(psid);
-  await run('DELETE FROM cart_items WHERE cart_id = $1', [cartId]);
+  await db.from('cart_items').delete().eq('cart_id', cartId);
 }
 
 export async function cartTotals(psid: string, deliveryFee = 0) {

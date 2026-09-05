@@ -1,6 +1,6 @@
 ﻿import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { one, many, run, query, insertReturningId, tx } from '../db';
+import { supa } from '../db/supabase';
 import { authMiddleware, requireRole } from './auth';
 import { updateOrderStatus, updatePaymentStatus } from '../services/orders';
 import { getVapidPublicKey, storeSubscription, removeSubscription, sendPushToAdmins, getPushStatus } from '../services/push';
@@ -17,138 +17,168 @@ r.use(authMiddleware);
 // ---- Dashboard ----
 r.get('/dashboard', async (_req, res) => {
   const today = new Date().toISOString().slice(0, 10);
+  const [todayOrders, pendingOrders, todayRows, todayRes, recentRows] = await Promise.all([
+    supa().from('orders').select('id', { count: 'exact', head: true }).like('created_at', today + '%'),
+    supa().from('orders').select('id', { count: 'exact', head: true }).eq('status', 'PENDING'),
+    supa().from('orders').select('total').like('created_at', today + '%').neq('status', 'CANCELLED'),
+    supa().from('reservations').select('*').eq('res_date', today).neq('status', 'CANCELLED').order('time_slot'),
+    supa().from('orders').select('*, customers(name)').order('id', { ascending: false }).limit(10),
+  ]);
   const stats = {
-    todayOrders: (await one("SELECT COUNT(*) c FROM orders WHERE date(created_at) = $1", [today]) as any).c,
-    pendingOrders: (await one("SELECT COUNT(*) c FROM orders WHERE status = 'PENDING'")).c,
-    todaySales: (await one("SELECT COALESCE(SUM(total),0) s FROM orders WHERE date(created_at) = $1 AND status != 'CANCELLED'", [today]) as any).s,
-    todayReservations: await many("SELECT * FROM reservations WHERE res_date = $1 AND status != 'CANCELLED' ORDER BY time_slot", [today]),
-    recentOrders: await many(`SELECT o.*, c.name AS customer_name FROM orders o
-      LEFT JOIN customers c ON c.id = o.customer_id ORDER BY o.id DESC LIMIT 10`),
+    todayOrders: todayOrders.count ?? 0,
+    pendingOrders: pendingOrders.count ?? 0,
+    todaySales: (todayRows.data || []).reduce((s: number, r: any) => s + (Number(r.total) || 0), 0),
+    todayReservations: todayRes.data || [],
+    recentOrders: (recentRows.data || []).map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, customers: undefined })),
   };
   res.json(stats);
 });
 
 // ---- Categories ----
-r.get('/categories', async (_req, res) => res.json(await many('SELECT * FROM categories ORDER BY sort_order')));
+r.get('/categories', async (_req, res) => {
+  const { data } = await supa().from('categories').select('*').order('sort_order');
+  res.json(data || []);
+});
 r.post('/categories', async (req, res) => {
   const { name, sort_order = 0 } = req.body;
-  const id = await insertReturningId('INSERT INTO categories (name, sort_order) VALUES ($1, $2) RETURNING id', [name, sort_order]);
+  const { data, error } = await supa().from('categories').insert({ name, sort_order }).select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  const id = Number(data.id);
   res.json({ id });
 });
 r.put('/categories/:id', async (req, res) => {
   const { name, active } = req.body;
-  await run('UPDATE categories SET name = COALESCE($1, name), active = COALESCE($2, active) WHERE id = $3',
-    [name ?? null, active ?? null, req.params.id]);
+  const upd: Record<string, any> = {};
+  if (name != null) upd.name = name;
+  if (active != null) upd.active = active;
+  if (Object.keys(upd).length > 0) await supa().from('categories').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 r.delete('/categories/:id', async (req, res) => {
-  await run('UPDATE categories SET active = 0 WHERE id = $1', [req.params.id]);
+  await supa().from('categories').update({ active: 0 }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ---- Products ----
 r.get('/products', async (_req, res) => {
-  const products = await many('SELECT * FROM products ORDER BY category_id, sort_order') as any[];
-  const variants = await many('SELECT * FROM product_variants') as any[];
+  const [prodRows, varRows] = await Promise.all([
+    supa().from('products').select('*').order('category_id, sort_order'),
+    supa().from('product_variants').select('*'),
+  ]);
+  const products = prodRows.data || [];
+  const variants = varRows.data || [];
   res.json(products.map((p: any) => ({ ...p, variants: variants.filter((v: any) => v.product_id === p.id) })));
 });
 r.post('/products', async (req, res) => {
   const { category_id, name, description, photo_url, variants = [] } = req.body;
-  const pid = await tx(async (client) => {
-    const prodRes = await client.query('INSERT INTO products (category_id, name, description, photo_url) VALUES ($1, $2, $3, $4) RETURNING id',
-      [category_id, name, description ?? null, photo_url ?? null]);
-    const pid = Number(prodRes.rows[0].id);
-    for (const v of variants) {
-      await client.query('INSERT INTO product_variants (product_id, size, price) VALUES ($1, $2, $3)', [pid, v.size, v.price]);
-    }
-    return pid;
-  });
+  const { data: prodRow, error: prodErr } = await supa().from('products')
+    .insert({ category_id, name, description: description ?? null, photo_url: photo_url ?? null })
+    .select('id').single();
+  if (prodErr) return res.status(400).json({ error: prodErr.message });
+  const pid = Number(prodRow.id);
+  if (variants.length > 0) {
+    const { error: varErr } = await supa().from('product_variants')
+      .insert(variants.map((v: any) => ({ product_id: pid, size: v.size, price: v.price })));
+    if (varErr) return res.status(400).json({ error: varErr.message });
+  }
   res.json({ id: pid });
 });
 r.put('/products/:id', async (req, res) => {
   const { name, description, photo_url, category_id, active, unavailable } = req.body;
-  await run(`UPDATE products SET name = COALESCE($1, name), description = COALESCE($2, description),
-    photo_url = COALESCE($3, photo_url), category_id = COALESCE($4, category_id),
-    active = COALESCE($5, active), unavailable = COALESCE($6, unavailable) WHERE id = $7`,
-    [name ?? null, description ?? null, photo_url ?? null, category_id ?? null, active ?? null, unavailable ?? null, req.params.id]);
+  const upd: Record<string, any> = {};
+  if (name != null) upd.name = name;
+  if (description != null) upd.description = description;
+  if (photo_url != null) upd.photo_url = photo_url;
+  if (category_id != null) upd.category_id = category_id;
+  if (active != null) upd.active = active;
+  if (unavailable != null) upd.unavailable = unavailable;
+  if (Object.keys(upd).length > 0) await supa().from('products').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 r.delete('/products/:id', async (req, res) => {
-  await run('UPDATE products SET active = 0 WHERE id = $1', [req.params.id]);
+  await supa().from('products').update({ active: 0 }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ---- Variants ----
 r.get('/products/:id/variants', async (req, res) => {
-  res.json(await many('SELECT * FROM product_variants WHERE product_id = $1 ORDER BY price', [req.params.id]));
+  const { data } = await supa().from('product_variants').select('*').eq('product_id', req.params.id).order('price');
+  res.json(data || []);
 });
 r.post('/products/:id/variants', async (req, res) => {
   const { size, price } = req.body;
-  const existing = await one('SELECT id FROM product_variants WHERE product_id = $1 AND size = $2', [req.params.id, size]) as any;
+  const { data: existing } = await supa().from('product_variants').select('id').eq('product_id', req.params.id).eq('size', size).maybeSingle();
   if (existing) {
-    await run('UPDATE product_variants SET price = $1 WHERE id = $2', [price, existing.id]);
+    await supa().from('product_variants').update({ price }).eq('id', existing.id);
     res.json({ id: existing.id });
   } else {
-    const id = await insertReturningId('INSERT INTO product_variants (product_id, size, price) VALUES ($1, $2, $3) RETURNING id',
-      [req.params.id, size, price]);
-    res.json({ id });
+    const { data, error } = await supa().from('product_variants').insert({ product_id: req.params.id, size, price }).select('id').single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ id: Number(data.id) });
   }
 });
 r.put('/products/:id/variants', async (req, res) => {
   const { variants } = req.body;
   if (!Array.isArray(variants)) return res.status(400).json({ error: 'variants must be an array' });
 
-  await tx(async (client) => {
-    // Delete existing variants for this product
-    await client.query('DELETE FROM product_variants WHERE product_id = $1', [req.params.id]);
-
-    // Insert new variants
-    for (const v of variants) {
-      await client.query(
-        'INSERT INTO product_variants (product_id, size, price) VALUES ($1, $2, $3)',
-        [req.params.id, v.size, v.price]
-      );
-    }
-  });
-
+  // Replace all variants for this product
+  await supa().from('product_variants').delete().eq('product_id', req.params.id);
+  if (variants.length > 0) {
+    const { error } = await supa().from('product_variants')
+      .insert(variants.map((v: any) => ({ product_id: req.params.id, size: v.size, price: v.price })));
+    if (error) return res.status(400).json({ error: error.message });
+  }
   res.json({ ok: true });
 });
 r.delete('/variants/:id', async (req, res) => {
-  await run('DELETE FROM product_variants WHERE id = $1', [req.params.id]);
+  await supa().from('product_variants').delete().eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ---- Packages ----
 r.get('/packages', async (_req, res) => {
-  const packages = await many('SELECT * FROM packages ORDER BY id') as any[];
-  const slots = await many('SELECT * FROM package_slots ORDER BY package_id, slot_number') as any[];
-  const options = await many('SELECT po.*, p.name AS product_name FROM package_options po JOIN products p ON p.id = po.product_id ORDER BY po.slot_id') as any[];
+  const [pkgRows, slotRows] = await Promise.all([
+    supa().from('packages').select('*').order('id'),
+    supa().from('package_slots').select('*').order('package_id, slot_number'),
+  ]);
+  const packages = pkgRows.data || [];
+  const slots = slotRows.data || [];
+  // options for every known package slot
+  const { data: options } = await supa().from('package_options').select('*, products(name)');
+  const opts = (options || []).map((o: any) => ({ ...o, product_name: o.products?.name ?? null, products: undefined }));
   res.json(packages.map((p: any) => ({
     ...p,
     slots: slots.filter((s: any) => s.package_id === p.id).map((s: any) => ({
       ...s,
-      options: options.filter((o: any) => o.slot_id === s.id),
+      options: opts.filter((o: any) => o.slot_id === s.id),
     })),
   })));
 });
 r.post('/packages', async (req, res) => {
   const { name, description, photo_url, base_price, selections, discount = 0, is_fixed = 0, is_custom = 0 } = req.body;
-  const id = await insertReturningId('INSERT INTO packages (name, description, photo_url, base_price, selections, discount, is_fixed, is_custom) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-    [name, description ?? null, photo_url ?? null, base_price, selections, discount, is_fixed, is_custom]);
-  res.json({ id });
+  const { data, error } = await supa().from('packages')
+    .insert({ name, description: description ?? null, photo_url: photo_url ?? null, base_price, selections, discount, is_fixed, is_custom })
+    .select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ id: Number(data.id) });
 });
 r.put('/packages/:id', async (req, res) => {
   const { name, description, photo_url, base_price, selections, active, discount, is_fixed, is_custom } = req.body;
-  await run(`UPDATE packages SET name = COALESCE($1, name), description = COALESCE($2, description),
-    photo_url = COALESCE($3, photo_url), base_price = COALESCE($4, base_price),
-    selections = COALESCE($5, selections), active = COALESCE($6, active),
-    discount = COALESCE($7, discount), is_fixed = COALESCE($8, is_fixed),
-    is_custom = COALESCE($9, is_custom) WHERE id = $10`,
-    [name ?? null, description ?? null, photo_url ?? null, base_price ?? null, selections ?? null, active ?? null, discount ?? null, is_fixed ?? null, is_custom ?? null, req.params.id]);
+  const upd: Record<string, any> = {};
+  if (name != null) upd.name = name;
+  if (description != null) upd.description = description;
+  if (photo_url != null) upd.photo_url = photo_url;
+  if (base_price != null) upd.base_price = base_price;
+  if (selections != null) upd.selections = selections;
+  if (active != null) upd.active = active;
+  if (discount != null) upd.discount = discount;
+  if (is_fixed != null) upd.is_fixed = is_fixed;
+  if (is_custom != null) upd.is_custom = is_custom;
+  if (Object.keys(upd).length > 0) await supa().from('packages').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 r.delete('/packages/:id', async (req, res) => {
-  await run('UPDATE packages SET active = 0 WHERE id = $1', [req.params.id]);
+  await supa().from('packages').update({ active: 0 }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
@@ -156,49 +186,44 @@ r.delete('/packages/:id', async (req, res) => {
 r.post('/packages/:id/slots', async (req, res) => {
   const { slot_number } = req.body;
   const pkgId = req.params.id;
-  const id = await insertReturningId('INSERT INTO package_slots (package_id, slot_number) VALUES ($1, $2) RETURNING id', [pkgId, slot_number]);
-  res.json({ id });
+  const { data, error } = await supa().from('package_slots').insert({ package_id: pkgId, slot_number }).select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ id: Number(data.id) });
 });
 r.put('/packages/:id/slots', async (req, res) => {
   const pkgId = req.params.id;
   const { slots } = req.body;
   if (!Array.isArray(slots)) return res.status(400).json({ error: 'slots must be an array' });
 
-  await tx(async (client) => {
-    // Delete existing options and slots for this package
-    const existingSlots = await client.query('SELECT id FROM package_slots WHERE package_id = $1', [pkgId]);
-    for (const s of existingSlots.rows) {
-      await client.query('DELETE FROM package_options WHERE slot_id = $1', [s.id]);
+  // Replace all slots + options for this package
+  const { data: existingSlots } = await supa().from('package_slots').select('id').eq('package_id', pkgId);
+  for (const s of existingSlots || []) {
+    await supa().from('package_options').delete().eq('slot_id', s.id);
+  }
+  await supa().from('package_slots').delete().eq('package_id', pkgId);
+
+  for (const slot of slots) {
+    const { data: slotRow, error: slotErr } = await supa().from('package_slots')
+      .insert({ package_id: pkgId, slot_number: slot.slot_number }).select('id').single();
+    if (slotErr) return res.status(400).json({ error: slotErr.message });
+    const slotId = Number(slotRow.id);
+
+    if (Array.isArray(slot.product_ids) && slot.product_ids.length > 0) {
+      const rows = slot.product_ids.map((productId: any) => ({
+        slot_id: slotId,
+        product_id: productId,
+        upgrade_price: slot.upgrade_prices?.[productId] ?? 0,
+        size_upgrade_price: slot.size_upgrade_prices?.[productId] ?? 0,
+        is_default: slot.default_product_id === productId ? 1 : 0,
+      }));
+      const { error: optErr } = await supa().from('package_options').insert(rows);
+      if (optErr) return res.status(400).json({ error: optErr.message });
     }
-    await client.query('DELETE FROM package_slots WHERE package_id = $1', [pkgId]);
-
-    // Insert new slots with options
-    for (const slot of slots) {
-      const slotRes = await client.query(
-        'INSERT INTO package_slots (package_id, slot_number) VALUES ($1, $2) RETURNING id',
-        [pkgId, slot.slot_number]
-      );
-      const slotId = Number(slotRes.rows[0].id);
-
-      // Insert options for this slot
-      if (Array.isArray(slot.product_ids)) {
-        for (const productId of slot.product_ids) {
-          const upgradePrice = slot.upgrade_prices?.[productId] ?? 0;
-          const sizeUpgradePrice = slot.size_upgrade_prices?.[productId] ?? 0;
-          const isDefault = slot.default_product_id === productId ? 1 : 0;
-          await client.query(
-            'INSERT INTO package_options (slot_id, product_id, upgrade_price, size_upgrade_price, is_default) VALUES ($1, $2, $3, $4, $5)',
-            [slotId, productId, upgradePrice, sizeUpgradePrice, isDefault]
-          );
-        }
-      }
-    }
-  });
-
+  }
   res.json({ ok: true });
 });
 r.delete('/slots/:id', async (req, res) => {
-  await run('DELETE FROM package_slots WHERE id = $1', [req.params.id]);
+  await supa().from('package_slots').delete().eq('id', req.params.id);
   res.json({ ok: true });
 });
 
@@ -206,84 +231,101 @@ r.delete('/slots/:id', async (req, res) => {
 r.post('/slots/:id/options', async (req, res) => {
   const { product_id, upgrade_price = 0, size_upgrade_price = 0, is_default = 0 } = req.body;
   const slotId = req.params.id;
-  const id = await insertReturningId('INSERT INTO package_options (slot_id, product_id, upgrade_price, size_upgrade_price, is_default) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-    [slotId, product_id, upgrade_price, size_upgrade_price, is_default]);
+  const { data, error } = await supa().from('package_options')
+    .insert({ slot_id: slotId, product_id, upgrade_price, size_upgrade_price, is_default })
+    .select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  const id = Number(data.id);
   res.json({ id });
 });
 r.put('/options/:id', async (req, res) => {
   const { upgrade_price, size_upgrade_price, is_default } = req.body;
-  await run('UPDATE package_options SET upgrade_price = COALESCE($1, upgrade_price), size_upgrade_price = COALESCE($2, size_upgrade_price), is_default = COALESCE($3, is_default) WHERE id = $4',
-    [upgrade_price ?? null, size_upgrade_price ?? null, is_default ?? null, req.params.id]);
+  const upd: Record<string, any> = {};
+  if (upgrade_price != null) upd.upgrade_price = upgrade_price;
+  if (size_upgrade_price != null) upd.size_upgrade_price = size_upgrade_price;
+  if (is_default != null) upd.is_default = is_default;
+  if (Object.keys(upd).length > 0) await supa().from('package_options').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 r.delete('/options/:id', async (req, res) => {
-  await run('DELETE FROM package_options WHERE id = $1', [req.params.id]);
+  await supa().from('package_options').delete().eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ---- Food Packs (simple fixed-price bundles) ----
 r.get('/food-packs', async (_req, res) => {
-  res.json(await many('SELECT * FROM food_packs ORDER BY sort_order, id'));
+  const { data } = await supa().from('food_packs').select('*').order('sort_order, id');
+  res.json(data || []);
 });
 r.post('/food-packs', async (req, res) => {
   const { name, description, photo_url, price, serves, sort_order = 0, active = 1 } = req.body;
   if (!name || price == null) return res.status(400).json({ error: 'name and price are required' });
-  const id = await insertReturningId(
-    'INSERT INTO food_packs (name, description, photo_url, price, serves, sort_order, active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-    [name, description ?? null, photo_url ?? null, price, serves ?? null, sort_order, active]
-  );
-  res.json({ id });
+  const { data, error } = await supa().from('food_packs')
+    .insert({ name, description: description ?? null, photo_url: photo_url ?? null, price, serves: serves ?? null, sort_order, active })
+    .select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ id: Number(data.id) });
 });
 r.put('/food-packs/:id', async (req, res) => {
   const { name, description, photo_url, price, serves, sort_order, active } = req.body;
-  await run(`UPDATE food_packs SET name = COALESCE($1, name), description = COALESCE($2, description),
-    photo_url = COALESCE($3, photo_url), price = COALESCE($4, price), serves = COALESCE($5, serves),
-    sort_order = COALESCE($6, sort_order), active = COALESCE($7, active) WHERE id = $8`,
-    [name ?? null, description ?? null, photo_url ?? null, price ?? null, serves ?? null, sort_order ?? null, active ?? null, req.params.id]);
+  const upd: Record<string, any> = {};
+  if (name != null) upd.name = name;
+  if (description != null) upd.description = description;
+  if (photo_url != null) upd.photo_url = photo_url;
+  if (price != null) upd.price = price;
+  if (serves != null) upd.serves = serves;
+  if (sort_order != null) upd.sort_order = sort_order;
+  if (active != null) upd.active = active;
+  if (Object.keys(upd).length > 0) await supa().from('food_packs').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 r.delete('/food-packs/:id', async (req, res) => {
-  await run('UPDATE food_packs SET active = 0 WHERE id = $1', [req.params.id]);
+  await supa().from('food_packs').update({ active: 0 }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ---- Orders ----
 r.get('/orders', async (_req, res) => {
-  res.json(await many(`SELECT o.*, c.name AS customer_name FROM orders o
-    LEFT JOIN customers c ON c.id = o.customer_id ORDER BY o.id DESC`));
+  const { data } = await supa().from('orders').select('*, customers(name)').order('id', { ascending: false });
+  res.json((data || []).map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, customers: undefined })));
 });
 r.get('/orders/:id', async (req, res) => {
-  const order = await one('SELECT * FROM orders WHERE id = $1', [req.params.id]) as any;
+  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
-  const items = await many('SELECT * FROM order_items WHERE order_id = $1', [order.id]) as any[];
-  const packageItems = await many('SELECT * FROM order_package_items ORDER BY order_item_id, slot_number') as any[];
+  const [itemsRes, pkgRes, histRes] = await Promise.all([
+    supa().from('order_items').select('*').eq('order_id', order.id),
+    supa().from('order_package_items').select('*').order('order_item_id, slot_number'),
+    supa().from('order_status_history').select('*').eq('order_id', order.id).order('created_at'),
+  ]);
+  const items = itemsRes.data || [];
+  const packageItems = pkgRes.data || [];
   order.items = items.map((i: any) => ({
     ...i,
     package_items: packageItems.filter((pi: any) => pi.order_item_id === i.id),
   }));
-  order.status_history = await many('SELECT * FROM order_status_history WHERE order_id = $1 ORDER BY changed_at', [order.id]);
+  order.status_history = histRes.data || [];
   res.json(order);
 });
 r.post('/orders/:id/status', async (req, res) => {
   const { status } = req.body;
-  const order = await one('SELECT * FROM orders WHERE id = $1', [req.params.id]) as any;
+  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   await updateOrderStatus(order.id, status);
   if (order.customer_id) {
-    const customer = await one('SELECT psid FROM customers WHERE id = $1', [order.customer_id]) as any;
-    if (customer?.psid) {
+    const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
+    if (customer?.data?.psid) {
       if (status === 'READY') {
-        await notifyOrderOnTheWay(customer.psid, order.order_number);
+        await notifyOrderOnTheWay(customer.data.psid, order.order_number);
         // Give the customer a one-tap way to complete the order themselves.
-        await sendQuickReplies(customer.psid, 'Once you receive your order, tap below:', [
+        await sendQuickReplies(customer.data.psid, 'Once you receive your order, tap below:', [
           { title: '✅ Order Received', payload: `COMPLETE:${order.id}` },
           { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
         ]);
       }
-      else await notifyOrderStatus(customer.psid, status, order.order_number);
+      else await notifyOrderStatus(customer.data.psid, status, order.order_number);
       // Send rating request when order is completed
       if (status === 'COMPLETED') {
-        await sendRatingRequest(customer.psid, order.order_number, order.id);
+        await sendRatingRequest(customer.data.psid, order.order_number, order.id);
       }
     }
   }
@@ -295,27 +337,27 @@ r.post('/orders/:id/status', async (req, res) => {
 // The fee is provided BY the admin — it is not auto-charged from the area estimates.
 r.post('/orders/:id/confirm', async (req, res) => {
   const fee = Math.max(0, Math.round(Number(req.body?.delivery_fee) ||  0));
-  const order = await one('SELECT * FROM orders WHERE id = $1', [req.params.id]) as any;
+  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   if (order.status !== 'PENDING') return res.status(400).json({ error: 'Only pending orders can be confirmed' });
   const newTotal = Math.max(0,(Number(order.subtotal) ||  0) - (Number(order.additional_discount) ||  0) + fee);
-  await query('UPDATE orders SET status = $1, delivery_fee = $2, total = $3 WHERE id = $4', ['CONFIRMED', fee, newTotal, order.id]);
-  await run('INSERT INTO order_status_history (order_id, status) VALUES ($1,$2)', [order.id, 'CONFIRMED']);
+  await supa().from('orders').update({ status: 'CONFIRMED', delivery_fee: fee, total: newTotal }).eq('id', order.id);
+  await supa().from('order_status_history').insert({ order_id: order.id, status: 'CONFIRMED' });
   if (order.customer_id) {
-    const customer = await one('SELECT psid FROM customers WHERE id = $1', [order.customer_id]) as any;
-    if (customer?.psid) {
-      await notifyOrderStatus(customer.psid, 'CONFIRMED', order.order_number);
-      await sendText(customer.psid, '🚚 Delivery fee: ₱' + fee.toLocaleString('en-PH') + '\n💰 New total: ₱' + newTotal.toLocaleString('en-PH'));
+    const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
+    if (customer?.data?.psid) {
+      await notifyOrderStatus(customer.data.psid, 'CONFIRMED', order.order_number);
+      await sendText(customer.data.psid, '🚚 Delivery fee: ₱' + fee.toLocaleString('en-PH') + '\n💰 New total: ₱' + newTotal.toLocaleString('en-PH'));
     }
   }
   res.json({ ok: true, total: newTotal, delivery_fee: fee });
 });
 r.post('/orders/:id/discount', async (req, res) => {
   const discount = Math.max(0, Math.round(Number(req.body?.additional_discount) || 0));
-  const order = await one('SELECT * FROM orders WHERE id = $1', [req.params.id]) as any;
+  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   const newTotal = Math.max(0, Number(order.total) + Number(order.additional_discount || 0) - discount);
-  await query('UPDATE orders SET additional_discount = $1, total = $2 WHERE id = $3', [discount, newTotal, order.id]);
+  await supa().from('orders').update({ additional_discount: discount, total: newTotal }).eq('id', order.id);
   res.json({ ok: true, total: newTotal, additional_discount: discount });
 });
 r.post('/orders/:id/payment-status', async (req, res) => {
@@ -326,64 +368,75 @@ r.post('/orders/:id/payment-status', async (req, res) => {
 
 // ---- Order Ratings & Feedback ----
 r.get('/ratings', async (_req, res) => {
-  const ratings = await many(`
-    SELECT r.*, o.order_number, c.name as customer_name
-    FROM order_ratings r
-    JOIN orders o ON o.id = r.order_id
-    LEFT JOIN customers c ON c.id = o.customer_id
-    ORDER BY r.created_at DESC
-  `);
-  res.json(ratings);
+  const { data } = await supa().from('order_ratings')
+    .select('*, orders(order_number, customers(name))')
+    .order('created_at', { ascending: false });
+  res.json((data || []).map((r: any) => ({
+    ...r,
+    order_number: r.orders?.order_number ?? null,
+    customer_name: r.orders?.customers?.name ?? null,
+    orders: undefined,
+  })));
 });
 r.get('/ratings/stats', async (_req, res) => {
-  const stats = await one(`
-    SELECT
-      COUNT(*) as total_ratings,
-      ROUND(AVG(rating), 1) as average_rating,
-      COUNT(CASE WHEN rating = 5 THEN 1 END) as five_star,
-      COUNT(CASE WHEN rating = 4 THEN 1 END) as four_star,
-      COUNT(CASE WHEN rating = 3 THEN 1 END) as three_star,
-      COUNT(CASE WHEN rating = 2 THEN 1 END) as two_star,
-      COUNT(CASE WHEN rating = 1 THEN 1 END) as one_star
-    FROM order_ratings
-  `);
+  const { data } = await supa().from('order_ratings').select('rating');
+  const rows = data || [];
+  const total = rows.length;
+  const count = (n: number) => rows.filter((r) => Number(r.rating) === n).length;
+  const stats = {
+    total_ratings: total,
+    average_rating: total ? Math.round((rows.reduce((s, r) => s + Number(r.rating), 0) / total) * 10) / 10 : 0,
+    five_star: count(5),
+    four_star: count(4),
+    three_star: count(3),
+    two_star: count(2),
+    one_star: count(1),
+  };
   res.json(stats);
 });
 
 // ---- Customers ----
 r.get('/customers', async (_req, res) => {
-  res.json(await many('SELECT * FROM customers ORDER BY id DESC'));
+  const { data } = await supa().from('customers').select('*').order('id', { ascending: false });
+  res.json(data || []);
 });
 r.get('/customers/:id', async (req, res) => {
-  const customer = await one('SELECT * FROM customers WHERE id = $1', [req.params.id]) as any;
+  const { data: customer } = await supa().from('customers').select('*').eq('id', req.params.id).maybeSingle();
   if (!customer) return res.status(404).json({ error: 'Customer not found' });
-  customer.orders = await many('SELECT * FROM orders WHERE customer_id = $1 ORDER BY id DESC', [customer.id]);
+  const { data: orders } = await supa().from('orders').select('*').eq('customer_id', customer.id).order('id', { ascending: false });
+  customer.orders = orders || [];
   res.json(customer);
 });
 
 // ---- Delivery Areas ----
 r.get('/delivery-areas', async (_req, res) => {
-  res.json(await many('SELECT * FROM delivery_areas ORDER BY name'));
+  const { data } = await supa().from('delivery_areas').select('*').order('name');
+  res.json(data || []);
 });
 r.post('/delivery-areas', async (req, res) => {
   const { name, fee } = req.body;
-  const id = await insertReturningId('INSERT INTO delivery_areas (name, fee) VALUES ($1, $2) RETURNING id', [name, fee]);
-  res.json({ id });
+  const { data, error } = await supa().from('delivery_areas').insert({ name, fee }).select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ id: Number(data.id) });
 });
 r.put('/delivery-areas/:id', async (req, res) => {
   const { name, fee, active } = req.body;
-  await run('UPDATE delivery_areas SET name = COALESCE($1, name), fee = COALESCE($2, fee), active = COALESCE($3, active) WHERE id = $4',
-    [name ?? null, fee ?? null, active ?? null, req.params.id]);
+  const upd: Record<string, any> = {};
+  if (name != null) upd.name = name;
+  if (fee != null) upd.fee = fee;
+  if (active != null) upd.active = active;
+  if (Object.keys(upd).length > 0) await supa().from('delivery_areas').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 r.delete('/delivery-areas/:id', async (req, res) => {
-  await run('UPDATE delivery_areas SET active = 0 WHERE id = $1', [req.params.id]);
+  await supa().from('delivery_areas').update({ active: 0 }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ---- Reservations ----
 r.get('/reservations', async (_req, res) => {
-  res.json(await many("SELECT * FROM reservations WHERE status != 'CANCELLED' ORDER BY res_date, time_slot"));
+  const { data } = await supa().from('reservations').select('*').neq('status', 'CANCELLED').order('res_date, time_slot');
+  res.json(data || []);
 });
 r.post('/reservations', async (req, res) => {
   try {
@@ -423,57 +476,73 @@ r.get('/availability', async (req, res) => {
 
 // ---- Business Hours ----
 r.get('/business-hours', async (_req, res) => {
-  res.json(await many('SELECT * FROM business_hours ORDER BY day_of_week'));
+  const { data } = await supa().from('business_hours').select('*').order('day_of_week');
+  res.json(data || []);
 });
 r.put('/business-hours/:day', async (req, res) => {
   const { open_time, close_time, closed } = req.body;
-  await run('UPDATE business_hours SET open_time = COALESCE($1, open_time), close_time = COALESCE($2, close_time), closed = COALESCE($3, closed) WHERE day_of_week = $4',
-    [open_time ?? null, close_time ?? null, closed ?? null, req.params.day]);
+  const upd: Record<string, any> = {};
+  if (open_time != null) upd.open_time = open_time;
+  if (close_time != null) upd.close_time = close_time;
+  if (closed != null) upd.closed = closed;
+  if (Object.keys(upd).length > 0) await supa().from('business_hours').update(upd).eq('day_of_week', req.params.day);
   res.json({ ok: true });
 });
 
 // ---- Blocked Dates ----
 r.get('/blocked-dates', async (_req, res) => {
-  res.json(await many('SELECT * FROM blocked_dates ORDER BY date'));
+  const { data } = await supa().from('blocked_dates').select('*').order('date');
+  res.json(data || []);
 });
 r.post('/blocked-dates', async (req, res) => {
   const { date, reason } = req.body;
-  await run('INSERT INTO blocked_dates (date, reason) VALUES ($1, $2) ON CONFLICT (date) DO UPDATE SET reason = EXCLUDED.reason', [date, reason ?? null]);
+  const { data: existing } = await supa().from('blocked_dates').select('date').eq('date', date).maybeSingle();
+  if (existing) {
+    await supa().from('blocked_dates').update({ reason: reason ?? null }).eq('date', date);
+  } else {
+    await supa().from('blocked_dates').insert({ date, reason: reason ?? null });
+  }
   res.json({ ok: true });
 });
 r.delete('/blocked-dates/:date', async (req, res) => {
-  await run('DELETE FROM blocked_dates WHERE date = $1', [req.params.date]);
+  await supa().from('blocked_dates').delete().eq('date', req.params.date);
   res.json({ ok: true });
 });
 
 // ---- Time Slots ----
 r.get('/time-slots', async (_req, res) => {
-  res.json(await many('SELECT * FROM time_slots ORDER BY sort_order'));
+  const { data } = await supa().from('time_slots').select('*').order('sort_order');
+  res.json(data || []);
 });
 r.post('/time-slots', async (req, res) => {
   const { label, max_capacity } = req.body;
-  const id = await insertReturningId('INSERT INTO time_slots (label, max_capacity) VALUES ($1, $2) RETURNING id', [label, max_capacity ?? 5]);
-  res.json({ id });
+  const { data, error } = await supa().from('time_slots').insert({ label, max_capacity: max_capacity ?? 5 }).select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ id: Number(data.id) });
 });
 r.put('/time-slots/:id', async (req, res) => {
   const { label, max_capacity, active } = req.body;
-  await run('UPDATE time_slots SET label = COALESCE($1, label), max_capacity = COALESCE($2, max_capacity), active = COALESCE($3, active) WHERE id = $4',
-    [label ?? null, max_capacity ?? null, active ?? null, req.params.id]);
+  const upd: Record<string, any> = {};
+  if (label != null) upd.label = label;
+  if (max_capacity != null) upd.max_capacity = max_capacity;
+  if (active != null) upd.active = active;
+  if (Object.keys(upd).length > 0) await supa().from('time_slots').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 r.delete('/time-slots/:id', async (req, res) => {
-  await run('UPDATE time_slots SET active = 0 WHERE id = $1', [req.params.id]);
+  await supa().from('time_slots').update({ active: 0 }).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 // ---- Payments ----
 r.get('/payments', async (_req, res) => {
-  res.json(await many('SELECT * FROM payments ORDER BY recorded_at DESC'));
+  const { data } = await supa().from('payments').select('*').order('recorded_at', { ascending: false });
+  res.json(data || []);
 });
 r.post('/payments', async (req, res) => {
   const { order_id, method, amount, status = 'PAID' } = req.body;
-  await run('INSERT INTO payments (order_id, method, amount, status) VALUES ($1, $2, $3, $4)', [order_id, method, amount, status]);
-  await run('UPDATE orders SET payment_status = $1 WHERE id = $2', [status === 'PAID' ? 'PAID' : 'PAYMENT_SUBMITTED', order_id]);
+  await supa().from('payments').insert({ order_id, method, amount, status });
+  await supa().from('orders').update({ payment_status: status === 'PAID' ? 'PAID' : 'PAYMENT_SUBMITTED' }).eq('id', order_id);
   res.json({ ok: true });
 });
 
@@ -488,7 +557,8 @@ r.post('/pricing/preview', async (req, res) => {
 const requireAdmin = requireRole('ADMIN');
 
 r.get('/admins', requireAdmin, async (_req, res) => {
-  res.json(await many('SELECT id, username, role, created_at FROM admins ORDER BY id'));
+  const { data } = await supa().from('admins').select('id, username, role, created_at').order('id');
+  res.json(data || []);
 });
 
 r.post('/admins', requireAdmin, async (req, res) => {
@@ -500,48 +570,53 @@ r.post('/admins', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 6 characters' });
   }
   const name = String(username).trim();
-  if (await one('SELECT id FROM admins WHERE username = $1', [name])) {
+  const { data: existing } = await supa().from('admins').select('id').eq('username', name).maybeSingle();
+  if (existing) {
     return res.status(409).json({ error: 'That username is already taken' });
   }
   const hash = bcrypt.hashSync(password, 10);
-  const id = await insertReturningId('INSERT INTO admins (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id',
-    [name, hash, role === 'ADMIN' ? 'ADMIN' : 'STAFF']);
-  res.json({ id });
+  const { data, error } = await supa().from('admins')
+    .insert({ username: name, password_hash: hash, role: role === 'ADMIN' ? 'ADMIN' : 'STAFF' })
+    .select('id').single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ id: Number(data.id) });
 });
 
 r.put('/admins/:id', requireAdmin, async (req, res) => {
-  const target = await one('SELECT * FROM admins WHERE id = $1', [req.params.id]) as any;
+  const { data: target } = await supa().from('admins').select('*').eq('id', req.params.id).maybeSingle();
   if (!target) return res.status(404).json({ error: 'Admin not found' });
   const { username, password, role } = req.body || {};
   const name = username != null ? String(username).trim() : null;
-  if (name && name !== target.username && await one('SELECT id FROM admins WHERE username = $1', [name])) {
-    return res.status(409).json({ error: 'That username is already taken' });
+  if (name && name !== target.username) {
+    const { data: dup } = await supa().from('admins').select('id').eq('username', name).maybeSingle();
+    if (dup) return res.status(409).json({ error: 'That username is already taken' });
   }
   if (password != null && password !== '' && String(password).length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters' });
   }
   const nextRole = role != null ? (role === 'ADMIN' ? 'ADMIN' : 'STAFF') : (target.role || 'ADMIN');
-  const adminCount = (await one("SELECT COUNT(*) c FROM admins WHERE role = 'ADMIN'") as any).c;
-  if ((target.role || 'ADMIN') === 'ADMIN' && nextRole !== 'ADMIN' && adminCount <= 1) {
+  const { count: adminCount } = await supa().from('admins').select('*', { count: 'exact', head: true }).eq('role', 'ADMIN');
+  if ((target.role || 'ADMIN') === 'ADMIN' && nextRole !== 'ADMIN' && (adminCount || 0) <= 1) {
     return res.status(400).json({ error: 'Cannot remove the last admin account' });
   }
-  const hash = password != null && password !== '' ? bcrypt.hashSync(password, 10) : null;
-  await run('UPDATE admins SET username = COALESCE($1, username), password_hash = COALESCE($2, password_hash), role = $3 WHERE id = $4',
-    [name, hash, nextRole, req.params.id]);
+  const upd: Record<string, any> = { role: nextRole };
+  if (name) upd.username = name;
+  if (password != null && password !== '') upd.password_hash = bcrypt.hashSync(password, 10);
+  await supa().from('admins').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
 
 r.delete('/admins/:id', requireAdmin, async (req, res) => {
-  const target = await one('SELECT * FROM admins WHERE id = $1', [req.params.id]) as any;
+  const { data: target } = await supa().from('admins').select('*').eq('id', req.params.id).maybeSingle();
   if (!target) return res.status(404).json({ error: 'Admin not found' });
   if (Number((req as any).admin?.sub) === target.id) {
     return res.status(400).json({ error: 'You cannot delete your own account' });
   }
   if ((target.role || 'ADMIN') === 'ADMIN') {
-    const adminCount = (await one("SELECT COUNT(*) c FROM admins WHERE role = 'ADMIN'") as any).c;
-    if (adminCount <= 1) return res.status(400).json({ error: 'Cannot remove the last admin account' });
+    const { count: adminCount } = await supa().from('admins').select('*', { count: 'exact', head: true }).eq('role', 'ADMIN');
+    if ((adminCount || 0) <= 1) return res.status(400).json({ error: 'Cannot remove the last admin account' });
   }
-  await run('DELETE FROM admins WHERE id = $1', [req.params.id]);
+  await supa().from('admins').delete().eq('id', req.params.id);
   res.json({ ok: true });
 });
 
@@ -606,9 +681,9 @@ r.post('/push/test', async (_req, res) => {
 // ---- App Settings (webview toggle, etc.) ----
 
 r.get('/settings', async (_req, res) => {
-  const rows = await many('SELECT key, value FROM app_settings') as any[];
+  const { data } = await supa().from('app_settings').select('key, value');
   const settings: Record<string, string> = {};
-  for (const row of rows) settings[row.key] = row.value;
+  for (const row of data || []) settings[row.key] = row.value;
   res.json(settings);
 });
 
@@ -618,11 +693,11 @@ r.put('/settings/:key', async (req, res) => {
   if (value == null) return res.status(400).json({ error: 'Missing value' });
   const now = new Date().toISOString();
   // Upsert: try update first, then insert if row doesn't exist
-  const existing = await one('SELECT key FROM app_settings WHERE key = $1', [key]);
+  const { data: existing } = await supa().from('app_settings').select('key').eq('key', key).maybeSingle();
   if (existing) {
-    await run('UPDATE app_settings SET value = $1, updated_at = $2 WHERE key = $3', [String(value), now, key]);
+    await supa().from('app_settings').update({ value: String(value), updated_at: now }).eq('key', key);
   } else {
-    await run('INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, $3)', [key, String(value), now]);
+    await supa().from('app_settings').insert({ key, value: String(value), updated_at: now });
   }
   res.json({ ok: true });
 });

@@ -1,5 +1,12 @@
 import { Router } from 'express';
-import { one, many, run, insertReturningId } from '../db';
+import { supa } from '../db/supabase';
+import {
+  getCustomerByPsid, createCustomer,
+  getActiveCategories, getProductsByCategory, getProductById, getProductVariants,
+  getVariantByProductAndSize, getFoodPacks, getFoodPackById, getPackageById,
+  getPackages, getPackageSlots, getPackageSlotByNumber, getSlotOptions,
+  getCustomSlotOptions, getPackageOptionBySlotAndProduct,
+} from '../db';
 import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, completeOrderByCustomer, rateOrder } from '../services/orders';
@@ -123,10 +130,9 @@ function imageUrl(url?: string | null): string | undefined {
 
 // ---------- helpers ----------
 async function ensureCustomer(psid: string): Promise<any> {
-  let c = await one('SELECT * FROM customers WHERE psid = $1', [psid]) as any;
+  let c = await getCustomerByPsid(psid);
   if (!c) {
-    await run('INSERT INTO customers (psid) VALUES ($1)', [psid]);
-    c = await one('SELECT * FROM customers WHERE psid = $1', [psid]) as any;
+    c = await createCustomer(psid);
   }
   return c;
 }
@@ -321,8 +327,13 @@ async function showCart(psid: string) {
       } catch { broken++; }
     }
     if (broken > 0) {
-      await run(`DELETE FROM cart_items WHERE cart_id = $1 AND id NOT IN (${keep.map((k) => Number(k.id)).join(',') || '0'})`,
-        [(await getOrCreateCart(psid))]);
+      const cartIdNow = await getOrCreateCart(psid);
+      const keepIds = keep.map((k) => Number(k.id));
+      if (keepIds.length > 0) {
+        await supa().from('cart_items').delete().eq('cart_id', cartIdNow).not('id', 'in', `(${keepIds.join(',')})`);
+      } else {
+        await supa().from('cart_items').delete().eq('cart_id', cartIdNow);
+      }
       await sendText(psid, `⚠️ ${broken} item(s) in your cart are no longer available and were removed.`);
     }
     totals = { subtotal, delivery: 0, discount, total: subtotal };
@@ -335,7 +346,7 @@ async function showCart(psid: string) {
     let label = `${i.quantity}x ${i.name}`;
     if (i.package_id && Array.isArray(i.slot_choices) && i.slot_choices.length) {
       const dishes = (await Promise.all(i.slot_choices
-        .map(async (c: any) => (await one('SELECT name FROM products WHERE id = $1', [c.product_id]) as any)?.name)))
+        .map(async (c: any) => (await getProductById(c.product_id))?.name)))
         .filter(Boolean).join(', ');
       if (dishes) label += `\n   📦 ${dishes}`;
     }
@@ -387,7 +398,7 @@ function categoryIcon(name: string): string {
 }
 
 async function showCategories(psid: string, backPayload = 'MAIN_MENU_BACK') {
-  const cats = await many('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order') as any[];
+  const cats = await getActiveCategories();
   await setState(psid, 'ORDER_CATEGORY', { back: backPayload });
   await sendQuickReplies(psid, 'Choose a category:', [
     ...cats.map((c) => ({ title: `${categoryIcon(c.name)} ${c.name}`, payload: `CAT:${c.id}` })),
@@ -396,10 +407,7 @@ async function showCategories(psid: string, backPayload = 'MAIN_MENU_BACK') {
 }
 
 async function showProducts(psid: string, categoryId: number, page = 0) {
-  const products = await many(
-    'SELECT * FROM products WHERE category_id = $1 AND active = 1 AND unavailable = 0 ORDER BY sort_order',
-    [categoryId]
-  ) as any[];
+  const products = await getProductsByCategory(categoryId);
   if (products.length === 0) {
     return sendText(psid, 'No products in this category yet.').then(() => showCategories(psid));
   }
@@ -409,7 +417,7 @@ async function showProducts(psid: string, categoryId: number, page = 0) {
   const slice = products.slice(safePage * PAGE, safePage * PAGE + PAGE);
   await setState(psid, 'ORDER_PRODUCT', { category_id: categoryId, page: safePage });
   await sendCarousel(psid, await Promise.all(slice.map(async (p: any) => {
-    const variants = await many('SELECT * FROM product_variants WHERE product_id = $1', [p.id]) as any[];
+    const variants = await getProductVariants(p.id);
     const subtitle = variants.map((v) => `${v.size} ${money(v.price)}`).join(' - ');
     return {
       title: p.name,
@@ -426,9 +434,9 @@ async function showProducts(psid: string, categoryId: number, page = 0) {
 }
 
 async function showVariants(psid: string, productId: number): Promise<SendResult | void> {
-  const product = await one('SELECT * FROM products WHERE id = $1', [productId]) as any;
+  const product = await getProductById(productId);
   if (!product) return sendText(psid, 'Product not found.');
-  const variants = await many('SELECT * FROM product_variants WHERE product_id = $1', [productId]) as any[];
+  const variants = await getProductVariants(productId);
   await setState(psid, 'ORDER_VARIANT', { product_id: productId });
   if (variants.length === 1) {
     return handlePayload(psid, `SIZE:${productId}:${variants[0].size}`);
@@ -441,7 +449,7 @@ async function showVariants(psid: string, productId: number): Promise<SendResult
 
 async function showQuantity(psid: string, productId: number, size: string) {
   await setState(psid, 'ORDER_QUANTITY', { product_id: productId, size });
-  const v = await one('SELECT * FROM product_variants WHERE product_id = $1 AND size = $2', [productId, size]) as any;
+  const v = await getVariantByProductAndSize(productId, size);
   return sendQuickReplies(psid, `How many (${size} - ${money(v.price)})?`, [
     { title: '1', payload: `QTY:${productId}:${size}:1` },
     { title: '2', payload: `QTY:${productId}:${size}:2` },
@@ -452,7 +460,7 @@ async function showQuantity(psid: string, productId: number, size: string) {
 
 // ---------- food packs ----------
 async function showFoodPacks(psid: string) {
-  const packs = await many('SELECT * FROM food_packs WHERE active = 1 ORDER BY sort_order, id') as any[];
+  const packs = await getFoodPacks();
   await setState(psid, 'FOODPACK_LIST');
   if (packs.length === 0) return sendText(psid, 'No food packs available right now.');
   const elements = packs.map((fp: any) => ({
@@ -469,7 +477,7 @@ async function showFoodPacks(psid: string) {
 }
 
 async function showFoodPackQuantity(psid: string, foodPackId: number) {
-  const fp = await one('SELECT * FROM food_packs WHERE id = $1 AND active = 1', [foodPackId]) as any;
+  const fp = await getFoodPackById(foodPackId);
   if (!fp) return sendText(psid, 'Food pack not found.');
   await setState(psid, 'FOODPACK_QTY', { food_pack_id: foodPackId });
   return sendQuickReplies(psid, `How many ${fp.name} (${money(fp.price)} each)?`, [
@@ -481,7 +489,7 @@ async function showFoodPackQuantity(psid: string, foodPackId: number) {
 }
 
 async function addFoodPackToCart(psid: string, foodPackId: number, qty: number) {
-  const fp = await one('SELECT * FROM food_packs WHERE id = $1 AND active = 1', [foodPackId]) as any;
+  const fp = await getFoodPackById(foodPackId);
   if (!fp) return sendText(psid, 'Food pack not found.');
   const quantity = Math.max(1, qty || 1);
   await addItem(psid, { food_pack_id: foodPackId, quantity });
@@ -495,11 +503,11 @@ async function addFoodPackToCart(psid: string, foodPackId: number, qty: number) 
 
 // ---------- packages ----------
 async function getPackage(packageId: number) {
-  return await one('SELECT * FROM packages WHERE id = $1 AND active = 1', [packageId]) as any;
+  return await getPackageById(packageId);
 }
 
 async function showPackages(psid: string) {
-  const packages = await many('SELECT * FROM packages WHERE active = 1 ORDER BY is_custom, id') as any[];
+  const packages = await getPackages();
   await setState(psid, 'PACKAGE_LIST');
   if (packages.length === 0) return sendText(psid, 'No packages available right now.');
   const elements = packages.map((p: any) => p.is_custom ? {
@@ -517,10 +525,10 @@ async function showPackages(psid: string) {
 }
 
 async function packageLines(packageId: number, choices: Record<number, number>): Promise<string> {
-  const slots = await many('SELECT * FROM package_slots WHERE package_id = $1 ORDER BY slot_number', [packageId]) as any[];
+  const slots = await getPackageSlots(packageId);
   return (await Promise.all(slots.map(async (s: any) => {
     const pid = choices?.[s.slot_number];
-    const prod = pid ? await one('SELECT name FROM products WHERE id = $1', [pid]) as any : null;
+    const prod = pid ? await getProductById(pid) : null;
     return `${s.slot_number}. ${prod ? prod.name : '(not chosen yet)'}`;
   }))).join('\n');
 }
@@ -565,7 +573,7 @@ async function showPackageDetails(psid: string, packageId: number, ctx?: any) {
       ]));
   }
 
-  const slots = await many('SELECT * FROM package_slots WHERE package_id = $1 ORDER BY slot_number', [packageId]) as any[];
+  const slots = await getPackageSlots(packageId);
   const filled = Object.keys(choices).length;
   const header = pkg.is_custom
     ? `${pkg.name}\n${money(pkg.base_price)} base\n\nPick any ${pkg.selections} dishes (${filled}/${pkg.selections} chosen):\n\n${await packageLines(packageId, choices)}`
@@ -586,24 +594,15 @@ async function showSlotOptions(psid: string, packageId: number, slotNumber: numb
   const st = await getState(psid);
   const pkg = await getPackage(packageId);
   if (!pkg) return sendText(psid, 'Package not found.');
-  const slot = await one('SELECT * FROM package_slots WHERE package_id = $1 AND slot_number = $2', [packageId, slotNumber]) as any;
+  const slot = await getPackageSlotByNumber(packageId, slotNumber);
   if (!slot) return sendText(psid, 'Invalid slot.');
 
   let opts: { product_id: number; product_name: string; upgrade_price: number }[];
   if (pkg.is_custom) {
     // Custom package: every active menu dish is allowed (admin-defined upgrade prices still apply).
-    opts = await many(`SELECT id AS product_id, name AS product_name, 0 AS upgrade_price
-      FROM products WHERE active = 1 AND unavailable = 0 ORDER BY name`) as any[];
-    const ups = await many(`SELECT po.product_id, po.upgrade_price FROM package_options po
-      JOIN package_slots ps ON ps.id = po.slot_id WHERE ps.package_id = $1`, [packageId]) as any[];
-    for (const u of ups) {
-      const o = opts.find((x) => x.product_id === u.product_id);
-      if (o) o.upgrade_price = u.upgrade_price || 0;
-    }
+    opts = await getCustomSlotOptions(packageId);
   } else {
-    opts = await many(`SELECT po.product_id, po.upgrade_price, p.name AS product_name
-      FROM package_options po JOIN products p ON p.id = po.product_id
-      WHERE po.slot_id = $1 AND p.active = 1 AND p.unavailable = 0 ORDER BY p.name`, [slot.id]) as any[];
+    opts = await getSlotOptions(slot.id);
   }
   if (opts.length === 0) return sendText(psid, 'No dishes available for this slot right now.');
 
@@ -627,15 +626,15 @@ async function afterChoice(psid: string, packageId: number, slotNumber: number, 
   // Validate the dish is allowed in this slot (stale quick replies can reference
   // dishes that were removed or moved) — otherwise the cart becomes unpriceable.
   if (!pkg.is_custom) {
-    const slot = await one('SELECT id FROM package_slots WHERE package_id = $1 AND slot_number = $2', [packageId, slotNumber]) as any;
-    const opt = slot ? await one('SELECT id FROM package_options WHERE slot_id = $1 AND product_id = $2', [slot.id, productId]) as any : null;
+    const slot = await getPackageSlotByNumber(packageId, slotNumber);
+    const opt = slot ? await getPackageOptionBySlotAndProduct(slot.id, productId) : null;
     if (!opt) {
       await sendText(psid, 'That dish is no longer available for this slot. Please pick again.');
       return showSlotOptions(psid, packageId, slotNumber);
     }
   } else {
-    const prod = await one('SELECT id FROM products WHERE id = $1 AND active = 1', [productId]) as any;
-    if (!prod) {
+    const prod = await getProductById(productId);
+    if (!prod || prod.active !== 1) {
       await sendText(psid, 'That dish is no longer available. Please pick again.');
       return showSlotOptions(psid, packageId, slotNumber);
     }
@@ -720,7 +719,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'MENU_PACKAGES':
       return showPackages(psid);
     case 'MENU_BROWSE': {
-      const cats = await many('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order') as any[];
+      const cats = await getActiveCategories();
       await setState(psid, 'BROWSE_CATEGORY');
       return sendQuickReplies(psid, 'Browse our menu:', [
         ...cats.map((c) => ({ title: `${categoryIcon(c.name)} ${c.name}`, payload: `BROWSE:${c.id}` })),
@@ -765,8 +764,8 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       const productId = Number(rest[0]);
       const size = rest[1];
       const qty = Number(rest[2]);
-      const product = await one('SELECT * FROM products WHERE id = $1', [productId]) as any;
-      const v = await one('SELECT * FROM product_variants WHERE product_id = $1 AND size = $2', [productId, size]) as any;
+      const product = await getProductById(productId);
+      const v = await getVariantByProductAndSize(productId, size);
       await addItem(psid, { product_id: productId, variant_size: size, quantity: qty });
       sendText(psid, `✅ Added ${qty}x ${product.name} (${size}) to your cart!`)
         .then(() => sendButtons(psid, 'What next?', [
@@ -848,12 +847,14 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       const method = rest[0];
       const st = await getState(psid);
       try {
-        const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+        const cust = await getCustomerByPsid(psid);
         if (!cust) throw new Error('Customer not found');
         // Remember contact details collected during checkout on the customer record.
         if (st.ctx.phone || st.ctx.address) {
-          await run('UPDATE customers SET phone = COALESCE($1, phone), address = COALESCE($2, address) WHERE id = $3',
-            [st.ctx.phone ?? null, st.ctx.address ?? null, cust.id]);
+          const upd: Record<string, any> = {};
+          if (st.ctx.phone) upd.phone = st.ctx.phone;
+          if (st.ctx.address) upd.address = st.ctx.address;
+          await supa().from('customers').update(upd).eq('id', cust.id);
         }
         const order = await createOrderFromCart(psid, {
           customer_id: cust.id,
@@ -890,7 +891,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       return;
     }
     case 'TRACK_ORDER': {
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       const recent = cust ? await getCustomerOrders(cust.id, 5) : [];
       if (recent.length > 0) {
         await setState(psid, 'TRACK_ORDER_INPUT');
@@ -907,9 +908,9 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       return sendText(psid, 'Please enter your order number (e.g., PP-1001):');
     case 'TRACKNUM': {
       const orderNumber = rest[0];
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'Customer not found.');
-      const order = await one('SELECT * FROM orders WHERE order_number = $1 AND customer_id = $2', [orderNumber, cust.id]) as any;
+      const { data: order } = await supa().from('orders').select('*').eq('order_number', orderNumber).eq('customer_id', cust.id).maybeSingle();
       if (!order) return sendText(psid, 'Order not found. Please check the number and try again.');
       const statusHistory = await getOrderStatusHistory(order.id);
       await sendOrderStatus(psid, order, statusHistory);
@@ -923,7 +924,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       return mainMenu(psid);
     }
     case 'ORDER_HISTORY': {
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'No customer record found.');
       const orders = await getCustomerOrders(cust.id, 5);
       await sendOrderHistory(psid, orders);
@@ -1028,9 +1029,9 @@ async function handleText(psid: string, text: string) {
       if (!orderNumber.startsWith('PP-')) {
         return sendText(psid, 'Please enter a valid order number (e.g., PP-1001):');
       }
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'Customer not found.');
-      const order = await one('SELECT * FROM orders WHERE order_number = $1 AND customer_id = $2', [orderNumber, cust.id]) as any;
+      const { data: order } = await supa().from('orders').select('*').eq('order_number', orderNumber).eq('customer_id', cust.id).maybeSingle();
       if (!order) return sendText(psid, 'Order not found. Please check the number and try again.');
       const statusHistory = await getOrderStatusHistory(order.id);
       await sendOrderStatus(psid, order, statusHistory);
@@ -1089,7 +1090,7 @@ async function handleText(psid: string, text: string) {
 
 /** Rebuild the cart from a previous order (used by Reorder + after confirmation). */
 async function reorderPreviousOrder(psid: string, orderId: number): Promise<void> {
-  const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+  const cust = await getCustomerByPsid(psid);
   if (!cust) { await sendText(psid, 'Customer not found.'); return; }
   const order = await getOrderById(orderId);
   if (!order || order.customer_id !== cust.id) { await sendText(psid, 'Order not found.'); return; }
@@ -1171,7 +1172,7 @@ export async function handleMessage(messaging: any) {
     // Order detail view
     if (payload.startsWith('ORDER_DETAIL:')) {
       const orderId = Number(payload.split(':')[1]);
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'Customer not found.');
       const order = await getOrderById(orderId);
       if (!order || order.customer_id !== cust.id) return sendText(psid, 'Order not found.');
@@ -1208,7 +1209,7 @@ export async function handleMessage(messaging: any) {
     // Reorder from history
     if (payload.startsWith('REORDER:')) {
       const orderId = Number(payload.split(':')[1]);
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'Customer not found.');
       const order = await getOrderById(orderId);
       if (!order || order.customer_id !== cust.id) return sendText(psid, 'Order not found.');
@@ -1225,7 +1226,7 @@ export async function handleMessage(messaging: any) {
     // Cancel order
     if (payload.startsWith('CANCEL:')) {
       const orderId = Number(payload.split(':')[1]);
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'Customer not found.');
       const result = await cancelOrder(orderId, cust.id);
       if (result.ok) {
@@ -1238,7 +1239,7 @@ export async function handleMessage(messaging: any) {
     // Customer marks a READY order as received -> COMPLETED (their own button).
     if (payload.startsWith('COMPLETE:')) {
       const orderId = Number(payload.split(':')[1]);
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'Customer not found.');
       const result = await completeOrderByCustomer(orderId, cust.id);
       if (result.ok) {
@@ -1253,7 +1254,7 @@ export async function handleMessage(messaging: any) {
       const [, orderIdStr, ratingStr] = payload.split(':');
       const orderId = Number(orderIdStr);
       const rating = Number(ratingStr);
-      const cust = await one('SELECT id FROM customers WHERE psid = $1', [psid]) as any;
+      const cust = await getCustomerByPsid(psid);
       if (!cust) return sendText(psid, 'Customer not found.');
       try {
         await rateOrder(orderId, cust.id, rating);

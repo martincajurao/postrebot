@@ -1,4 +1,4 @@
-﻿import { one, many, run, tx } from '../db';
+﻿import { supa } from '../db/supabase';
 
 export interface SlotAvailability {
   label: string;
@@ -8,27 +8,27 @@ export interface SlotAvailability {
 }
 
 export async function isDateOpen(date: string): Promise<{ open: boolean; reason?: string }> {
-  const blocked = await one('SELECT reason FROM blocked_dates WHERE date = $1', [date]) as any;
+  const db = supa();
+  const { data: blocked } = await db.from('blocked_dates').select('reason').eq('date', date).maybeSingle();
   if (blocked) return { open: false, reason: blocked.reason || 'Closed' };
   const dow = new Date(date + 'T00:00:00').getDay();
-  const bh = await one('SELECT * FROM business_hours WHERE day_of_week = $1', [dow]) as any;
+  const { data: bh } = await db.from('business_hours').select('*').eq('day_of_week', dow).maybeSingle();
   if (!bh || bh.closed) return { open: false, reason: 'Business closed on this day' };
   return { open: true };
 }
 
 export async function slotAvailability(date: string): Promise<SlotAvailability[]> {
-  const slots = await many('SELECT * FROM time_slots WHERE active = 1 ORDER BY sort_order') as any[];
-  return Promise.all(slots.map(async (s: any) => {
-    const used = (await one(
-      "SELECT COUNT(*) c FROM reservations WHERE res_date = $1 AND time_slot = $2 AND status != 'CANCELLED'",
-      [date, s.label]) as any).c;
+  const db = supa();
+  const { data: slots } = await db.from('time_slots').select('*').eq('active', 1).order('sort_order');
+  return Promise.all((slots || []).map(async (s: any) => {
+    const { count } = await db.from('reservations').select('*', { count: 'exact', head: true }).eq('res_date', date).eq('time_slot', s.label).neq('status', 'CANCELLED');
+    const used = count || 0;
     return { label: s.label, used, capacity: s.max_capacity, full: used >= s.max_capacity };
   }));
 }
 
 /**
  * Reserve a slot with double-booking protection.
- * The availability check + insert run inside a single transaction.
  */
 export async function createReservation(input: {
   customer_name: string; phone?: string; res_date: string; time_slot: string;
@@ -36,47 +36,48 @@ export async function createReservation(input: {
 }) {
   const dateOpen = await isDateOpen(input.res_date);
   if (!dateOpen.open) throw new Error('Date is closed');
-  
-  return await tx(async (client) => {
-    const slot = await client.query('SELECT * FROM time_slots WHERE label = $1 AND active = 1', [input.time_slot]);
-    if (slot.rows.length === 0) throw new Error('Invalid time slot');
-    const slotData = slot.rows[0];
-    const usedRes = await client.query(
-      "SELECT COUNT(*) c FROM reservations WHERE res_date = $1 AND time_slot = $2 AND status != 'CANCELLED'",
-      [input.res_date, input.time_slot]);
-    const used = Number(usedRes.rows[0].c);
-    if (used >= slotData.max_capacity) throw new Error('Time slot is full');
-    const r = await client.query(`INSERT INTO reservations (order_id, customer_name, phone, res_date, time_slot, status, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [input.order_id ?? null, input.customer_name, input.phone ?? null,
-        input.res_date, input.time_slot, input.status ?? 'PENDING', input.notes ?? null]);
-    return Number(r.rows[0].id);
-  });
+
+  const db = supa();
+  const { data: slotData } = await db.from('time_slots').select('*').eq('label', input.time_slot).eq('active', 1).single();
+  if (!slotData) throw new Error('Invalid time slot');
+
+  const { count } = await db.from('reservations').select('*', { count: 'exact', head: true }).eq('res_date', input.res_date).eq('time_slot', input.time_slot).neq('status', 'CANCELLED');
+  const used = count || 0;
+  if (used >= slotData.max_capacity) throw new Error('Time slot is full');
+
+  const { data } = await db.from('reservations').insert({
+    order_id: input.order_id ?? null,
+    customer_name: input.customer_name,
+    phone: input.phone ?? null,
+    res_date: input.res_date,
+    time_slot: input.time_slot,
+    status: input.status ?? 'PENDING',
+    notes: input.notes ?? null,
+  }).select('id').single();
+  return Number(data!.id);
 }
 
 export async function cancelReservation(id: number): Promise<void> {
-  await run("UPDATE reservations SET status = 'CANCELLED' WHERE id = $1", [id]);
+  await supa().from('reservations').update({ status: 'CANCELLED' }).eq('id', id);
 }
 
 export async function updateReservationStatus(id: number, status: string): Promise<void> {
   const allowed = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'];
   if (!allowed.includes(status)) throw new Error('Invalid status');
-  await run('UPDATE reservations SET status = $1 WHERE id = $2', [status, id]);
+  await supa().from('reservations').update({ status }).eq('id', id);
 }
 
 export async function rescheduleReservation(id: number, res_date: string, time_slot: string): Promise<void> {
-  const res = await one('SELECT * FROM reservations WHERE id = $1', [id]) as any;
+  const db = supa();
+  const { data: res } = await db.from('reservations').select('*').eq('id', id).maybeSingle();
   if (!res) throw new Error('Reservation not found');
-  
-  await tx(async (client) => {
-    const slotRes = await client.query('SELECT * FROM time_slots WHERE label = $1 AND active = 1', [time_slot]);
-    if (slotRes.rows.length === 0) throw new Error('Invalid time slot');
-    const slot = slotRes.rows[0];
-    const usedRes = await client.query(
-      "SELECT COUNT(*) c FROM reservations WHERE res_date = $1 AND time_slot = $2 AND status != 'CANCELLED' AND id != $3",
-      [res_date, time_slot, id]);
-    const used = Number(usedRes.rows[0].c);
-    if (used >= slot.max_capacity) throw new Error('Time slot is full');
-    await client.query('UPDATE reservations SET res_date = $1, time_slot = $2 WHERE id = $3', [res_date, time_slot, id]);
-  });
+
+  const { data: slotData } = await db.from('time_slots').select('*').eq('label', time_slot).eq('active', 1).single();
+  if (!slotData) throw new Error('Invalid time slot');
+
+  const { count } = await db.from('reservations').select('*', { count: 'exact', head: true }).eq('res_date', res_date).eq('time_slot', time_slot).neq('status', 'CANCELLED').neq('id', id);
+  const used = count || 0;
+  if (used >= slotData.max_capacity) throw new Error('Time slot is full');
+
+  await db.from('reservations').update({ res_date, time_slot }).eq('id', id);
 }

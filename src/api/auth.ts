@@ -1,14 +1,18 @@
 ﻿import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import { one } from '../db';
+import { supa } from '../db/supabase';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
 export async function loginHandler(req: Request, res: Response) {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
-  const admin = await one('SELECT * FROM admins WHERE username = $1', [username]) as any;
+  const { data: admin } = await supa()
+    .from('admins')
+    .select('*')
+    .eq('username', username)
+    .maybeSingle();
   if (!admin || !bcrypt.compareSync(password, admin.password_hash)) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }

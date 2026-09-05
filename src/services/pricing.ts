@@ -1,4 +1,4 @@
-﻿import { one, many } from '../db';
+﻿import { supa } from '../db/supabase';
 
 export interface PricingResult {
   unit_price: number;
@@ -24,12 +24,9 @@ export function netPackagePrice(pkg: { base_price: number; discount?: number | n
  * Prices stored as integer pesos (or centavos — consistent usage).
  */
 export async function priceProduct(productId: number, size: string): Promise<number> {
-  const row = await one(
-    'SELECT price FROM product_variants WHERE product_id = $1 AND size = $2',
-    [productId, size]
-  ) as any;
-  if (!row) throw new Error('Invalid product or size');
-  return row.price;
+  const { data } = await supa().from('product_variants').select('price').eq('product_id', productId).eq('size', size).single();
+  if (!data) throw new Error('Invalid product or size');
+  return data.price;
 }
 
 /**
@@ -50,13 +47,10 @@ export function normalizeChoices(slotChoices: any): SlotChoice[] {
 
 /** Pre-selected dish per slot: the is_default option wins, otherwise the first option. */
 export async function packageDefaults(packageId: number): Promise<SlotChoice[]> {
-  const slots = await many('SELECT * FROM package_slots WHERE package_id = $1 ORDER BY slot_number', [packageId]) as any[];
+  const { data: slots } = await supa().from('package_slots').select('id, slot_number').eq('package_id', packageId).order('slot_number');
   const out: SlotChoice[] = [];
-  for (const s of slots) {
-    const opt = await one(
-      'SELECT product_id FROM package_options WHERE slot_id = $1 ORDER BY is_default DESC, id LIMIT 1',
-      [s.id]
-    ) as any;
+  for (const s of slots || []) {
+    const { data: opt } = await supa().from('package_options').select('product_id').eq('slot_id', s.id).order('is_default', { ascending: false }).order('id').limit(1).maybeSingle();
     if (opt) out.push({ slot_number: s.slot_number, product_id: opt.product_id });
   }
   return out;
@@ -67,32 +61,27 @@ export async function packageDefaults(packageId: number): Promise<SlotChoice[]> 
  * dish. Not manually editable — derived from the dishes in the package.
  */
 export async function computePackageBasePrice(packageId: number): Promise<number> {
-  const slots = await many('SELECT id FROM package_slots WHERE package_id = $1 ORDER BY slot_number', [packageId]) as any[];
+  const { data: slots } = await supa().from('package_slots').select('id').eq('package_id', packageId).order('slot_number');
   let sum = 0;
-  for (const s of slots) {
-    const opt = await one(
-      'SELECT product_id FROM package_options WHERE slot_id = $1 ORDER BY is_default DESC, id LIMIT 1',
-      [s.id]
-    ) as any;
+  for (const s of slots || []) {
+    const { data: opt } = await supa().from('package_options').select('product_id').eq('slot_id', s.id).order('is_default', { ascending: false }).order('id').limit(1).maybeSingle();
     if (!opt) continue;
-    const v = await one('SELECT MIN(price) AS p FROM product_variants WHERE product_id = $1', [opt.product_id]) as any;
-    sum += Number(v?.p) || 0;
+    const { data: v } = await supa().from('product_variants').select('price').eq('product_id', opt.product_id).order('price').limit(1).maybeSingle();
+    sum += Number(v?.price) || 0;
   }
   return sum;
 }
 
 /** Surcharge for a single package slot choice (upgrade + optional size upgrade). */
 export async function choiceUpgrade(packageId: number, slotNumber: number, productId: number, size?: string): Promise<number> {
-  const slot = await one('SELECT id FROM package_slots WHERE package_id = $1 AND slot_number = $2',
-    [packageId, slotNumber]) as any;
+  const { data: slot } = await supa().from('package_slots').select('id').eq('package_id', packageId).eq('slot_number', slotNumber).single();
   if (!slot) throw new Error(`Invalid slot ${slotNumber}`);
-  const opt = await one('SELECT * FROM package_options WHERE slot_id = $1 AND product_id = $2',
-    [slot.id, productId]) as any;
+  const { data: opt } = await supa().from('package_options').select('*').eq('slot_id', slot.id).eq('product_id', productId).maybeSingle();
   if (!opt) {
     // Custom packages allow every active dish; default size upgrade applies unless configured.
-    const pkg = await one('SELECT is_custom FROM packages WHERE id = $1', [packageId]) as any;
+    const { data: pkg } = await supa().from('packages').select('is_custom').eq('id', packageId).single();
     if (pkg?.is_custom) {
-      const prod = await one('SELECT id FROM products WHERE id = $1 AND active = 1', [productId]) as any;
+      const { data: prod } = await supa().from('products').select('id').eq('id', productId).eq('active', 1).maybeSingle();
       if (!prod) throw new Error('Product not allowed in this slot');
       return size === 'L' ? CUSTOM_DEFAULT_SIZE_UPGRADE : 0;
     }
@@ -105,11 +94,10 @@ export async function choiceUpgrade(packageId: number, slotNumber: number, produ
     // never prices the same as Medium by accident.
     let sizeExtra = opt.size_upgrade_price || 0;
     if (!sizeExtra) {
-      const v = await one(`SELECT
-          MAX(CASE WHEN size = 'L' THEN price END) AS l,
-          MAX(CASE WHEN size = 'M' THEN price END) AS m
-        FROM product_variants WHERE product_id = $1`, [productId]) as any;
-      sizeExtra = Math.max(0, Number(v?.l || 0) - Number(v?.m || 0));
+      const { data: variants } = await supa().from('product_variants').select('size, price').eq('product_id', productId);
+      const l = variants?.find((v: any) => v.size === 'L');
+      const m = variants?.find((v: any) => v.size === 'M');
+      sizeExtra = Math.max(0, Number(l?.price || 0) - Number(m?.price || 0));
     }
     extra += sizeExtra;
   }
@@ -118,21 +106,21 @@ export async function choiceUpgrade(packageId: number, slotNumber: number, produ
 
 /** Price a package cart item given slot choices (array or legacy object) and the package size. */
 export async function pricePackage(packageId: number, slotChoices: any, packageSize?: string): Promise<{ total: number; breakdown: { label: string; amount: number }[] }> {
-  const pkg = await one('SELECT * FROM packages WHERE id = $1 AND active = 1', [packageId]) as any;
+  const { data: pkg } = await supa().from('packages').select('*').eq('id', packageId).eq('active', 1).single();
   if (!pkg) throw new Error('Invalid package');
   const breakdown: { label: string; amount: number }[] = [{ label: `${pkg.name} base`, amount: pkg.base_price }];
   let total = pkg.base_price || 0;
 
-  const slots = await many('SELECT * FROM package_slots WHERE package_id = $1', [packageId]) as any[];
+  const { data: slots } = await supa().from('package_slots').select('*').eq('package_id', packageId);
   const choices = normalizeChoices(slotChoices);
   if (choices.length !== pkg.selections) throw new Error(`Package requires ${pkg.selections} selections`);
 
   for (const choice of choices) {
-    const slot = slots.find((s: any) => s.slot_number === choice.slot_number);
+    const slot = (slots || []).find((s: any) => s.slot_number === choice.slot_number);
     if (!slot) throw new Error(`Invalid slot ${choice.slot_number}`);
     const size = choice.size || packageSize;
     const extra = await choiceUpgrade(packageId, choice.slot_number, choice.product_id, size);
-    const prod = await one('SELECT name FROM products WHERE id = $1', [choice.product_id]) as any;
+    const { data: prod } = await supa().from('products').select('name').eq('id', choice.product_id).maybeSingle();
     if (extra > 0) breakdown.push({ label: `${prod?.name ?? 'Dish'}${size ? ' ' + size : ''} upgrade`, amount: extra });
     total += extra;
   }
@@ -148,7 +136,7 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
 
 /** Server-side authoritative price of a food pack (fixed-price bundle). */
 export async function priceFoodPack(foodPackId: number): Promise<{ price: number; name: string }> {
-  const pack = await one('SELECT id, name, price FROM food_packs WHERE id = $1 AND active = 1', [foodPackId]) as any;
+  const { data: pack } = await supa().from('food_packs').select('id, name, price').eq('id', foodPackId).eq('active', 1).single();
   if (!pack) throw new Error('Invalid food pack');
   return { price: Number(pack.price) || 0, name: pack.name };
 }
@@ -174,8 +162,8 @@ export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<
       subtotal += total * item.quantity;
     } else {
       const price = await priceProduct(item.product_id, item.variant_size);
-      const prod = await one('SELECT name FROM products WHERE id = $1', [item.product_id]) as any;
-      breakdown.push({ label: `${prod.name} ${item.variant_size} x${item.quantity}`, amount: price * item.quantity });
+      const { data: prod } = await supa().from('products').select('name').eq('id', item.product_id).maybeSingle();
+      breakdown.push({ label: `${prod?.name || ''} ${item.variant_size} x${item.quantity}`, amount: price * item.quantity });
       subtotal += price * item.quantity;
     }
   }

@@ -1,12 +1,13 @@
 ﻿import express from 'express';
 import 'dotenv/config';
-import { migrate, dbType } from './db';
+import { migrate } from './db/postgres';
 import adminRoutes from './api/admin';
 import uploadRoutes from './api/upload';
 import { logConfig } from './api/supabase-storage';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
 import webviewApi from './api/webview';
+import { whitelistWebviewDomain } from './messenger/send';
 import { configurePush } from './services/push';
 import path from 'path';
 import fs from 'fs';
@@ -16,10 +17,11 @@ app.set('trust proxy', 1);
 app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
 
 migrate()
-  .then(() => console.log(`[db] migration complete (${dbType()})`))
+  .then(() => console.log('[db] migration complete (supabase)'))
   .catch((err) => {
-    console.error('[db] migration failed:', err);
-    process.exit(1);
+    // Non-fatal: if the schema already exists via Supabase, this just logs.
+    // The app must still boot so Messenger/webhook keep working.
+    console.error('[db] migration warning (non-fatal):', err?.message || err);
   });
 
 app.use('/webhook', messengerWebhook);
@@ -40,14 +42,14 @@ app.get('/uploads/:file', async (req, res) => {
   const file = String(req.params.file);
   if (!/^[-\w.]+$/.test(file)) return res.status(400).end();
   // Redirect to Supabase Storage public URL
-  const { one } = await import('./db');
-  const row = await one('SELECT public_url FROM uploads WHERE name = $1', [file]) as any;
-  if (!row || !row.public_url) return res.status(404).end();
-  return res.redirect(row.public_url);
+  const { publicUrl } = require('./api/supabase-storage');
+  const url = publicUrl(file);
+  if (!url) return res.status(404).end();
+  return res.redirect(url);
 });
 app.use('/api/admin', uploadRoutes);
 
-app.get('/health', (_req, res) => res.json({ ok: true, db: dbType() }));
+app.get('/health', (_req, res) => res.json({ ok: true, db: 'supabase' }));
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   console.error(err);
@@ -58,8 +60,15 @@ logConfig();
 configurePush();
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => {
-  const base = process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-  console.log(`Postre server listening on http://localhost:${PORT} (db: ${dbType()})`);
+  const base = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
+  console.log(`Postre server listening on http://localhost:${PORT} (db: supabase)`);
   console.log(`Web ordering URL: ${base}/webview`);
-  console.log(`⚠️  Remember to whitelist "${base}" in Meta App Dashboard → Messenger → Settings → Webview Domains`);
+  // Register the webview domain with the Messenger Profile API so the
+  // "Open Web Store" button (messenger_extensions) opens INSIDE Messenger's
+  // in-chat webview instead of being rejected / opening an external browser.
+  if (base.startsWith('https://')) {
+    whitelistWebviewDomain(base).catch(() => { /* logged inside */ });
+  } else {
+    console.log(`⚠️  BASE_URL is not HTTPS (${base}) — messenger_extensions webview requires HTTPS. Skipping auto-whitelist.`);
+  }
 });

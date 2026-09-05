@@ -1,5 +1,5 @@
 import webpush from 'web-push';
-import { many, run, one } from '../db';
+import { supa } from '../db/supabase';
 
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@postre.example';
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
@@ -37,17 +37,17 @@ export interface PushSubscription {
 }
 
 export async function storeSubscription(sub: PushSubscription, userAgent?: string): Promise<void> {
-    const now = new Date().toISOString();
-  await run(
-    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent, updated_at)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, user_agent = excluded.user_agent, updated_at = excluded.updated_at`,
-    [sub.endpoint, sub.p256dh, sub.auth, userAgent ?? null, now],
-  );
+  const now = new Date().toISOString();
+  const { data: existing } = await supa().from('push_subscriptions').select('endpoint').eq('endpoint', sub.endpoint).maybeSingle();
+  if (existing) {
+    await supa().from('push_subscriptions').update({ p256dh: sub.p256dh, auth: sub.auth, user_agent: userAgent ?? null, updated_at: now }).eq('endpoint', sub.endpoint);
+  } else {
+    await supa().from('push_subscriptions').insert({ endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth, user_agent: userAgent ?? null, updated_at: now });
+  }
 }
 
 export async function removeSubscription(endpoint: string): Promise<void> {
-  await run('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
+  await supa().from('push_subscriptions').delete().eq('endpoint', endpoint);
 }
 
 export interface PushPayload {
@@ -70,9 +70,9 @@ export async function sendPushToAdmins(payload: PushPayload): Promise<PushSendRe
     console.warn('[push] Send skipped — VAPID keys are not configured in the server environment.');
     return result;
   }
-  const subs = await many('SELECT endpoint, p256dh, auth FROM push_subscriptions') as any[];
-  result.total = subs.length;
-  if (subs.length === 0) {
+  const { data: subs } = await supa().from('push_subscriptions').select('endpoint, p256dh, auth');
+  result.total = subs?.length || 0;
+  if (!subs || subs.length === 0) {
     console.warn('[push] Send skipped — no devices subscribed yet. Open /admin → Settings → Push Notifications to subscribe.');
     return result;
   }
@@ -111,8 +111,8 @@ export async function sendPushToAdmins(payload: PushPayload): Promise<PushSendRe
 export async function getPushStatus(): Promise<{ configured: boolean; subscriptions: number }> {
   let subscriptions = 0;
   try {
-    const row = await one('SELECT COUNT(*) c FROM push_subscriptions') as any;
-    subscriptions = Number(row?.c || 0);
+    const { count } = await supa().from('push_subscriptions').select('*', { count: 'exact', head: true });
+    subscriptions = count || 0;
   } catch { /* table may not exist yet */ }
   return { configured, subscriptions };
 }

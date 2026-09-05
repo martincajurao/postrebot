@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import crypto from 'crypto';
 import { authMiddleware } from './auth';
-import { run } from '../db';
+import { supa } from '../db/supabase';
 import { uploadImage, listImages, deleteImages, publicUrl, configured } from './supabase-storage';
 
 const ALLOWED = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
@@ -36,8 +36,6 @@ r.post('/upload', upload.single('image'), async (req, res) => {
 
   try {
     const url = await uploadImage(name, mime, req.file.buffer);
-    await run('INSERT INTO uploads (name, mime, public_url) VALUES ($1, $2, $3) ON CONFLICT (name) DO UPDATE SET mime = EXCLUDED.mime, public_url = EXCLUDED.public_url',
-      [name, mime, url]);
     return res.json({ url, name, storage: 'supabase' });
   } catch (e: any) {
     console.error('[upload] supabase error:', e.message);
@@ -63,11 +61,10 @@ r.delete('/uploads/:name', async (req, res) => {
   if (!configured()) return res.status(500).json({ error: 'Supabase is not configured' });
   try {
     await deleteImages([name]);
-    await run('DELETE FROM uploads WHERE name = $1', [name]);
     const url = publicUrl(name);
-    for (const [t, c] of [['products', 'photo_url'], ['packages', 'photo_url']] as const) {
-      await run(`UPDATE ${t} SET ${c} = NULL WHERE ${c} = $1 OR ${c} LIKE $2`, [url, `%/${name}`]);
-    }
+    // Clear any product/package photos that referenced this upload.
+    await supa().from('products').update({ photo_url: null }).or(`photo_url.eq.${encodeURIComponent(url)},photo_url.like.%/${name}`);
+    await supa().from('packages').update({ photo_url: null }).or(`photo_url.eq.${encodeURIComponent(url)},photo_url.like.%/${name}`);
     return res.json({ ok: true, deleted: name });
   } catch (e: any) {
     console.error('[delete upload] error:', e.message);

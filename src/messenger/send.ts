@@ -1,18 +1,30 @@
 ﻿import type { Request, Response } from 'express';
-import { one, run } from '../db';
+import { supa } from '../db/supabase';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
 
 // ---------- conversation state helpers ----------
 export async function getState(psid: string): Promise<{ state: string; ctx: any }> {
-  const row = await one('SELECT state, context_json FROM conversation_states WHERE psid = $1', [psid]) as any;
-  return { state: row?.state || 'MAIN_MENU', ctx: row?.context_json ? JSON.parse(row.context_json) : {} };
+  const { data } = await supa()
+    .from('conversation_states')
+    .select('state, context_json')
+    .eq('psid', psid)
+    .maybeSingle();
+  return { state: data?.state || 'MAIN_MENU', ctx: data?.context_json ? JSON.parse(data.context_json) : {} };
 }
 
 export async function setState(psid: string, state: string, ctx: any = {}): Promise<void> {
-  await run(`INSERT INTO conversation_states (psid, state, context_json) VALUES ($1, $2, $3)
-    ON CONFLICT(psid) DO UPDATE SET state = excluded.state, context_json = excluded.context_json,
-    updated_at = now()::text`, [psid, state, JSON.stringify(ctx)]);
+  const context_json = JSON.stringify(ctx);
+  const { data: existing } = await supa()
+    .from('conversation_states')
+    .select('psid')
+    .eq('psid', psid)
+    .maybeSingle();
+  if (existing) {
+    await supa().from('conversation_states').update({ state, context_json }).eq('psid', psid);
+  } else {
+    await supa().from('conversation_states').insert({ psid, state, context_json });
+  }
 }
 
 // ---------- Messenger send API ----------
@@ -98,6 +110,39 @@ export function sendUrlButton(psid: string, text: string, title: string, url: st
       },
     },
   });
+}
+
+/**
+ * Whitelist a domain with the Messenger Profile API so buttons with
+ * messenger_extensions: true are accepted and open INSIDE Messenger's
+ * webview instead of the external browser. Required for the webview to:
+ *  - render as an in-chat browser window (not an external link)
+ *  - load the MessengerExtensions JS SDK (requestCloseBrowser / getUserID)
+ * Must be HTTPS. Safe to call repeatedly (idempotent on Meta's side).
+ */
+export async function whitelistWebviewDomain(baseUrl: string): Promise<boolean> {
+  if (!PAGE_TOKEN) {
+    console.log('[messenger] skip whitelist (no PAGE_ACCESS_TOKEN configured)');
+    return false;
+  }
+  try {
+    const origin = baseUrl.replace(/\/+$/, '');
+    const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ whitelisted_domains: [origin] }),
+    });
+    const text = await res.text();
+    if (res.ok) {
+      console.log(`[messenger] webview domain whitelisted: ${origin}`);
+      return true;
+    }
+    console.error(`[messenger] whitelist failed (${res.status}): ${text}`);
+    return false;
+  } catch (e: any) {
+    console.error('[messenger] whitelist error:', e?.message || e);
+    return false;
+  }
 }
 
 /** Messenger must be able to download carousel images itself; drop any URL it cannot fetch. */

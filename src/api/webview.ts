@@ -1,10 +1,11 @@
 /**
  * Webview API - REST endpoints that mirror the Messenger bot's ordering flow.
  * A session ID (stored in the browser) replaces the Messenger PSID.
+ * Uses Supabase query builder — no raw SQL.
  */
 
 import { Router } from 'express';
-import { one, many, run, insertReturningId } from '../db';
+import { supa } from '../db/supabase';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems } from '../services/orders';
 import { slotAvailability, isDateOpen } from '../services/reservations';
@@ -12,53 +13,33 @@ import { slotAvailability, isDateOpen } from '../services/reservations';
 const r = Router();
 
 async function getOrCreateCustomer(sessionId: string): Promise<number> {
-  let cust = await one('SELECT id FROM customers WHERE psid = $1', [sessionId]) as any;
-  if (!cust) {
-    const id = await insertReturningId(
-      'INSERT INTO customers (psid, name) VALUES ($1, $2) RETURNING id',
-      [sessionId, 'Web Customer']
-    );
-    return Number(id);
-  }
-  return Number(cust.id);
+  const db = supa();
+  const { data: existing } = await db.from('customers').select('id').eq('psid', sessionId).maybeSingle();
+  if (existing) return Number(existing.id);
+  const { data: created } = await db.from('customers').insert({ psid: sessionId, name: 'Web Customer' }).select('id').single();
+  return Number(created!.id);
 }
 
 // ---- Catalog endpoints ----
 
 r.get('/categories', async (_req, res) => {
-  const cats = await many('SELECT * FROM categories WHERE active = 1 ORDER BY sort_order');
-  res.json(cats);
+  const { data } = await supa().from('categories').select('*').eq('active', 1).order('sort_order');
+  res.json(data || []);
 });
 
 r.get('/products', async (_req, res) => {
-  const products = await many('SELECT * FROM products WHERE active = 1 ORDER BY category_id, sort_order') as any[];
-  const variants = await many('SELECT * FROM product_variants') as any[];
-  res.json(products.map((p: any) => ({
-    ...p,
-    variants: variants.filter((v: any) => v.product_id === p.id),
-  })));
+  const { data: products } = await supa().from('products').select('*, product_variants(*)').eq('active', 1).order('category_id, sort_order');
+  res.json(products || []);
 });
 
 r.get('/packages', async (_req, res) => {
-  const packages = await many('SELECT * FROM packages WHERE active = 1 ORDER BY sort_order') as any[];
-  const result = [];
-  for (const pkg of packages) {
-    const slots = await many('SELECT * FROM package_slots WHERE package_id = $1 ORDER BY slot_number', [pkg.id]) as any[];
-    for (const slot of slots) {
-      slot.options = await many(
-        `SELECT po.*, p.name, p.photo_url FROM package_options po
-         JOIN products p ON p.id = po.product_id WHERE po.slot_id = $1 ORDER BY po.is_default DESC, po.id`,
-        [slot.id]
-      );
-    }
-    result.push({ ...pkg, slots });
-  }
-  res.json(result);
+  const { data: packages } = await supa().from('packages').select('*, package_slots(*, package_options(*))').eq('active', 1).order('sort_order');
+  res.json(packages || []);
 });
 
 r.get('/food-packs', async (_req, res) => {
-  const packs = await many('SELECT * FROM food_packs WHERE active = 1 ORDER BY sort_order');
-  res.json(packs);
+  const { data } = await supa().from('food_packs').select('*').eq('active', 1).order('sort_order');
+  res.json(data || []);
 });
 
 // ---- Cart endpoints ----
@@ -124,8 +105,7 @@ r.post('/checkout', async (req, res) => {
 
   const custId = await getOrCreateCustomer(sessionId);
   if (phone || address) {
-    await run('UPDATE customers SET phone = COALESCE($1, phone), address = COALESCE($2, address) WHERE id = $3',
-      [phone ?? null, address ?? null, custId]);
+    await supa().from('customers').update({ phone: phone ?? null, address: address ?? null }).eq('id', custId);
   }
 
   try {
@@ -149,7 +129,7 @@ r.post('/checkout', async (req, res) => {
 r.get('/orders', async (req, res) => {
   const sessionId = String(req.query.session || '');
   if (!sessionId) return res.json([]);
-  const cust = await one('SELECT id FROM customers WHERE psid = $1', [sessionId]) as any;
+  const { data: cust } = await supa().from('customers').select('id').eq('psid', sessionId).maybeSingle();
   if (!cust) return res.json([]);
   const orders = await getCustomerOrders(cust.id);
   res.json(orders);
@@ -176,7 +156,7 @@ r.get('/slots', async (req, res) => {
 
 r.get('/enabled', async (_req, res) => {
   try {
-    const row = await one("SELECT value FROM app_settings WHERE key = 'webview_enabled'") as any;
+    const { data: row } = await supa().from('app_settings').select('value').eq('key', 'webview_enabled').maybeSingle();
     const enabled = row ? row.value === '1' : true; // default to enabled
     res.json({ enabled });
   } catch {
