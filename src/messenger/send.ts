@@ -72,10 +72,11 @@ export function sendButtons(psid: string, text: string, buttons: { title: string
   });
 }
 
-/** Send a URL button that opens a web page (can be used for webview) */
+/** Send a URL button that opens a web page inside Messenger's built-in webview */
 export function sendUrlButton(psid: string, text: string, title: string, url: string): Promise<SendResult> {
   return sendApi({
     recipient: { id: psid },
+    messaging_type: 'RESPONSE',
     message: {
       attachment: {
         type: 'template',
@@ -86,6 +87,8 @@ export function sendUrlButton(psid: string, text: string, title: string, url: st
             type: 'web_url',
             title: title.slice(0, 20),
             url: url,
+            messenger_extensions: true,
+            webview_height_ratio: 'full',
           }],
         },
       },
