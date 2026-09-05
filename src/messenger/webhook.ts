@@ -295,7 +295,7 @@ async function mainMenu(psid: string) {
     const whitelisted = await ensureWebviewWhitelisted(webviewLink, { force: true });
     console.log(`[mainMenu] WHITELIST STATUS: ${whitelisted}`);
     // Send a web_url button directly in the welcome message - opens WebView in one tap
-    const result = await sendUrlButton(psid, '🍽️ Welcome to Postre Food Products!\n\nTap below to order online:', '🌐 Order Online', webviewLink);
+    const result = await sendUrlButton(psid, '🍽️ Welcome to Postre Food Products!\n\nTap below to order online:', '🛍️ Order Online', webviewLink);
     console.log(`[mainMenu] sendUrlButton RESULT: ok=${result.ok}, status=${result.status}, body=${result.body}`);
     if (!result.ok) {
       console.error(`[mainMenu] WEBVIEW BUTTON FAILED: ${result.body}`);

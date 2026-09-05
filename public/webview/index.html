@@ -6,8 +6,16 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>Postre Food Products - Order</title>
+  <title>Postre Food Products - Order Online</title>
   <link rel="stylesheet" href="style.css?v=20260905-10">
+  <!-- Open Graph / Messenger Preview -->
+  <meta property="og:title" content="Postre Food Products - Order Online">
+  <meta property="og:description" content="Browse our menu and order your favorite dishes!">
+  <meta property="og:image" content="https://postrebot.onrender.com/webview/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:url" content="https://postrebot.onrender.com/webview">
+  <meta property="og:type" content="website">
   <!-- Messenger Extensions SDK: required for in-Messenger webview features like requestCloseBrowser() -->
   <script>
     window.extAsyncInit = function() {
@@ -181,31 +189,11 @@
           <div class="success-icon">✅</div>
           <h2>Order Placed!</h2>
           <p id="success-order-number" class="success-number"></p>
-          <p class="success-msg">Thank you for your order. We'll keep you updated on its status.</p>
+          <p class="success-msg">Thank you for your order. It is now <strong>pending confirmation</strong> by our admin. We'll notify you once confirmed!</p>
           <button class="btn btn-primary" onclick="closeWebview()">Done</button>
         </div>
       </section>
     </main>
-
-    <!-- Fixed cart bar (toggled) -->
-    <div id="cart-bar" class="cart-bar hidden">
-      <button class="cart-bar-head" onclick="toggleCartBar()">
-        <span class="cart-bar-icon">🛒</span>
-        <span class="cart-bar-info">
-          <span id="cart-bar-count">0 items</span>
-          <span id="cart-bar-total" class="cart-bar-total">₱0</span>
-        </span>
-        <span class="cart-bar-cta">View Cart</span>
-        <span class="cart-bar-chevron" id="cart-bar-chevron">▴</span>
-      </button>
-      <div id="cart-bar-details" class="cart-bar-details hidden">
-        <div id="cart-bar-items"></div>
-        <div class="cart-bar-foot">
-          <div class="total-row grand"><span>Total</span><span class="value" id="cart-bar-grand">₱0</span></div>
-          <button class="btn btn-primary" style="width:100%" onclick="checkoutFromCartBar()">Checkout</button>
-        </div>
-      </div>
-    </div>
 
     <!-- Bottom navigation -->
     <nav class="bottom-nav" id="bottom-nav">

@@ -95,7 +95,8 @@ function imageHtml(url, alt, cls) {
   const img = url
     ? `<img${attrs} src="${esc(url)}" alt="${esc(alt || '')}" loading="lazy" onerror="this.style.display='none'">`
     : '';
-  return `<div class="img-wrap ${cls}"><span class="img-ghost">🍽️</span>${img}</div>`.replace('  ', ' ');
+  // Return only the image, no plate/utensils placeholder
+  return img ? `<div class="img-wrap ${cls}">${img}</div>` : '';
 }
 
 function showToast(msg) {
@@ -171,12 +172,22 @@ function goBack() {
   else showCategories();
 }
 
+let prevCartCount = 0;
+
 function updateCartBadge() {
   const badge = $id('cart-badge');
   if (!badge) return;
   const count = cart.items.reduce((s, i) => s + i.quantity, 0);
   badge.textContent = count;
   badge.classList.toggle('hidden', count === 0);
+  
+  // Animate badge when item is added (count increases)
+  if (count > prevCartCount) {
+    badge.classList.remove('badge-bounce');
+    void badge.offsetWidth; // Trigger reflow to restart animation
+    badge.classList.add('badge-bounce');
+  }
+  prevCartCount = count;
 }
 // ---------- Category icon mapping (mirrors the Messenger bot) ----------
 const CATEGORY_ICONS = [
@@ -415,7 +426,8 @@ function recalcCartTotals() {
       if (pkg && Number(pkg.discount) > 0) discount += Math.min(Number(pkg.discount), Math.max(0, unit)) * it.quantity;
     }
   }
-  cart.totals = { subtotal, delivery: 0, discount, total: subtotal, breakdown };
+  // Fix: total = subtotal - discount
+  cart.totals = { subtotal, delivery: 0, discount, total: subtotal - discount, breakdown };
 }
 
 function clearLocalCart() {
@@ -1022,60 +1034,25 @@ function addToCartFoodPack(fpId) {
   showToast('Added to cart!');
 }
 
-// ---------- Fixed cart bar (toggled) ----------
+// ---------- Fixed cart bar (toggled) - DISABLED ----------
 const CART_BAR_HIDDEN_VIEWS = ['cart', 'checkout', 'orders', 'order-detail', 'success'];
 let cartBarOpen = false;
 
 function toggleCartBar() {
-  if (cart.items.length === 0) return;
-  cartBarOpen = !cartBarOpen;
-  renderCartBar();
+  // Floating cart bar removed - do nothing
 }
 
 function checkoutFromCartBar() {
-  cartBarOpen = false;
-  startCheckout();
+  // Floating cart bar removed - do nothing
 }
 
-/** Renders the fixed bottom bar; hidden when the cart is empty or a cart/orders screen is active. */
+/** Renders the fixed bottom bar - DISABLED: floating cart removed. */
 function renderCartBar() {
+  // Floating cart bar removed - always hide
   const bar = $id('cart-bar');
   const app = $id('app');
-  if (!bar || !app) return;
-  const count = cart.items.reduce((s, i) => s + i.quantity, 0);
-  const show = count > 0 && !CART_BAR_HIDDEN_VIEWS.includes(currentView);
-  bar.classList.toggle('hidden', !show);
-  bar.classList.toggle('open', show && cartBarOpen);
-  app.classList.toggle('has-cart-bar', show);
-  if (!show) return;
-
-  const countEl = $id('cart-bar-count');
-  if (countEl) countEl.textContent = count + ' item' + (count === 1 ? '' : 's') + ' in cart';
-  const totalEl = $id('cart-bar-total');
-  if (totalEl) totalEl.textContent = formatMoney(cart.totals.total);
-  const chevron = $id('cart-bar-chevron');
-  if (chevron) chevron.textContent = cartBarOpen ? '▾' : '▴';
-
-  const details = $id('cart-bar-details');
-  if (!details) return;
-  if (cartBarOpen) {
-    $id('cart-bar-items').innerHTML = cart.items.map((it) => {
-      const unit = cartItemUnitPrice(it);
-      const line = unit !== null && unit !== undefined ? unit * it.quantity : null;
-      const comp = slotChoiceText(it);
-      return `<div class="cart-bar-item">
-        <div class="cbi-name">${esc(it.name)}${comp ? `<small>${esc(comp)}</small>` : ''}
-          <small>Qty ${it.quantity}${unit !== null && unit !== undefined ? ' × ' + formatMoney(unit) : ''}</small>
-        </div>
-        <span class="cbi-price">${line !== null ? formatMoney(line) : '—'}</span>
-        <button class="cbi-remove" onclick="removeCartItem(${it.id})" aria-label="Remove">✕</button>
-      </div>`;
-    }).join('');
-    $id('cart-bar-grand').textContent = formatMoney(cart.totals.total);
-    details.classList.remove('hidden');
-  } else {
-    details.classList.add('hidden');
-  }
+  if (bar) bar.classList.add('hidden');
+  if (app) app.classList.remove('has-cart-bar');
 }
 
 // ---------- Cart ----------
@@ -1183,10 +1160,30 @@ function showCategories() {
 }
 
 // ---------- Checkout ----------
+const CUSTOMER_DATA_KEY = () => 'webview_customer_' + sessionId;
+
+/** Save customer data to localStorage for next order. */
+function saveCustomerData(name, phone, address) {
+  try {
+    localStorage.setItem(CUSTOMER_DATA_KEY(), JSON.stringify({ name, phone, address }));
+  } catch { /* non-fatal */ }
+}
+
+/** Load remembered customer data from localStorage. */
+function loadCustomerData() {
+  try {
+    const data = localStorage.getItem(CUSTOMER_DATA_KEY());
+    return data ? JSON.parse(data) : null;
+  } catch { return null; }
+}
+
 function startCheckout() {
   if (cart.items.length === 0) return showToast('Your cart is empty');
   const container = $id('checkout-form');
   if (!container) return;
+
+  // Load remembered customer data
+  const remembered = loadCustomerData();
 
   const pay = config.payment || {};
   const methods = [
@@ -1198,7 +1195,7 @@ function startCheckout() {
   container.innerHTML = `
     <div class="form-group">
       <label>Full Name</label>
-      <input type="text" id="co-name" placeholder="Juan Dela Cruz">
+      <input type="text" id="co-name" placeholder="Juan Dela Cruz" value="${esc(remembered?.name || '')}">
     </div>
     <div class="form-group">
       <label>Order Type</label>
@@ -1209,11 +1206,11 @@ function startCheckout() {
     </div>
     <div class="form-group" id="address-group">
       <label>Delivery Address</label>
-      <textarea id="address" placeholder="House #, street, barangay, city"></textarea>
+      <textarea id="address" placeholder="House #, street, barangay, city">${esc(remembered?.address || '')}</textarea>
     </div>
     <div class="form-group">
       <label>Contact Number</label>
-      <input type="tel" id="phone" placeholder="09XX-XXX-XXXX">
+      <input type="tel" id="phone" placeholder="09XX-XXX-XXXX" value="${esc(remembered?.phone || '')}">
     </div>
     <div class="form-group">
       <label>Fulfillment Date</label>
@@ -1303,7 +1300,7 @@ async function placeOrder() {
   if (!paymentMethod) return showToast('Please select payment method');
 
   const btn = $id('place-order-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Placing order…'; }
+  if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); btn.textContent = 'Placing order…'; }
   showLoading('Placing your order…');
 
   // Client-side cart contents — the server re-prices every line from the DB,
@@ -1339,13 +1336,15 @@ async function placeOrder() {
     });
   } catch (e) {
     hideLoading();
-    if (btn) { btn.disabled = false; btn.textContent = 'Place Order'; }
+    if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); btn.textContent = 'Place Order'; }
     showToast((e && e.message) || 'Failed to place order');
     return;
   }
   hideLoading();
 
   if (result && result.ok) {
+    // Save customer data for next order (remembered checkout)
+    saveCustomerData(name, phone, address);
     clearLocalCart();
     const successLine = $id('success-order-number');
     if (successLine) {
@@ -1355,7 +1354,7 @@ async function placeOrder() {
     showView('view-success');
     if (isInsideMessenger) setTimeout(() => closeWebview(), 4000);
   } else {
-    if (btn) { btn.disabled = false; btn.textContent = 'Place Order'; }
+    if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); btn.textContent = 'Place Order'; }
     showToast((result && result.error) || 'Failed to place order');
   }
 }

@@ -6,8 +6,6 @@ let ME_ID = Number(localStorage.getItem('me_id')) || 0;
 let ROLE = localStorage.getItem('role') || 'ADMIN';
 let currentView = 'dashboard';
 
-
-
 // ---------- helpers ----------
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
@@ -37,15 +35,6 @@ function closeModal() { document.getElementById('modal-overlay').classList.remov
  * then restores it. Prevents double-clicks on slow API calls.
  * Usage: button.addEventListener('click', (e) => withBtn(e.currentTarget, async () => { ... }));
  */
-// Add to app.js temporarily
-window.addEventListener('load', () => {
-  if (window.MessengerExtensions) {
-    console.log('SDK loaded correctly');
-  } else {
-    console.log('SDK NOT loaded - this is the problem');
-  }
-});
-
 async function withBtn(btn, fn) {
   if (!btn) return fn();
   if (btn.dataset.busy) return; // already running
