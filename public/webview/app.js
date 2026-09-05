@@ -1,18 +1,51 @@
-// ===== Supabase client (fetch catalog directly — much faster than Express round-trip) =====
+// ===== Supabase client (optional direct-to-Supabase fallback) =====
 const SUPABASE_URL = 'https://npftxbstixrhuiaqpmap.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZnR4YnN0aXhyaHVpYXFwbWFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTQwMDQsImV4cCI6MjEwMzM5MDAwNH0.9NFykxXdzeVfNRd4KikObsCmNsW2Ex3mFjftMLuWxMU';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// The Supabase JS CDN can be blocked or load slowly (e.g. inside Messenger's webview).
+// Never let a missing CDN script kill the whole app — create the client lazily and only
+// use it as a fallback when the REST API (/api/webview) is unreachable.
+let sb = null;
+function getSupabaseClient() {
+  if (sb) return sb;
+  try {
+    if (typeof supabase !== 'undefined' && supabase.createClient) {
+      sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } else {
+      console.warn('[webview] Supabase JS not loaded — relying on /api/webview REST endpoints.');
+    }
+  } catch (e) {
+    console.warn('[webview] Failed to init Supabase client:', e);
+  }
+  return sb;
+}
+
+// Some in-app webviews disable localStorage and throw on any access.
+function storageGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* non-fatal */ }
+}
 
 // Session management - when opened from Messenger we receive a ?psid= parameter
 // which identifies the customer. Use it as the session so orders link to their account.
 const urlParams = new URLSearchParams(window.location.search);
 const psidFromMessenger = urlParams.get('psid') || '';
 
-let sessionId = psidFromMessenger || localStorage.getItem('webview_session');
+let sessionId = psidFromMessenger || storageGet('webview_session');
 if (!sessionId) {
   sessionId = 'wv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
-  localStorage.setItem('webview_session', sessionId);
+  storageSet('webview_session', sessionId);
 }
+
+// Surface any runtime JS error so console debugging always shows it.
+window.addEventListener('error', (e) => {
+  console.error('[webview] uncaught error:', e && e.error ? e.error.stack || e.error : (e && e.message));
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[webview] unhandled rejection:', e && e.reason ? (e.reason.stack || e.reason) : e);
+});
 
 // State
 let categories = [];
@@ -32,11 +65,36 @@ let messengerLink = '';
 let isInsideMessenger = false;
 
 // ---- Helpers ----
+/** Fetch the REST endpoint. Throws on any failure so callers can fall back. */
 async function api(path, opts = {}) {
-  const res = await fetch('/api/webview' + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 15000) : null;
+  let res;
+  try {
+    res = await fetch('/api/webview' + path, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller ? controller.signal : undefined,
+      ...opts,
+    });
+  } catch (e) {
+    throw new Error(e && e.name === 'AbortError' ? 'Request timed out' : 'Network error — are you online?');
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    let msg = 'HTTP ' + res.status;
+    try {
+      const j = await res.json();
+      if (j && j.error) msg = j.error;
+    } catch { /* keep the status message */ }
+    throw new Error(msg);
+  }
+
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    throw new Error('Unexpected response from server');
+  }
   return res.json();
 }
 
@@ -45,6 +103,22 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.remove('hidden');
   setTimeout(() => t.classList.add('hidden'), 2500);
+}
+
+// #loading-view has an inline display:flex that beats the .view{display:none} rule,
+// so toggling the 'active' class alone never hides the spinner. Set the inline
+// display explicitly instead.
+function showLoading() {
+  const el = document.getElementById('loading-view');
+  if (!el) return;
+  el.classList.add('active');
+  el.style.display = 'flex';
+}
+function hideLoading() {
+  const el = document.getElementById('loading-view');
+  if (!el) return;
+  el.classList.remove('active');
+  el.style.display = 'none';
 }
 
 function formatMoney(n) {
@@ -94,42 +168,111 @@ function updateCartBadge() {
   }
 }
 
-// ---- Load data (direct from Supabase — fast) ----
+// ---- Load data (REST API first, direct Supabase as a fallback) ----
 async function loadCategories() {
-  const { data } = await sb.from('categories').select('*').eq('active', 1).order('sort_order');
-  categories = data || [];
+  try {
+    const data = await api('/categories');
+    categories = Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn('[webview] /categories via API failed:', e && e.message);
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        const { data } = await client.from('categories').select('*').eq('active', 1).order('sort_order');
+        categories = data || [];
+      } catch { categories = []; }
+    } else {
+      categories = [];
+    }
+  }
+  console.log('[webview] data → categories:', categories.length, categories.map(c => ({ id: c.id, name: c.name })));
   renderCategories();
 }
 
 async function loadProducts() {
-  const { data } = await sb.from('products').select('*, product_variants(*)').eq('active', 1).order('category_id, sort_order');
-  products = data || [];
+  try {
+    const data = await api('/products');
+    products = Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn('[webview] /products via API failed:', e && e.message);
+    const client = getSupabaseClient();
+    if (!client) { products = []; return; }
+    try {
+      const { data } = await client.from('products').select('*, product_variants(*)').eq('active', 1).order('category_id, sort_order');
+      products = data || [];
+    } catch { products = []; }
+  }
+  console.log('[webview] data → products:', products.length, products[0]
+    ? { id: products[0].id, name: products[0].name, category_id: products[0].category_id, category_id_type: typeof products[0].category_id, variants: (products[0].product_variants || []).length }
+    : null);
 }
 
 async function loadPackages() {
-  const { data } = await sb.from('packages').select('*, package_slots:package_slots(*, package_options:package_options(*))').eq('active', 1).order('sort_order');
-  // Transform to match the rendering code's expected structure
-  packages = (data || []).map(pkg => ({
-    ...pkg,
-    slots: (pkg.package_slots || []).map(slot => ({
-      ...slot,
-      options: slot.package_options || [],
-    })),
-  }));
+  try {
+    const data = await api('/packages');
+    packages = Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn('[webview] /packages via API failed:', e && e.message);
+    const client = getSupabaseClient();
+    if (!client) { packages = []; return; }
+    try {
+      const { data } = await client.from('packages')
+        .select('*, package_slots:package_slots(*, package_options:package_options(*))')
+        .eq('active', 1)
+        .order('id');
+      packages = (data || []).map(pkg => ({
+        ...pkg,
+        slots: (pkg.package_slots || []).map(slot => ({
+          ...slot,
+          options: slot.package_options || [],
+        })),
+      }));
+    } catch { packages = []; }
+  }
+  console.log('[webview] data → packages:', packages.length, packages[0] ? { id: packages[0].id, name: packages[0].name, slots: packages[0].slots ? packages[0].slots.length : 0 } : null);
 }
 
 async function loadFoodPacks() {
-  const { data } = await sb.from('food_packs').select('*').eq('active', 1).order('sort_order');
-  foodPacks = data || [];
+  try {
+    const data = await api('/food-packs');
+    foodPacks = Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn('[webview] /food-packs via API failed:', e && e.message);
+    const client = getSupabaseClient();
+    if (!client) { foodPacks = []; return; }
+    try {
+      const { data } = await client.from('food_packs').select('*').eq('active', 1).order('sort_order');
+      foodPacks = data || [];
+    } catch { foodPacks = []; }
+  }
+  console.log('[webview] data → foodPacks:', foodPacks.length, foodPacks.map(fp => ({ id: fp.id, name: fp.name, price: fp.price })));
 }
 
 async function loadCart() {
-  cart = await api('/cart?session=' + sessionId);
+  try {
+    const data = await api('/cart?session=' + sessionId);
+    cart = {
+      items: (data && data.items) || [],
+      totals: (data && data.totals) || { subtotal: 0, delivery: 0, total: 0 },
+    };
+  } catch (e) {
+    console.warn('[webview] /cart failed:', e && e.message);
+    cart = { items: [], totals: { subtotal: 0, delivery: 0, total: 0 } };
+  }
+  console.log('[webview] data → cart items:', cart.items.length, cart.totals);
   updateCartBadge();
 }
 
 async function loadConfig() {
-  config = await api('/config');
+  config = { payment: {}, contact: {} };
+  try {
+    const data = await api('/config');
+    if (data && data.payment) config.payment = data.payment;
+    if (data && data.contact) config.contact = data.contact;
+  } catch (e) {
+    console.warn('[webview] /config failed:', e && e.message);
+  }
+  console.log('[webview] data → config:', config);
   messengerLink = 'https://m.me/postrefoodproducts';
   const link = document.getElementById('messenger-link-disabled');
   if (link) link.href = messengerLink;
@@ -152,10 +295,29 @@ function renderCategories() {
 // ---- Render Products ----
 function showProducts(categoryId) {
   currentCategory = categoryId;
-  const cat = categories.find(c => c.id === categoryId);
+  categoryId = Number(categoryId);
+  const cat = categories.find(c => Number(c.id) === categoryId);
   document.getElementById('products-title').textContent = cat ? cat.name : 'Products';
-  const catProducts = products.filter(p => p.category_id === categoryId);
+  const catProducts = products.filter(p => Number(p.category_id) === categoryId);
+  console.log(
+    '[webview] showProducts(category=' + categoryId + ' "' + (cat ? cat.name : '?') + '") → ' +
+    catProducts.length + ' of ' + products.length + ' products matched'
+  );
+  if (catProducts.length === 0) {
+    console.log('[webview] no-match diagnostics:', {
+      requestedCategory: categoryId,
+      totalProducts: products.length,
+      productCategoryIdsInState: [...new Set(products.map(p => p.category_id))],
+      categoriesInState: categories.map(c => ({ id: c.id, name: c.name })),
+    });
+  }
   const container = document.getElementById('products-list');
+
+  if (catProducts.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">🍽️</div><p>No items in this category yet.</p></div>';
+    showView('view-products');
+    return;
+  }
 
   container.innerHTML = catProducts.map(p => {
     const variants = p.product_variants || [];
@@ -302,6 +464,14 @@ async function addToCartPackage(pkgId) {
 // ---- Food Packs ----
 function showFoodPacks() {
   const container = document.getElementById('food-packs-list');
+  console.log('[webview] showFoodPacks → foodPacks in state:', foodPacks.length, foodPacks.map(fp => ({ id: fp.id, name: fp.name, price: fp.price, active: fp.active })));
+
+  if (foodPacks.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">🍱</div><p>No food packs available yet.</p></div>';
+    showView('view-food-packs');
+    return;
+  }
+
   container.innerHTML = foodPacks.map(fp => {
     const img = fp.photo_url ? `<img src="${fp.photo_url}" alt="${fp.name}">` : `<img src="" alt="">`;
     return `<div class="product-card" onclick="addToCartFoodPack(${fp.id})">
@@ -422,15 +592,21 @@ function startCheckout() {
   document.getElementById('fulfill-date').addEventListener('change', async function () {
     const date = this.value;
     if (!date) return;
-    const data = await api('/slots?date=' + date);
     const slotSelect = document.getElementById('time-slot');
-    if (!data.open) {
-      slotSelect.innerHTML = '<option value="">Date not available</option>';
-      return;
+    try {
+      const data = await api('/slots?date=' + date);
+      if (!data.open) {
+        slotSelect.innerHTML = '<option value="">Date not available</option>';
+        return;
+      }
+      slotSelect.innerHTML = data.slots.map(s =>
+        `<option value="${s.label}" ${s.full ? 'disabled' : ''}>${s.label} ${s.full ? '(Full)' : ''}</option>`
+      ).join('');
+    } catch (e) {
+      console.warn('[webview] /slots failed:', e && e.message);
+      slotSelect.innerHTML = '<option value="">Could not load time slots</option>';
+      showToast('Could not load time slots — check your connection');
     }
-    slotSelect.innerHTML = data.slots.map(s =>
-      `<option value="${s.label}" ${s.full ? 'disabled' : ''}>${s.label} ${s.full ? '(Full)' : ''}</option>`
-    ).join('');
   });
 
   const today = new Date().toISOString().split('T')[0];
@@ -489,8 +665,15 @@ async function placeOrder() {
 
 // ---- Orders ----
 async function showOrders() {
-  orders = await api('/orders?session=' + sessionId);
   const container = document.getElementById('orders-list');
+  try {
+    orders = await api('/orders?session=' + sessionId);
+    if (!Array.isArray(orders)) orders = [];
+  } catch (e) {
+    console.warn('[webview] /orders failed:', e && e.message);
+    orders = [];
+    showToast('Could not load orders — check your connection');
+  }
 
   if (orders.length === 0) {
     container.innerHTML = '<div class="empty-state"><div class="icon">\u{1F4CB}</div><p>No orders yet</p></div>';
@@ -560,24 +743,77 @@ function closeWebview() {
 
 // ---- Init ----
 async function init() {
-  // Detect if we're running inside Messenger's webview
-  isInsideMessenger = await detectMessenger();
+  // Detect Messenger in parallel — never let the SDK poll block catalog loading.
+  const messengerDetection = detectMessenger();
 
-  // Check if webview is enabled
-  const enabledData = await api('/enabled');
-  if (!enabledData.enabled) {
-    document.getElementById('loading-view').classList.remove('active');
-    document.getElementById('disabled-msg').classList.remove('hidden');
-    document.getElementById('main-content').classList.add('hidden');
-    document.getElementById('bottom-nav').style.display = 'none';
+  // Check if webview is enabled (assume enabled when the check itself fails).
+  let enabled = true;
+  try {
+    const enabledData = await api('/enabled');
+    enabled = enabledData && enabledData.enabled !== false;
+  } catch (e) {
+    console.warn('[webview] /enabled check failed — assuming enabled:', e && e.message);
+  }
+
+  const mainContent = document.getElementById('main-content');
+  const nav = document.getElementById('bottom-nav');
+
+  if (!enabled) {
+    hideLoading();
+    const disabled = document.getElementById('disabled-msg');
+    if (disabled) disabled.classList.remove('hidden');
+    if (mainContent) mainContent.classList.add('hidden');
+    if (nav) nav.style.display = 'none';
     return;
   }
 
-  await Promise.all([loadCategories(), loadProducts(), loadPackages(), loadFoodPacks(), loadCart(), loadConfig()]);
-  document.getElementById('loading-view').classList.remove('active');
-  document.getElementById('main-content').classList.remove('hidden');
+  // Load everything; settle all results so one failed loader can't blank the whole menu.
+  const results = await Promise.allSettled([
+    loadCategories(),
+    loadProducts(),
+    loadPackages(),
+    loadFoodPacks(),
+    loadCart(),
+    loadConfig(),
+  ]);
+  const failed = results.filter(r => r.status === 'rejected');
+  if (failed.length > 0) {
+    console.warn('[webview] ' + failed.length + ' data loader(s) failed:', failed.map(f => f.reason && f.reason.message));
+  }
+  console.log('[webview] init complete →', {
+    categories: categories.length,
+    products: products.length,
+    packages: packages.length,
+    foodPacks: foodPacks.length,
+    cartItems: cart.items.length,
+    sessionId,
+    isInsideMessenger: await messengerDetection,
+  });
+
+  isInsideMessenger = await messengerDetection;
+
+  hideLoading();
+
+  // No catalog data at all → show an actionable error instead of a blank menu.
+  if (categories.length === 0) {
+    if (mainContent) mainContent.classList.add('hidden');
+    const errBox = document.getElementById('load-error');
+    if (errBox) errBox.classList.remove('hidden');
+    return;
+  }
+
+  if (mainContent) mainContent.classList.remove('hidden');
   renderCategories();
   showCategories();
+}
+
+function retryLoad() {
+  const errBox = document.getElementById('load-error');
+  if (errBox) errBox.classList.add('hidden');
+  showLoading();
+  const mainContent = document.getElementById('main-content');
+  if (mainContent) mainContent.classList.add('hidden');
+  init();
 }
 
 init();

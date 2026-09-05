@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Postre Food Products - Order</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20260905-4">
   <!-- Messenger Extensions SDK: required for in-Messenger webview features like requestCloseBrowser() -->
   <script src="https://connect.facebook.net/en_US/MessengerExtensions.js"></script>
-  <!-- Supabase JS: fetch catalog data directly from Supabase (faster than going through Express) -->
+  <!-- Supabase JS: optional fallback data source (primary is the /api/webview REST API) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -36,6 +36,16 @@
         <h2>Web ordering is currently unavailable</h2>
         <p style="color:#666;margin:12px 0">Please order through our Facebook Messenger bot instead.</p>
         <a id="messenger-link-disabled" href="https://m.me/postrefoodproducts" target="_blank" class="btn btn-primary">Order on Messenger</a>
+      </div>
+    </div>
+
+    <!-- Load error (shown only when the menu cannot be fetched at all) -->
+    <div id="load-error" class="view hidden" style="flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:40px 20px">
+      <div>
+        <div style="font-size:3rem;margin-bottom:16px">⚠️</div>
+        <h2>Couldn't load the menu</h2>
+        <p style="color:#666;margin:12px 0">We couldn't reach the server. Check your connection and try again.</p>
+        <button onclick="retryLoad()" class="btn btn-primary" style="width:100%">Retry</button>
       </div>
     </div>
 
@@ -147,6 +157,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260905-4"></script>
 </body>
 </html>
