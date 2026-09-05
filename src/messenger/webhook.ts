@@ -7,7 +7,7 @@ import {
   getPackages, getPackageSlots, getPackageSlotByNumber, getSlotOptions,
   getCustomSlotOptions, getPackageOptionBySlotAndProduct,
 } from '../db';
-import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest } from './send';
+import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest, GRAPH_API_VERSION } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, completeOrderByCustomer, rateOrder } from '../services/orders';
 import { sendPushToAdmins } from '../services/push';
@@ -716,10 +716,14 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       if (url) {
         // Pass the PSID so the webview can identify the customer and link orders to their Messenger account.
         const webviewLink = url + (url.includes('?') ? '&' : '?') + 'psid=' + encodeURIComponent(psid);
-        console.log(`[webhook] WEBVIEW payload received from psid=${psid}, opening webview: ${webviewLink}`);
+        console.log(`[webhook] WEBVIEW payload received from psid=${psid}`);
+        console.log(`[webhook] webviewLink=${webviewLink}`);
+        console.log(`[webhook] GRAPH_API_VERSION=${GRAPH_API_VERSION}`);
+        // Force re-verification of whitelist (bypass cache) for diagnostics
         const result = await sendUrlButton(psid, '🌐 Order online through our web store!\n\nTap the button below to open the web ordering page inside Messenger:', '🌐 Open Web Store', webviewLink);
+        console.log(`[webhook] sendUrlButton result: ok=${result.ok}, status=${result.status}, body=${result.body}`);
         if (!result.ok) {
-          console.error(`[webhook] WEBVIEW send failed for psid=${psid}: ${result.body}`);
+          console.error(`[webhook] WEBVIEW send FAILED for psid=${psid}: ${result.body}`);
           // Inform the user that the webview could not be opened
           await safeSend(sendText(psid, '⚠️ Unable to open the web store. Please try again later or use the menu below to order.'));
         }

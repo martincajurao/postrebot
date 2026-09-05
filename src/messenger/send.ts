@@ -5,7 +5,7 @@ const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
 
 // Graph API version - v19.0 expired May 21, 2026. Using v22.0 (stable, supported until May 20, 2027).
 // See: https://developers.facebook.com/docs/graph-api/changelog
-const GRAPH_API_VERSION = 'v22.0';
+export const GRAPH_API_VERSION = 'v22.0';
 
 // ---------- conversation state helpers ----------
 export async function getState(psid: string): Promise<{ state: string; ctx: any }> {
@@ -40,24 +40,27 @@ async function sendApi(body: any): Promise<SendResult> {
     return { ok: true };
   }
   const targetUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messages`;
+  const requestBody = JSON.stringify(body);
   try {
-    console.log(`[messenger:sendApi] POST ${targetUrl} | body=${JSON.stringify(body).slice(0, 200)}`);
+    // Log COMPLETE non-secret payload for diagnostics
+    console.log(`[messenger:sendApi] POST ${targetUrl}`);
+    console.log(`[messenger:sendApi] PAYLOAD: ${requestBody}`);
     const res = await fetch(`${targetUrl}?access_token=${PAGE_TOKEN}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: requestBody,
     });
     const text = await res.text();
+    // Log COMPLETE non-secret response for diagnostics
+    console.log(`[messenger:sendApi] RESPONSE STATUS: ${res.status}`);
+    console.log(`[messenger:sendApi] RESPONSE BODY: ${text}`);
     if (!res.ok) {
-      console.error(`[messenger] send failed (${res.status}): ${text}`);
       // Parse Meta error details for better logging
       try {
         const errJson = JSON.parse(text);
         const err = errJson?.error || {};
         console.error(`[messenger] Meta error: code=${err.code}, type=${err.type}, message=${err.message}, subcode=${err.error_subcode}`);
       } catch { /* not JSON */ }
-    } else {
-      console.log(`[messenger:sendApi] success (${res.status})`);
     }
     return { ok: res.ok, status: res.status, body: text };
   } catch (e: any) {
@@ -131,7 +134,7 @@ export function webviewButton(url: string, title: string) {
  * to a poor user experience. */
 export async function sendUrlButton(psid: string, text: string, title: string, url: string, messengerExt = true): Promise<SendResult> {
   const isHttps = messengerExt && url.startsWith('https://');
-  console.log(`[sendUrlButton] psid=${psid} | url=${url} | isHttps=${isHttps} | messengerExt=${messengerExt}`);
+  console.log(`[sendUrlButton] START psid=${psid} | url=${url} | isHttps=${isHttps} | messengerExt=${messengerExt}`);
 
   const sendWith = (ext: boolean) => {
     const button: any = {
@@ -144,7 +147,8 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
       button.messenger_extensions = true;
       button.fallback_url = url;
     }
-    console.log(`[sendUrlButton] sending button: messenger_extensions=${ext}, webview_height_ratio=full, url=${url}`);
+    console.log(`[sendUrlButton] BUTTON TYPE: ${button.type}`);
+    console.log(`[sendUrlButton] BUTTON PAYLOAD: ${JSON.stringify(button)}`);
     return sendApi({
       recipient: { id: psid },
       messaging_type: 'RESPONSE',
@@ -167,6 +171,7 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
   }
 
   // Verify origin is whitelisted (uses in-memory cache, avoids blocking every tap with a Meta API call)
+  console.log(`[sendUrlButton] Checking whitelist for origin=${originOf(url)}`);
   const whitelisted = await ensureWebviewWhitelisted(url);
   console.log(`[sendUrlButton] ensureWebviewWhitelisted=${whitelisted} for origin=${originOf(url)}`);
 
@@ -179,14 +184,18 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
   }
 
   // Domain is whitelisted — send with messenger_extensions=true
+  console.log(`[sendUrlButton] Domain whitelisted. Sending with messenger_extensions=true...`);
   const result = await sendWith(true);
-  console.log(`[sendUrlButton] sent with messenger_extensions=true | ok=${result.ok} | status=${result.status} | body=${result.body?.slice(0, 300)}`);
+  console.log(`[sendUrlButton] RESULT ok=${result.ok} | status=${result.status} | body=${result.body}`);
 
-  if (result.ok) return result;
+  if (result.ok) {
+    console.log(`[sendUrlButton] SUCCESS: WebView button sent successfully.`);
+    return result;
+  }
 
   // Send failed — log the exact Meta API response for debugging
   const err = (result.body || '').toLowerCase();
-  console.error(`[sendUrlButton] messenger_extensions=true was rejected by Meta.`);
+  console.error(`[sendUrlButton] FAILURE: messenger_extensions=true was rejected by Meta.`);
   console.error(`[sendUrlButton] Full Meta response: ${result.body}`);
 
   if (err.includes('whitelisted') || err.includes('domain') || err.includes('messenger_extensions')) {
