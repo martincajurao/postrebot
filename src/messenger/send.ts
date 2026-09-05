@@ -3,6 +3,10 @@ import { supa } from '../db/supabase';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
 
+// Graph API version - v19.0 expired May 21, 2026. Using v22.0 (stable, supported until May 20, 2027).
+// See: https://developers.facebook.com/docs/graph-api/changelog
+const GRAPH_API_VERSION = 'v22.0';
+
 // ---------- conversation state helpers ----------
 export async function getState(psid: string): Promise<{ state: string; ctx: any }> {
   const { data } = await supa()
@@ -35,14 +39,26 @@ async function sendApi(body: any): Promise<SendResult> {
     console.log('[messenger:mock-send]', JSON.stringify(body));
     return { ok: true };
   }
+  const targetUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messages`;
   try {
-    const res = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${PAGE_TOKEN}`, {
+    console.log(`[messenger:sendApi] POST ${targetUrl} | body=${JSON.stringify(body).slice(0, 200)}`);
+    const res = await fetch(`${targetUrl}?access_token=${PAGE_TOKEN}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const text = await res.text();
-    if (!res.ok) console.error(`[messenger] send failed (${res.status}): ${text}`);
+    if (!res.ok) {
+      console.error(`[messenger] send failed (${res.status}): ${text}`);
+      // Parse Meta error details for better logging
+      try {
+        const errJson = JSON.parse(text);
+        const err = errJson?.error || {};
+        console.error(`[messenger] Meta error: code=${err.code}, type=${err.type}, message=${err.message}, subcode=${err.error_subcode}`);
+      } catch { /* not JSON */ }
+    } else {
+      console.log(`[messenger:sendApi] success (${res.status})`);
+    }
     return { ok: res.ok, status: res.status, body: text };
   } catch (e: any) {
     console.error('[messenger] send error:', e?.message || e);
@@ -107,10 +123,15 @@ export function webviewButton(url: string, title: string) {
  *  1. URL must be HTTPS
  *  2. Domain origin must be in whitelisted_domains
  *  3. fallback_url must be provided when messenger_extensions is true
- *  4. webview_height_ratio: 'full' */
+ *  4. webview_height_ratio: 'full'
+ *
+ * IMPORTANT: We do NOT silently fall back to an external browser when webview fails.
+ * If the webview request fails, we log the exact Meta API response and preserve the error.
+ * This ensures the failure is visible and can be addressed, rather than silently degrading
+ * to a poor user experience. */
 export async function sendUrlButton(psid: string, text: string, title: string, url: string, messengerExt = true): Promise<SendResult> {
   const isHttps = messengerExt && url.startsWith('https://');
-  console.log(`[sendUrlButton] url=${url} | isHttps=${isHttps} | messengerExt=${messengerExt}`);
+  console.log(`[sendUrlButton] psid=${psid} | url=${url} | isHttps=${isHttps} | messengerExt=${messengerExt}`);
 
   const sendWith = (ext: boolean) => {
     const button: any = {
@@ -123,6 +144,7 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
       button.messenger_extensions = true;
       button.fallback_url = url;
     }
+    console.log(`[sendUrlButton] sending button: messenger_extensions=${ext}, webview_height_ratio=full, url=${url}`);
     return sendApi({
       recipient: { id: psid },
       messaging_type: 'RESPONSE',
@@ -140,32 +162,42 @@ export async function sendUrlButton(psid: string, text: string, title: string, u
   };
 
   if (!isHttps) {
-    console.log('[sendUrlButton] not HTTPS — sending external fallback');
+    console.error('[sendUrlButton] URL is not HTTPS — cannot use messenger_extensions. Sending as external link.');
     return sendWith(false);
   }
 
   // Verify origin is whitelisted (uses in-memory cache, avoids blocking every tap with a Meta API call)
   const whitelisted = await ensureWebviewWhitelisted(url);
-  console.log(`[sendUrlButton] ensureWebviewWhitelisted=${whitelisted}`);
+  console.log(`[sendUrlButton] ensureWebviewWhitelisted=${whitelisted} for origin=${originOf(url)}`);
 
-  if (whitelisted) {
-    const result = await sendWith(true);
-    console.log(`[sendUrlButton] sent with messenger_extensions=true ok=${result.ok} status=${result.status} body=${result.body?.slice(0, 200)}`);
-    if (result.ok) return result;
-
-    // Send failed — if Meta rejected due to extensions/whitelist, clear cache
-    const err = (result.body || '').toLowerCase();
-    if (err.includes('whitelisted') || err.includes('domain') || err.includes('messenger_extensions')) {
-      whitelistedOrigins.delete(originOf(url).replace(/\/+$/, ''));
-      console.warn('[messenger] messenger_extensions rejected by Meta — falling back to external link:', originOf(url));
-    } else {
-      console.warn('[messenger] webview send failed — falling back to external link:', result.body);
-    }
+  if (!whitelisted) {
+    // Whitelist check failed — do NOT silently fall back to external link.
+    // Log the error and return failure so the issue is visible.
+    const errMsg = `[sendUrlButton] CRITICAL: Domain not whitelisted. Cannot open webview. Origin=${originOf(url)}. Add this domain to Page Settings → Advanced Messaging → Whitelisted domains.`;
+    console.error(errMsg);
+    return { ok: false, status: 0, body: errMsg };
   }
 
-  // Whitelist check failed OR messenger_extensions rejected — send external fallback.
-  console.log('[sendUrlButton] sending external fallback (messenger_extensions=false)');
-  return sendWith(false);
+  // Domain is whitelisted — send with messenger_extensions=true
+  const result = await sendWith(true);
+  console.log(`[sendUrlButton] sent with messenger_extensions=true | ok=${result.ok} | status=${result.status} | body=${result.body?.slice(0, 300)}`);
+
+  if (result.ok) return result;
+
+  // Send failed — log the exact Meta API response for debugging
+  const err = (result.body || '').toLowerCase();
+  console.error(`[sendUrlButton] messenger_extensions=true was rejected by Meta.`);
+  console.error(`[sendUrlButton] Full Meta response: ${result.body}`);
+
+  if (err.includes('whitelisted') || err.includes('domain') || err.includes('messenger_extensions')) {
+    // Clear cache so we re-verify on next attempt
+    whitelistedOrigins.delete(originOf(url).replace(/\/+$/, ''));
+    console.error(`[sendUrlButton] Domain whitelist issue detected. Cleared cache for: ${originOf(url)}`);
+  }
+
+  // DO NOT fall back to external link — preserve the error so it's visible
+  console.error(`[sendUrlButton] NOT falling back to external browser. Preserving error for visibility.`);
+  return result;
 }
 
 // ---------- Webview domain whitelisting ----------
@@ -184,12 +216,20 @@ export function originOf(url: string): string {
 }
 
 export async function fetchWhitelistedDomains(): Promise<string[]> {
-  const url = `https://graph.facebook.com/v19.0/me/messenger_profile?fields=whitelisted_domains&access_token=${PAGE_TOKEN}`;
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messenger_profile?fields=whitelisted_domains&access_token=${PAGE_TOKEN}`;
   console.log(`[fetchWhitelistedDomains] GET ${url.replace(PAGE_TOKEN, '***')}`);
   const res = await fetch(url);
   const text = await res.text();
   console.log(`[fetchWhitelistedDomains] status=${res.status} body=${text.slice(0, 300)}`);
-  if (!res.ok) throw new Error(`whitelist lookup failed (${res.status}): ${text}`);
+  if (!res.ok) {
+    // Parse Meta error details
+    try {
+      const errJson = JSON.parse(text);
+      const err = errJson?.error || {};
+      console.error(`[fetchWhitelistedDomains] Meta error: code=${err.code}, type=${err.type}, message=${err.message}`);
+    } catch { /* not JSON */ }
+    throw new Error(`whitelist lookup failed (${res.status}): ${text}`);
+  }
   const json = JSON.parse(text) as { data?: Array<{ whitelisted_domains?: string[] }> };
   return json.data?.[0]?.whitelisted_domains || [];
 }
@@ -248,7 +288,7 @@ export function whitelistWebviewDomain(buttonUrl: string, opts: { force?: boolea
       // Not whitelisted — add it now (merge, clean origins only without trailing slashes).
       const merged = Array.from(new Set([...normalized, origin]));
       console.log(`[whitelist] adding ${origin} to whitelist (merged list: [${merged.join(', ')}])`);
-      const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
+      const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ whitelisted_domains: merged }),
@@ -259,6 +299,12 @@ export function whitelistWebviewDomain(buttonUrl: string, opts: { force?: boolea
         whitelistedOrigins.add(origin);
         return true;
       }
+      // Parse Meta error details
+      try {
+        const errJson = JSON.parse(text);
+        const err = errJson?.error || {};
+        console.error(`[messenger] whitelist POST failed: code=${err.code}, type=${err.type}, message=${err.message}, subcode=${err.error_subcode}`);
+      } catch { /* not JSON */ }
       console.error(`[messenger] whitelist failed (${res.status}): ${text}`);
       return false;
     } catch (e: any) {
@@ -313,7 +359,8 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
     ],
   };
   try {
-    const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
+    console.log(`[setPersistentMenu] POST persistent menu with messenger_extensions=${whitelisted} for ${webviewUrl}`);
+    const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -323,6 +370,12 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
       console.log(`[messenger] persistent menu set (webview: ${webviewUrl}, extensions: ${whitelisted})`);
       return true;
     }
+    // Parse Meta error details
+    try {
+      const errJson = JSON.parse(text);
+      const err = errJson?.error || {};
+      console.error(`[setPersistentMenu] Meta error: code=${err.code}, type=${err.type}, message=${err.message}, subcode=${err.error_subcode}`);
+    } catch { /* not JSON */ }
     console.error(`[messenger] persistent menu failed (${res.status}): ${text}`);
     return false;
   } catch (e: any) {

@@ -716,7 +716,14 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       if (url) {
         // Pass the PSID so the webview can identify the customer and link orders to their Messenger account.
         const webviewLink = url + (url.includes('?') ? '&' : '?') + 'psid=' + encodeURIComponent(psid);
-        return sendUrlButton(psid, '🌐 Order online through our web store!\n\nTap the button below to open the web ordering page inside Messenger:', '🌐 Open Web Store', webviewLink);
+        console.log(`[webhook] WEBVIEW payload received from psid=${psid}, opening webview: ${webviewLink}`);
+        const result = await sendUrlButton(psid, '🌐 Order online through our web store!\n\nTap the button below to open the web ordering page inside Messenger:', '🌐 Open Web Store', webviewLink);
+        if (!result.ok) {
+          console.error(`[webhook] WEBVIEW send failed for psid=${psid}: ${result.body}`);
+          // Inform the user that the webview could not be opened
+          await safeSend(sendText(psid, '⚠️ Unable to open the web store. Please try again later or use the menu below to order.'));
+        }
+        return result;
       }
       return sendText(psid, '🌐 Web ordering is coming soon! For now, please use the menu below to order.');
     }

@@ -226,7 +226,7 @@ button doesn't send it automatically, set it once with the Page token:
 
 ```powershell
 $token = "YOUR_PAGE_ACCESS_TOKEN"
-Invoke-RestMethod -Uri "https://graph.facebook.com/v19.0/me/messenger_profile?access_token=$token" `
+Invoke-RestMethod -Uri "https://graph.facebook.com/v22.0/me/messenger_profile?access_token=$token" `
   -Method Post -ContentType 'application/json' `
   -Body '{"get_started":{"payload":"GET_STARTED"}}'
 ```
