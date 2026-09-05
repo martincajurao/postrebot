@@ -1,4 +1,4 @@
-﻿import type { Request, Response } from 'express';
+﻿﻿import type { Request, Response } from 'express';
 import { supa } from '../db/supabase';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
@@ -86,65 +86,77 @@ export function sendButtons(psid: string, text: string, buttons: { title: string
 
 /** Build a web_url button that opens INSIDE Messenger's full-height webview. */
 export function webviewButton(url: string, title: string) {
-  return {
+  const isHttps = url.startsWith('https://');
+  const btn: any = {
     type: 'web_url',
     url,
     title: title.slice(0, 20),
     webview_height_ratio: 'full',
-    // messenger_extensions only validates on HTTPS — ensureWebviewWhitelisted()
-    // gates this flag against the Messenger Profile whitelist before sending.
-    messenger_extensions: url.startsWith('https://'),
   };
+  if (isHttps) {
+    btn.messenger_extensions = true;
+    btn.fallback_url = url;
+  }
+  return btn;
 }
 
 /** Send a URL button that opens INSIDE Messenger's built-in in-app browser.
  *  messenger_extensions: true makes it a true in-Messenger webview (closes back into
  *  the chat thread) and loads the MessengerExtensions JS SDK on the page so the webview
- *  can call requestCloseBrowser(). The URL must be HTTPS and whitelisted in the Meta app
- *  dashboard under Messenger > Webview Domains — verified here before sending, with an
- *  external fallback (instead of a rejected message) when it can't be confirmed. */
+ *  can call requestCloseBrowser(). Meta requirements:
+ *  1. URL must be HTTPS
+ *  2. Domain origin must be in whitelisted_domains
+ *  3. fallback_url must be provided when messenger_extensions is true
+ *  4. webview_height_ratio: 'full' */
 export async function sendUrlButton(psid: string, text: string, title: string, url: string, messengerExt = true): Promise<SendResult> {
-  const https = messengerExt && url.startsWith('https://');
-  console.log(`[sendUrlButton] url=${url} | https=${https} | messengerExt=${messengerExt}`);
-  const sendWith = (ext: boolean) => sendApi({
-    recipient: { id: psid },
-    messaging_type: 'RESPONSE',
-    message: {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'button',
-          text: text.slice(0, 640),
-          buttons: [{
-            type: 'web_url',
-            url,
-            title: title.slice(0, 20),
-            webview_height_ratio: 'full',
-            messenger_extensions: ext,
-          }],
+  const isHttps = messengerExt && url.startsWith('https://');
+  console.log(`[sendUrlButton] url=${url} | isHttps=${isHttps} | messengerExt=${messengerExt}`);
+
+  const sendWith = (ext: boolean) => {
+    const button: any = {
+      type: 'web_url',
+      url,
+      title: title.slice(0, 20),
+      webview_height_ratio: 'full',
+    };
+    if (ext) {
+      button.messenger_extensions = true;
+      button.fallback_url = url;
+    }
+    return sendApi({
+      recipient: { id: psid },
+      messaging_type: 'RESPONSE',
+      message: {
+        attachment: {
+          type: 'template',
+          payload: {
+            template_type: 'button',
+            text: text.slice(0, 640),
+            buttons: [button],
+          },
         },
       },
-    },
-  });
+    });
+  };
 
-  if (!https) {
-    console.log('[sendUrlButton] not HTTPS — sending external');
+  if (!isHttps) {
+    console.log('[sendUrlButton] not HTTPS — sending external fallback');
     return sendWith(false);
   }
 
-  // Verify the button URL's origin is whitelisted so Meta actually opens the
-  // in-app webview instead of silently demoting the button to an external page.
-  // Force mode: always re-verify against Meta's actual whitelist (the cache can
-  // be stale if the domain was removed from the dashboard after boot).
-  const whitelisted = await ensureWebviewWhitelisted(url, { force: true });
+  // Verify origin is whitelisted (uses in-memory cache, avoids blocking every tap with a Meta API call)
+  const whitelisted = await ensureWebviewWhitelisted(url);
   console.log(`[sendUrlButton] ensureWebviewWhitelisted=${whitelisted}`);
+
   if (whitelisted) {
     const result = await sendWith(true);
     console.log(`[sendUrlButton] sent with messenger_extensions=true ok=${result.ok} status=${result.status} body=${result.body?.slice(0, 200)}`);
     if (result.ok) return result;
-    // Send failed — log and fall through to external fallback.
+
+    // Send failed — if Meta rejected due to extensions/whitelist, clear cache
     const err = (result.body || '').toLowerCase();
-    if (err.includes('whitelisted') || err.includes('messenger_extensions') || err.includes('invalid key')) {
+    if (err.includes('whitelisted') || err.includes('domain') || err.includes('messenger_extensions')) {
+      whitelistedOrigins.delete(originOf(url).replace(/\/+$/, ''));
       console.warn('[messenger] messenger_extensions rejected by Meta — falling back to external link:', originOf(url));
     } else {
       console.warn('[messenger] webview send failed — falling back to external link:', result.body);
@@ -207,13 +219,12 @@ export function whitelistWebviewDomain(buttonUrl: string, opts: { force?: boolea
     return Promise.resolve(false);
   }
 
-  const origin = originOf(buttonUrl);
+  const origin = originOf(buttonUrl).replace(/\/+$/, '');
   console.log(`[whitelist] checking origin: ${origin} (force=${!!opts.force})`);
   if (!opts.force && whitelistedOrigins.has(origin)) {
     console.log(`[whitelist] cache hit — already whitelisted: ${origin}`);
     return Promise.resolve(true);
   }
-  // Force mode: verify Meta's actual whitelist instead of trusting cache.
   if (opts.force) {
     console.log(`[whitelist] force mode — bypassing cache, re-verifying with Meta`);
   }
@@ -234,11 +245,8 @@ export function whitelistWebviewDomain(buttonUrl: string, opts: { force?: boolea
         whitelistedOrigins.add(origin);
         return true;
       }
-      // Not whitelisted — add it now (merge, never replace).
-      // Add BOTH with and without trailing slash — Meta's whitelist matching
-      // is exact, and it may store the domain with a trailing slash while the
-      // button URL origin has none (or vice versa). Cover both forms.
-      const merged = Array.from(new Set([...normalized, origin, origin + '/']));
+      // Not whitelisted — add it now (merge, clean origins only without trailing slashes).
+      const merged = Array.from(new Set([...normalized, origin]));
       console.log(`[whitelist] adding ${origin} to whitelist (merged list: [${merged.join(', ')}])`);
       const res = await fetch(`https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
         method: 'POST',
@@ -276,19 +284,25 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
   }
   const webviewUrl = webviewBaseUrl.replace(/\/+$/, '') + '/webview';
   const whitelisted = await ensureWebviewWhitelisted(webviewUrl);
+
+  const menuButton: any = {
+    type: 'web_url',
+    title: '🌐 Order Online',
+    url: webviewUrl,
+    webview_height_ratio: 'full',
+  };
+  if (whitelisted) {
+    menuButton.messenger_extensions = true;
+    menuButton.fallback_url = webviewUrl;
+  }
+
   const payload = {
     persistent_menu: [
       {
         locale: 'default',
         composer_input_disabled: false,
         call_to_actions: [
-          {
-            type: 'web_url',
-            title: '🌐 Order Online',
-            url: webviewUrl,
-            webview_height_ratio: 'full',
-            messenger_extensions: whitelisted,
-          },
+          menuButton,
           {
             type: 'postback',
             title: '📋 Main Menu',

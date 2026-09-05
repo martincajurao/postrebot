@@ -1,4 +1,4 @@
-﻿import express from 'express';
+﻿﻿import express from 'express';
 import 'dotenv/config';
 import { migrate } from './db/postgres';
 import adminRoutes from './api/admin';
@@ -29,8 +29,29 @@ app.post('/api/login', loginHandler);
 
 // Webview ordering interface (REST API + static frontend)
 app.use('/api/webview', webviewApi);
+
+// Middleware to configure frame permissions specifically for Messenger webview:
+// On Desktop Messenger (facebook.com / messenger.com), the webview is embedded in an iframe.
+// We must allow Meta domains in CSP frame-ancestors and ensure X-Frame-Options does not block framing.
+const allowMessengerFraming = (_req: express.Request, res: express.Response, next: express.NextFunction) => {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' https://www.messenger.com https://*.messenger.com https://www.facebook.com https://*.facebook.com https://web.facebook.com https://*.fbsbx.com"
+  );
+  next();
+};
+
+app.use('/webview', allowMessengerFraming);
 app.use('/webview', express.static(path.join(__dirname, 'public', 'webview'), {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.removeHeader('X-Frame-Options');
+    res.setHeader(
+      'Content-Security-Policy',
+      "frame-ancestors 'self' https://www.messenger.com https://*.messenger.com https://www.facebook.com https://*.facebook.com https://web.facebook.com https://*.fbsbx.com"
+    );
+  },
 }));
 
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
@@ -61,8 +82,7 @@ app.get('/whitelist', async (_req, res) => {
     }
     const domains = await fetchWhitelistedDomains();
     const base = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
-    const origin = base ? originOf(base) : null;
-    // Meta may store the domain with or without a trailing slash — check both.
+    const origin = base ? originOf(base).replace(/\/+$/, '') : null;
     const normalized = domains.map(d => d.replace(/\/+$/, ''));
     const whitelisted = origin ? normalized.includes(origin) : false;
     res.json({
@@ -70,7 +90,7 @@ app.get('/whitelist', async (_req, res) => {
       our_origin: origin,
       our_origin_whitelisted: whitelisted,
       count: domains.length,
-      note: 'Meta matches by exact origin string — trailing slash matters. We add both forms to the whitelist.',
+      note: 'Whitelisted domains must match the HTTPS origin without trailing slash.',
     });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || String(e) });
@@ -85,30 +105,36 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 logConfig();
 configurePush();
 const PORT = Number(process.env.PORT || 3000);
-app.listen(PORT, () => {
-  const base = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
+app.listen(PORT, async () => {
+  let base = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).trim().replace(/\/+$/, '');
+  // Automatically upgrade to https if running on Render or any public domain
+  if (base.startsWith('http://') && !/localhost|127\.0\.0\.1|\[::1\]/.test(base)) {
+    base = base.replace(/^http:\/\//i, 'https://');
+  } else if (!base.startsWith('http://') && !base.startsWith('https://')) {
+    base = 'https://' + base;
+  }
+
   const hasToken = !!process.env.PAGE_ACCESS_TOKEN;
   console.log(`Postre server listening on http://localhost:${PORT} (db: supabase)`);
   console.log(`Web ordering URL: ${base}/webview`);
   console.log(`[boot] BASE_URL=${process.env.BASE_URL || '(not set)'} | RENDER_EXTERNAL_URL=${process.env.RENDER_EXTERNAL_URL || '(not set)'} | resolved base=${base} | PAGE_ACCESS_TOKEN=${hasToken ? 'set' : 'NOT SET'}`);
+
   // Register the webview domain with the Messenger Profile API so the
   // "Open Web Store" button (messenger_extensions) opens INSIDE Messenger's
   // in-chat webview instead of being rejected / opening an external browser.
   if (base.startsWith('https://')) {
-    console.log(`[boot] base is HTTPS — calling whitelistWebviewDomain(${base})`);
-    whitelistWebviewDomain(base).then((ok) => {
+    try {
+      console.log(`[boot] base is HTTPS — ensuring whitelist for: ${base}`);
+      const ok = await whitelistWebviewDomain(base);
       console.log(`[boot] whitelistWebviewDomain resolved: ${ok}`);
-    }).catch((e) => {
-      console.error(`[boot] whitelistWebviewDomain rejected:`, e?.message || e);
-    });
-    // Register persistent menu (☰ "Order Online" entry) so customers always have
-    // an in-Messenger way to open the webview, even without tapping a button.
-    console.log(`[boot] calling setPersistentMenu(${base})`);
-    setPersistentMenu(base).then((ok) => {
-      console.log(`[boot] setPersistentMenu resolved: ${ok}`);
-    }).catch((e) => {
-      console.error(`[boot] setPersistentMenu rejected:`, e?.message || e);
-    });
+
+      // Register persistent menu (☰ "Order Online" entry) after whitelist is established
+      console.log(`[boot] registering persistent menu for: ${base}`);
+      const menuOk = await setPersistentMenu(base);
+      console.log(`[boot] setPersistentMenu resolved: ${menuOk}`);
+    } catch (e: any) {
+      console.error(`[boot] Messenger webview registration failed:`, e?.message || e);
+    }
   } else {
     console.log(`⚠️  BASE_URL is not HTTPS (${base}) — messenger_extensions webview requires HTTPS. Skipping auto-whitelist and persistent menu.`);
   }

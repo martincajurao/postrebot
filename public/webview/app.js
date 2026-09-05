@@ -1478,26 +1478,40 @@ async function cancelMyOrder(orderId) {
 /** True when the page runs inside Messenger's in-app browser (UA fallback). */
 function detectMessengerUserAgent() {
   const ua = navigator.userAgent || '';
-  return /\b(FBAV|FB_IAB|MessengerForiOS|Messenger)\b/i.test(ua) || /\[FB_IAB\]/.test(ua);
+  return /\b(FBAV|FB_IAB|FBAN|MessengerForiOS|Orca-Android|Messenger)\b/i.test(ua) || /\[FB_IAB\]/.test(ua);
 }
 
 /** Wait up to ~2s for the MessengerExtensions SDK, then resolve detection. */
 async function detectMessenger() {
-  if (window.MessengerExtensions) return true;
+  if (window.__messengerExtensionsReady) return true;
+  if (window.MessengerExtensions && typeof window.MessengerExtensions.isInExtension === 'function') {
+    try { if (window.MessengerExtensions.isInExtension()) return true; } catch { /* ignore */ }
+  }
+  // Check if opened via Messenger button with psid parameter
+  if (new URLSearchParams(window.location.search).get('psid')) return true;
+
   for (let i = 0; i < 10; i++) {
-    await new Promise((r) => setTimeout(r, 200));
-    if (window.MessengerExtensions) return true;
+    if (window.__messengerExtensionsReady) return true;
+    if (window.MessengerExtensions && typeof window.MessengerExtensions.isInExtension === 'function') {
+      try { if (window.MessengerExtensions.isInExtension()) return true; } catch { /* ignore */ }
+    }
+    await new Promise((r) => setTimeout(r, 150));
   }
   return detectMessengerUserAgent();
 }
 
 /** Close the in-Messenger webview and return the user to the chat thread. */
 function closeWebview() {
-  if (window.MessengerExtensions) {
+  const ext = window.MessengerExtensions;
+  if (ext && typeof ext.requestCloseBrowser === 'function') {
     try {
-      window.MessengerExtensions.requestCloseBrowser(
-        () => { /* closed */ },
-        (err) => console.error('[webview] requestCloseBrowser error:', err),
+      ext.requestCloseBrowser(
+        () => { console.log('[webview] in-app webview closed successfully'); },
+        (err) => {
+          console.warn('[webview] requestCloseBrowser returned error:', err);
+          window.close();
+          setTimeout(() => { if (!window.closed) showCategories(); }, 300);
+        },
       );
       return;
     } catch (e) {
@@ -1519,7 +1533,6 @@ function resolveMessengerUser() {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
-    // The SDK script can land late on flaky mobile connections — poll briefly.
     let tries = 0;
     (function attempt() {
       const ext = window.MessengerExtensions;
@@ -1532,7 +1545,7 @@ function resolveMessengerUser() {
           return;
         } catch { finish(null); return; }
       }
-      if (++tries < 12) setTimeout(attempt, 200);
+      if (++tries < 15) setTimeout(attempt, 200);
       else finish(null);
     })();
     setTimeout(() => finish(null), 3000);

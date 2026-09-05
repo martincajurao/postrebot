@@ -47,16 +47,22 @@ function safeSend(p: Promise<any>): Promise<void> {
 // break every image.
 function envBaseUrl(): string {
   // 1. Explicit BASE_URL env var takes priority (set this in Render Dashboard)
-  let raw = (process.env.BASE_URL || '').replace(/\/+$/, '');
+  let raw = (process.env.BASE_URL || '').trim().replace(/\/+$/, '');
   // 2. On Render, fall back to RENDER_EXTERNAL_URL if BASE_URL not set
   if (!raw && process.env.RENDER_EXTERNAL_URL) {
-    raw = process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '');
+    raw = process.env.RENDER_EXTERNAL_URL.trim().replace(/\/+$/, '');
   }
   if (!raw) return '';
-  // Ignore localhost / tunnel hosts — unreachable from Messenger
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(raw) || /(^|\.)ngrok/i.test(raw)) {
-    console.warn(`[webhook] ignoring BASE_URL="${raw}" (localhost/tunnel host, unreachable from Messenger) — using the webhook request origin instead`);
+  // Ignore localhost / loopback hosts — unreachable from Messenger
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(raw)) {
+    console.warn(`[webhook] ignoring BASE_URL="${raw}" (localhost host, unreachable from Messenger) — using the webhook request origin instead`);
     return '';
+  }
+  // Messenger Extensions requires HTTPS — upgrade http to https for public hosts
+  if (raw.startsWith('http://')) {
+    raw = raw.replace(/^http:\/\//i, 'https://');
+  } else if (!raw.startsWith('https://')) {
+    raw = 'https://' + raw;
   }
   return raw;
 }
@@ -1082,6 +1088,10 @@ async function handleText(psid: string, text: string) {
       }
     }
     default:
+      // Direct shortcut for webview if customer mentions ordering online or webview
+      if (/\b(order\s+online|web\s*store|webview|open\s+store)\b/i.test(text)) {
+        return handlePayload(psid, 'WEBVIEW');
+      }
       // unknown text -> main menu
       if (text.toLowerCase().includes('menu') || text.toLowerCase().startsWith('hi')) return mainMenu(psid);
       return sendText(psid, 'Sorry, I did not understand that.').then(() => mainMenu(psid));
