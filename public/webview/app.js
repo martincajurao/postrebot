@@ -145,6 +145,7 @@ function showView(id) {
   if (loading && id !== 'loading-view') loading.style.display = 'none';
   currentView = id.replace('view-', '');
   updateBottomNav();
+  renderCartBar();
 }
 
 /** Bottom nav index per view. */
@@ -326,18 +327,106 @@ async function loadFoodPacks() {
   }
 }
 
+// ---------- Local cart (no DB round-trips) ----------
+// The cart lives entirely in the webview (in-memory + localStorage) so adding
+// items is instant. The server only sees the items at checkout, where every
+// line is re-priced server-side from the DB — client totals are display-only.
+const LOCAL_CART_KEY = () => 'webview_cart_' + sessionId;
+
+function emptyCart() {
+  return { items: [], nextId: 1, totals: { subtotal: 0, delivery: 0, discount: 0, total: 0, breakdown: [] } };
+}
+
 async function loadCart() {
-  try {
-    const data = await api('/cart?session=' + sessionId);
-    cart = {
-      items: (data && data.items) || [],
-      totals: (data && data.totals) || { subtotal: 0, delivery: 0, discount: 0, total: 0, breakdown: [] },
-    };
-  } catch (e) {
-    console.warn('[webview] /cart failed:', e && e.message);
-    cart = { items: [], totals: { subtotal: 0, delivery: 0, discount: 0, total: 0, breakdown: [] } };
-  }
+  let saved = null;
+  try { saved = JSON.parse(storageGet(LOCAL_CART_KEY()) || 'null'); } catch { saved = null; }
+  cart = (saved && Array.isArray(saved.items)) ? saved : emptyCart();
+  if (!Number.isFinite(cart.nextId)) cart.nextId = cart.items.reduce((m, i) => Math.max(m, Number(i.id) || 0), 0) + 1;
+  recalcCartTotals();
   updateCartBadge();
+}
+
+function saveCart() {
+  recalcCartTotals();
+  storageSet(LOCAL_CART_KEY(), JSON.stringify(cart));
+  updateCartBadge();
+  refreshCartUI();
+}
+
+/** Display-name for a catalog-backed cart line. */
+function cartItemName(kind, id, size) {
+  if (kind === 'food_pack') {
+    const fp = foodPacks.find((f) => Number(f.id) === Number(id));
+    return (fp ? fp.name : 'Food pack') + ' (food pack)';
+  }
+  if (kind === 'package') {
+    const pkg = packages.find((p) => Number(p.id) === Number(id));
+    return (pkg ? pkg.name : 'Package') + ' (package)';
+  }
+  const p = products.find((x) => Number(x.id) === Number(id));
+  return ((p ? p.name : 'Item') + ' ' + (size || '')).trim();
+}
+
+function localItemSignature(kind, id, size, choices) {
+  const choiceKey = Array.isArray(choices)
+    ? choices.map((c) => Number(c.slot_number) + ':' + Number(c.product_id)).sort().join('|')
+    : '';
+  return [kind, Number(id), size || '', choiceKey].join('~');
+}
+
+/** Add (or merge) an item into the local cart. Returns the cart item. */
+function localAddItem(kind, id, quantity, size, slotChoices) {
+  const qty = Math.max(1, Number(quantity) || 1);
+  const sig = localItemSignature(kind, id, size, slotChoices);
+  const existing = cart.items.find((it) => it._sig === sig);
+  if (existing) {
+    existing.quantity += qty;
+    saveCart();
+    return existing;
+  }
+  const item = {
+    id: cart.nextId++,
+    _sig: sig,
+    name: cartItemName(kind, id, size),
+    quantity: qty,
+  };
+  if (kind === 'product') item.product_id = Number(id);
+  else if (kind === 'package') { item.package_id = Number(id); item.slot_choices = slotChoices || []; }
+  else if (kind === 'food_pack') item.food_pack_id = Number(id);
+  if (size) item.variant_size = size;
+  cart.items.push(item);
+  saveCart();
+  return item;
+}
+
+/** Recompute display totals from the loaded catalog. */
+function recalcCartTotals() {
+  let subtotal = 0;
+  let discount = 0;
+  const breakdown = [];
+  for (const it of cart.items) {
+    const unit = cartItemUnitPrice(it);
+    if (unit === null || unit === undefined) continue;
+    const line = unit * it.quantity;
+    subtotal += line;
+    breakdown.push({ label: (it.name || 'Item') + ' x' + it.quantity, amount: line });
+    if (it.package_id) {
+      const pkg = packages.find((p) => Number(p.id) === Number(it.package_id));
+      if (pkg && Number(pkg.discount) > 0) discount += Math.min(Number(pkg.discount), Math.max(0, unit)) * it.quantity;
+    }
+  }
+  cart.totals = { subtotal, delivery: 0, discount, total: subtotal, breakdown };
+}
+
+function clearLocalCart() {
+  cart = emptyCart();
+  saveCart();
+}
+
+/** Re-render whatever cart surfaces are on screen (bar + cart view). */
+function refreshCartUI() {
+  renderCartBar();
+  if (currentView === 'cart') showCart();
 }
 
 /** Render the store contact config into the header, disabled link, and menu "Visit us" card. */
@@ -443,6 +532,55 @@ function priceRange(p) {
   return `${formatMoney(prices[0])} – ${formatMoney(prices[prices.length - 1])}`;
 }
 
+// Per-card size selections (persists while browsing): { 'product-12': 'L', 'package-3': 'M' }
+const cardSizes = {};
+
+/** Price label for a product card given a chosen size. */
+function productCardPrice(p, size) {
+  const vs = productVariants(p);
+  const v = vs.find((x) => x.size === size) || vs[0];
+  return v ? formatMoney(v.price) : priceRange(p);
+}
+
+/** Card price for a package at a size, using each slot's default dish (like the bot). */
+function packageCardPrice(pkg, size) {
+  const defaults = packageDefaultChoices(pkg);
+  if (defaults.length === 0) return formatMoney(netPackagePrice(pkg));
+  const choices = {};
+  defaults.forEach((c) => { choices[c.slot_number] = c.product_id; });
+  return formatMoney(pricePackageChoices(pkg, choices, size).total);
+}
+
+/** Default dish per slot for fixed packages (is_default wins, else first option). */
+function packageDefaultChoices(pkg) {
+  const out = [];
+  for (const slot of (pkg.slots || [])) {
+    const opts = packageSlotOptions(pkg, slot);
+    const def = opts.find((o) => Number(o.is_default) === 1) || opts[0];
+    if (def && def.product_id != null) out.push({ slot_number: Number(slot.slot_number), product_id: Number(def.product_id) });
+  }
+  return out;
+}
+
+/** Pick a size directly on a catalog card (updates the card price in place). */
+function selectCardSize(event, kind, id, size) {
+  if (event && event.stopPropagation) event.stopPropagation();
+  cardSizes[kind + '-' + Number(id)] = size;
+  const card = event && event.target ? event.target.closest('.product-card, .pkg-card') : null;
+  if (!card) return;
+  card.querySelectorAll('.size-pill').forEach((b) => b.classList.toggle('selected', b.textContent.trim() === String(size)));
+  const priceEl = card.querySelector('.card-price');
+  if (priceEl) {
+    if (kind === 'product') {
+      const p = products.find((x) => Number(x.id) === Number(id));
+      if (p) priceEl.textContent = productCardPrice(p, size);
+    } else {
+      const pkg = packages.find((x) => Number(x.id) === Number(id));
+      if (pkg) priceEl.textContent = packageCardPrice(pkg, size);
+    }
+  }
+}
+
 function showProducts(categoryId) {
   currentCategoryId = Number(categoryId);
   const cat = categories.find((c) => Number(c.id) === currentCategoryId);
@@ -462,12 +600,21 @@ function showProducts(categoryId) {
 
   container.innerHTML = list.map((p) => {
     const unavailable = Number(p.unavailable) === 1;
+    const vs = productVariants(p);
+    const selSize = cardSizes['product-' + p.id] || (vs[0] ? vs[0].size : null);
+    const sizePills = vs.length > 1
+      ? `<div class="card-sizes">${vs.map((v) =>
+          `<button class="size-pill${v.size === selSize ? ' selected' : ''}" onclick="selectCardSize(event, 'product', ${p.id}, '${esc(v.size)}')">${esc(v.size)}</button>`
+        ).join('')}</div>`
+      : '';
     return `<div class="product-card${unavailable ? ' unavailable' : ''}" ${unavailable ? '' : `onclick="showProductDetail(${p.id})"`}>
       ${imageHtml(p.photo_url, p.name)}
       <div class="info">
         <div class="name">${esc(p.name)}</div>
         ${p.description ? `<div class="desc">${esc(p.description)}</div>` : ''}
-        <div class="price">${priceRange(p)}</div>
+        <div class="price card-price">${productCardPrice(p, selSize)}</div>
+        ${sizePills}
+        ${unavailable ? '' : `<div class="card-actions"><button class="card-add-btn" onclick="addToCartProductQuick(${p.id}, event)">+ Add to Cart</button></div>`}
         ${unavailable ? '<span class="badge-flag">Unavailable</span>' : ''}
       </div>
     </div>`;
@@ -548,22 +695,9 @@ function changeProductQty(delta) {
   }
 }
 
-async function addToCartProduct() {
-  try {
-    await api('/cart/add', {
-      method: 'POST',
-      body: JSON.stringify({
-        session: sessionId,
-        product_id: productDetail.productId,
-        variant_size: productDetail.size,
-        quantity: productDetail.qty,
-      }),
-    });
-  } catch (e) {
-    showToast((e && e.message) || 'Could not add item');
-    return;
-  }
-  await loadCart();
+function addToCartProduct() {
+  const v = selectedProductVariant();
+  localAddItem('product', productDetail.productId, productDetail.qty, v ? v.size : null);
   showToast('Added to cart!');
 }
 
@@ -581,18 +715,48 @@ function showPackages() {
     return;
   }
   container.innerHTML = packages.map((pkg) => {
-    const net = netPackagePrice(pkg);
     const saved = Number(pkg.discount) > 0;
+    const slots = pkg.slots || [];
+    const selSize = cardSizes['package-' + pkg.id] || 'M';
+    const defaults = packageDefaultChoices(pkg);
+    const canQuickAdd = !pkg.is_custom && (Number(pkg.selections) || slots.length || 0) <= defaults.length && defaults.length > 0;
+
+    // Preview of the dishes included (default picks) — up to 3, then "+N more".
+    const names = pkg.is_custom
+      ? []
+      : slots.map((slot) => {
+          const opts = packageSlotOptions(pkg, slot);
+          const def = opts.find((o) => Number(o.is_default) === 1) || opts[0];
+          return def ? def.name : null;
+        }).filter(Boolean);
+    const dishPreview = names.length > 0
+      ? `<div class="pkg-dishes">${esc(names.slice(0, 3).join(', '))}${names.length > 3 ? ` +${names.length - 3} more` : ''}</div>`
+      : '';
+
+    const meta = pkg.is_custom
+      ? `Pick any ${esc(String(pkg.selections || slots.length || '?'))} dishes`
+      : `${slots.length || esc(String(pkg.selections || '?'))} dishes · Ready to order`;
+
     return `<div class="pkg-card" onclick="showPackageDetail(${pkg.id})">
       ${imageHtml(pkg.photo_url, pkg.name, 'pkg-img')}
       <div class="pkg-body">
         <div class="pkg-name">${esc(pkg.name)}</div>
-        ${pkg.description ? `<div class="desc">${esc(pkg.description)}</div>` : ''}
-        <div class="pkg-meta">${esc(String(pkg.selections) || '?')} dishes · ${pkg.is_custom ? 'Pick your own' : (pkg.is_fixed ? 'Ready to order' : 'Customize')}</div>
-        <div class="pkg-price-line">
-          ${saved ? `<span class="was">${formatMoney(pkg.base_price)}</span>` : ''}
-          <span class="price">${formatMoney(net)}</span>
-          ${saved ? `<span class="save">Save ${formatMoney(pkg.discount)}</span>` : ''}
+        ${pkg.description ? `<div class="pkg-meta">${esc(pkg.description)}</div>` : ''}
+        <div class="pkg-meta">${meta}</div>
+        ${dishPreview}
+        <div class="pkg-size-row">
+          <button class="size-pill${selSize === 'M' ? ' selected' : ''}" onclick="selectCardSize(event, 'package', ${pkg.id}, 'M')">M</button>
+          <button class="size-pill${selSize === 'L' ? ' selected' : ''}" onclick="selectCardSize(event, 'package', ${pkg.id}, 'L')">L</button>
+          <span class="pkg-price-line">
+            ${saved ? `<span class="was">${formatMoney(pkg.base_price)}</span>` : ''}
+            <span class="price card-price">${packageCardPrice(pkg, selSize)}</span>
+            ${saved ? `<span class="save">Save ${formatMoney(pkg.discount)}</span>` : ''}
+          </span>
+        </div>
+        <div class="card-actions">
+          <button class="card-add-btn" onclick="${canQuickAdd ? `addToCartPackageQuick(${pkg.id}, event)` : `showPackageDetail(${pkg.id})`}">
+            ${canQuickAdd ? '+ Add to Cart' : 'Choose Dishes'}
+          </button>
         </div>
       </div>
     </div>`;
@@ -638,7 +802,7 @@ function showPackageDetail(pkgId) {
       if (def) choices[Number(slot.slot_number)] = Number(def.product_id);
     }
   }
-  packageDetail = { pkgId: Number(pkg.id), choices, size: 'M', qty: 1 };
+  packageDetail = { pkgId: Number(pkg.id), choices, size: cardSizes['package-' + Number(pkg.id)] || 'M', qty: 1 };
   renderPackageDetail();
 }
 
@@ -784,7 +948,7 @@ function changePackageQty(delta) {
   if (totalEl) totalEl.textContent = formatMoney(pricing.total * packageDetail.qty);
 }
 
-async function addToCartPackage() {
+function addToCartPackage() {
   const pkg = currentPackage();
   if (!pkg) return;
   const needed = Number(pkg.selections) || (pkg.slots || []).length || 0;
@@ -795,22 +959,32 @@ async function addToCartPackage() {
     slot_number: Number(slot),
     product_id: Number(packageDetail.choices[slot]),
   }));
-  try {
-    await api('/cart/add', {
-      method: 'POST',
-      body: JSON.stringify({
-        session: sessionId,
-        package_id: packageDetail.pkgId,
-        variant_size: packageDetail.size,
-        quantity: packageDetail.qty,
-        slot_choices: slotChoices,
-      }),
-    });
-  } catch (e) {
-    showToast((e && e.message) || 'Could not add package');
-    return;
-  }
-  await loadCart();
+  localAddItem('package', packageDetail.pkgId, packageDetail.qty, packageDetail.size, slotChoices);
+  showToast('Added to cart!');
+}
+
+/** Quick add from a product card: selected size, qty 1, no round-trip. */
+function addToCartProductQuick(productId, event) {
+  if (event && event.stopPropagation) event.stopPropagation();
+  const p = products.find((x) => Number(x.id) === Number(productId));
+  if (!p) return;
+  const vs = productVariants(p);
+  const size = cardSizes['product-' + Number(productId)] || (vs[0] ? vs[0].size : null);
+  localAddItem('product', productId, 1, size);
+  showToast('Added to cart!');
+}
+
+/** Quick add from a package card: fixed packages add with default dishes; custom opens the chooser. */
+function addToCartPackageQuick(pkgId, event) {
+  if (event && event.stopPropagation) event.stopPropagation();
+  const pkg = packages.find((x) => Number(x.id) === Number(pkgId));
+  if (!pkg) return;
+  if (pkg.is_custom) return showPackageDetail(pkgId);
+  const choices = packageDefaultChoices(pkg);
+  const needed = Number(pkg.selections) || (pkg.slots || []).length || 0;
+  if (needed > 0 && choices.length < needed) return showPackageDetail(pkgId);
+  const size = cardSizes['package-' + Number(pkgId)] || 'M';
+  localAddItem('package', pkgId, 1, size, choices);
   showToast('Added to cart!');
 }
 
@@ -843,18 +1017,65 @@ async function retryFoodPacks() {
   showFoodPacks();
 }
 
-async function addToCartFoodPack(fpId) {
-  try {
-    await api('/cart/add', {
-      method: 'POST',
-      body: JSON.stringify({ session: sessionId, food_pack_id: fpId, quantity: 1 }),
-    });
-  } catch (e) {
-    showToast((e && e.message) || 'Could not add food pack');
-    return;
-  }
-  await loadCart();
+function addToCartFoodPack(fpId) {
+  localAddItem('food_pack', fpId, 1);
   showToast('Added to cart!');
+}
+
+// ---------- Fixed cart bar (toggled) ----------
+const CART_BAR_HIDDEN_VIEWS = ['cart', 'checkout', 'orders', 'order-detail', 'success'];
+let cartBarOpen = false;
+
+function toggleCartBar() {
+  if (cart.items.length === 0) return;
+  cartBarOpen = !cartBarOpen;
+  renderCartBar();
+}
+
+function checkoutFromCartBar() {
+  cartBarOpen = false;
+  startCheckout();
+}
+
+/** Renders the fixed bottom bar; hidden when the cart is empty or a cart/orders screen is active. */
+function renderCartBar() {
+  const bar = $id('cart-bar');
+  const app = $id('app');
+  if (!bar || !app) return;
+  const count = cart.items.reduce((s, i) => s + i.quantity, 0);
+  const show = count > 0 && !CART_BAR_HIDDEN_VIEWS.includes(currentView);
+  bar.classList.toggle('hidden', !show);
+  bar.classList.toggle('open', show && cartBarOpen);
+  app.classList.toggle('has-cart-bar', show);
+  if (!show) return;
+
+  const countEl = $id('cart-bar-count');
+  if (countEl) countEl.textContent = count + ' item' + (count === 1 ? '' : 's') + ' in cart';
+  const totalEl = $id('cart-bar-total');
+  if (totalEl) totalEl.textContent = formatMoney(cart.totals.total);
+  const chevron = $id('cart-bar-chevron');
+  if (chevron) chevron.textContent = cartBarOpen ? '▾' : '▴';
+
+  const details = $id('cart-bar-details');
+  if (!details) return;
+  if (cartBarOpen) {
+    $id('cart-bar-items').innerHTML = cart.items.map((it) => {
+      const unit = cartItemUnitPrice(it);
+      const line = unit !== null && unit !== undefined ? unit * it.quantity : null;
+      const comp = slotChoiceText(it);
+      return `<div class="cart-bar-item">
+        <div class="cbi-name">${esc(it.name)}${comp ? `<small>${esc(comp)}</small>` : ''}
+          <small>Qty ${it.quantity}${unit !== null && unit !== undefined ? ' × ' + formatMoney(unit) : ''}</small>
+        </div>
+        <span class="cbi-price">${line !== null ? formatMoney(line) : '—'}</span>
+        <button class="cbi-remove" onclick="removeCartItem(${it.id})" aria-label="Remove">✕</button>
+      </div>`;
+    }).join('');
+    $id('cart-bar-grand').textContent = formatMoney(cart.totals.total);
+    details.classList.remove('hidden');
+  } else {
+    details.classList.add('hidden');
+  }
 }
 
 // ---------- Cart ----------
@@ -940,31 +1161,20 @@ function showCart() {
   showView('view-cart');
 }
 
-async function updateCartItem(itemId, qty) {
-  if (qty <= 0) return removeCartItem(itemId);
-  try {
-    await api('/cart/update-quantity', {
-      method: 'POST',
-      body: JSON.stringify({ session: sessionId, item_id: itemId, quantity: qty }),
-    });
-  } catch (e) {
-    showToast((e && e.message) || 'Could not update item');
-  }
-  await loadCart();
-  showCart();
+/** Local-cart quantity change (no server round-trip). */
+function updateCartItem(itemId, qty) {
+  const it = cart.items.find((x) => Number(x.id) === Number(itemId));
+  if (!it) return;
+  const next = Number(qty) || 0;
+  if (next <= 0) return removeCartItem(itemId);
+  it.quantity = next;
+  saveCart();
 }
 
-async function removeCartItem(itemId) {
-  try {
-    await api('/cart/remove', {
-      method: 'POST',
-      body: JSON.stringify({ session: sessionId, item_id: itemId }),
-    });
-  } catch (e) {
-    showToast((e && e.message) || 'Could not remove item');
-  }
-  await loadCart();
-  showCart();
+/** Local-cart removal (no server round-trip). */
+function removeCartItem(itemId) {
+  cart.items = cart.items.filter((x) => Number(x.id) !== Number(itemId));
+  saveCart();
 }
 
 // ---------- Navigation ----------
@@ -1095,6 +1305,21 @@ async function placeOrder() {
   const btn = $id('place-order-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Placing order…'; }
   showLoading('Placing your order…');
+
+  // Client-side cart contents — the server re-prices every line from the DB,
+  // so these only carry *what* was ordered, never the prices.
+  const payloadItems = cart.items.map((it) => {
+    const out = { quantity: Math.max(1, Number(it.quantity) || 1) };
+    if (it.product_id) out.product_id = Number(it.product_id);
+    if (it.package_id) out.package_id = Number(it.package_id);
+    if (it.food_pack_id) out.food_pack_id = Number(it.food_pack_id);
+    if (it.variant_size) out.variant_size = it.variant_size;
+    if (it.package_id && Array.isArray(it.slot_choices)) {
+      out.slot_choices = it.slot_choices.map((c) => ({ slot_number: Number(c.slot_number), product_id: Number(c.product_id) }));
+    }
+    return out;
+  });
+
   let result;
   try {
     result = await api('/checkout', {
@@ -1109,6 +1334,7 @@ async function placeOrder() {
         time_slot: timeSlot,
         payment_method: paymentMethod,
         notes,
+        items: payloadItems,
       }),
     });
   } catch (e) {
@@ -1120,7 +1346,7 @@ async function placeOrder() {
   hideLoading();
 
   if (result && result.ok) {
-    await loadCart();
+    clearLocalCart();
     const successLine = $id('success-order-number');
     if (successLine) {
       successLine.textContent = 'Order #' + result.order_number +

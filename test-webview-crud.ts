@@ -150,6 +150,51 @@ const server = app.listen(0, async () => {
     assert('POST /checkout', checkoutRes.status === 200 && checkoutRes.data.ok && checkoutRes.data.order_id);
     const orderId = checkoutRes.data.order_id;
 
+    // 6b. Checkout with CLIENT-SIDE cart items (webview local-cart flow).
+    // Items carry only ids/quantities — the server re-prices every line.
+    const pkgList = (await req('/packages')).data;
+    const fixedPkg = Array.isArray(pkgList)
+      ? pkgList.find((p: any) => Array.isArray(p.slots) && p.slots.some((s: any) => Array.isArray(s.options) && s.options.length > 0))
+      : null;
+    const fpsAll = await req('/food-packs');
+    const fp = Array.isArray(fpsAll.data) && fpsAll.data.length > 0 ? fpsAll.data[0] : null;
+
+    const clientItems: any[] = [
+      { product_id: prodId, variant_size: prods.data[0].variants[0]?.size || 'Regular', quantity: 2 },
+    ];
+    if (fixedPkg) {
+      const slot_choices = fixedPkg.slots
+        .filter((s: any) => Array.isArray(s.options) && s.options.length > 0)
+        .map((s: any) => ({ slot_number: s.slot_number, product_id: s.options[0].product_id }));
+      clientItems.push({ package_id: fixedPkg.id, variant_size: 'M', quantity: 1, slot_choices });
+    }
+    if (fp) clientItems.push({ food_pack_id: fp.id, quantity: 1 });
+
+    const coRes = await req('/checkout', {
+      method: 'POST',
+      body: JSON.stringify({
+        session,
+        order_type: 'delivery',
+        address: '123 Test St.',
+        phone: '09123456789',
+        name: 'Test Customer',
+        fulfillment_date: '2026-10-15',
+        time_slot: '10:00 AM - 12:00 PM',
+        payment_method: 'gcash',
+        items: clientItems,
+      }),
+    });
+    assert('POST /checkout (client items)', coRes.status === 200 && coRes.data.ok && coRes.data.order_id,
+      coRes.data && coRes.data.error ? String(coRes.data.error) : '');
+    if (coRes.data && coRes.data.ok) {
+      const detail = await req('/orders/' + coRes.data.order_id);
+      assert('Client-item order has all lines', Array.isArray(detail.data.items) && detail.data.items.length === clientItems.length,
+        'got ' + (detail.data.items || []).length + ' expected ' + clientItems.length);
+      assert('Client-item order total > 0', Number(detail.data.total) > 0);
+      assert('Client-item order priced server-side', Number(detail.data.subtotal) > 0);
+      await req('/orders/' + coRes.data.order_id + '?session=' + session, { method: 'DELETE' });
+    }
+
     // Read Orders
     const ordersRes = await req('/orders?session=' + session);
     assert('GET /orders', ordersRes.status === 200 && Array.isArray(ordersRes.data) && ordersRes.data.some((o: any) => o.id === orderId));

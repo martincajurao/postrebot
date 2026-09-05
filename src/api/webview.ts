@@ -374,10 +374,12 @@ r.delete('/cart/items', handleClearCart);
 // ==========================================
 
 // CREATE: Place order from cart
+// The webview keeps its cart client-side; when `items` is provided those are used
+// (and re-priced server-side). Without `items` it falls back to the DB cart (bot flow).
 r.post('/checkout', async (req, res) => {
   const sessionId = getSessionId(req);
   if (!sessionId) return res.status(400).json({ error: 'No session' });
-  const { order_type, address, phone, payment_method, fulfillment_date, time_slot, name, notes } = req.body;
+  const { order_type, address, phone, payment_method, fulfillment_date, time_slot, name, notes, items } = req.body;
 
   try {
     const custId = await getOrCreateCustomer(sessionId, name, phone, address);
@@ -398,7 +400,7 @@ r.post('/checkout', async (req, res) => {
       time_slot,
       payment_method,
       notes,
-    });
+    }, Array.isArray(items) ? items : undefined);
 
     // Notify admins via web push
     try {

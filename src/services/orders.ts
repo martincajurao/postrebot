@@ -1,6 +1,90 @@
 ﻿﻿import { supa } from '../db/supabase';
-import { computeCartTotals, choiceUpgrade } from './pricing';
+import { computeCartTotals, choiceUpgrade, normalizeChoices, priceFoodPack, pricePackage, priceProduct } from './pricing';
 import { clearCart, getCart } from './cart';
+
+/**
+ * Resolve a webview client-side cart into priced order items.
+ * Every line is re-priced from the DB (priceProduct/pricePackage/priceFoodPack),
+ * so client-sent amounts are never trusted — only *what* was ordered.
+ * Throws on any unpriceable/invalid item so checkout fails loudly.
+ */
+async function resolveClientCartItems(rawItems: any[]): Promise<any[]> {
+  if (rawItems.length > 50) throw new Error('Too many items in cart');
+  const db = supa();
+  const out: any[] = [];
+
+  for (const raw of rawItems) {
+    const quantity = Math.max(1, Math.min(99, Math.floor(Number(raw?.quantity) || 0)));
+    if (!quantity) throw new Error('Invalid item quantity');
+
+    const productId = Number(raw?.product_id) || 0;
+    const packageId = Number(raw?.package_id) || 0;
+    const foodPackId = Number(raw?.food_pack_id) || 0;
+    const kinds = [productId, packageId, foodPackId].filter((n) => n > 0).length;
+    if (kinds !== 1) throw new Error('Invalid cart item');
+
+    if (productId > 0) {
+      const variantSize = raw.variant_size ? String(raw.variant_size) : undefined;
+      const price = await priceProduct(productId, variantSize); // throws on invalid product/size
+      const { data: prod } = await db.from('products').select('name').eq('id', productId).maybeSingle();
+      out.push({
+        product_id: productId,
+        package_id: null,
+        food_pack_id: null,
+        variant_size: variantSize ?? null,
+        quantity,
+        slot_choices: null,
+        name: `${prod?.name || 'Item'} ${variantSize || ''}`.trim(),
+        unit_price: price,
+        line_total: price * quantity,
+        discount: 0,
+      });
+    } else if (packageId > 0) {
+      const variantSize = raw.variant_size ? String(raw.variant_size) : undefined;
+      const slotChoices = normalizeChoices(raw?.slot_choices);
+      const { total, breakdown } = await pricePackage(packageId, slotChoices, variantSize); // throws on invalid package
+      const { data: pkg } = await db.from('packages').select('name').eq('id', packageId).maybeSingle();
+      const itemDiscount = breakdown
+        .filter((b: any) => b.amount < 0)
+        .reduce((s: number, b: any) => s + -b.amount, 0) * quantity;
+      out.push({
+        product_id: null,
+        package_id: packageId,
+        food_pack_id: null,
+        variant_size: variantSize ?? null,
+        quantity,
+        slot_choices: slotChoices,
+        name: `${pkg?.name || 'Package'} (package)`,
+        unit_price: Math.round(total / quantity),
+        line_total: total * quantity,
+        discount: itemDiscount,
+      });
+    } else {
+      const { price, name } = await priceFoodPack(foodPackId); // throws on invalid food pack
+      out.push({
+        product_id: null,
+        package_id: null,
+        food_pack_id: foodPackId,
+        variant_size: null,
+        quantity,
+        slot_choices: null,
+        name: `${name} (food pack)`,
+        unit_price: price,
+        line_total: price * quantity,
+        discount: 0,
+      });
+    }
+  }
+  return out;
+}
+
+/** Totals for a client-resolved cart (already priced per line). */
+function totalsFromResolvedItems(items: any[]) {
+  const subtotal = items.reduce((s, it) => s + (Number(it.line_total) || 0), 0);
+  const discount = items.reduce((s, it) => s + (Number(it.discount) || 0), 0);
+  const breakdown = items.map((it) => ({ label: `${it.name} x${it.quantity}`, amount: it.line_total }));
+  return { subtotal, delivery: 0, discount, total: subtotal, breakdown };
+}
 
 export async function nextOrderNumber(): Promise<string> {
   const { data } = await supa().from('orders').select('id').order('id', { ascending: false }).limit(1).maybeSingle();
@@ -20,15 +104,22 @@ export async function createOrderFromCart(
     payment_method?: string;
     phone?: string;
     notes?: string;
-  }
+  },
+  clientItems?: any[]
 ) {
   let deliveryFee = 0;
   // Delivery fee is intentionally NOT auto-charged at order time — the admin enters
   // the actual fare when confirming the order (POST /orders/:id/confirm). This way
   // the customer is not billed a pre-set estimate before the order is reviewed.
-  const items = await getCart(psid);
+
+  // Two cart sources:
+  //  - clientItems: the webview's local cart (items only; every line is re-priced
+  //    server-side in resolveClientCartItems — client amounts are never trusted).
+  //  - DB cart: the Messenger bot flow (unchanged).
+  const usingClientCart = Array.isArray(clientItems) && clientItems.length > 0;
+  const items = usingClientCart ? await resolveClientCartItems(clientItems) : await getCart(psid);
   if (items.length === 0) throw new Error('Cart is empty');
-  const totals = await computeCartTotals(items, deliveryFee);
+  const totals = usingClientCart ? totalsFromResolvedItems(items) : await computeCartTotals(items, deliveryFee);
 
   const db = supa();
   const orderNumber = await nextOrderNumber();
@@ -49,8 +140,17 @@ export async function createOrderFromCart(
   const orderId = Number(orderRow!.id);
 
   for (const it of items) {
-    const line = await computeCartTotals([it], 0);
-    const unit = Math.round(line.subtotal / it.quantity);
+    let unit: number;
+    let lineSubtotal: number;
+    if (it.unit_price !== undefined && it.line_total !== undefined) {
+      // Client-resolved cart: lines were already priced server-side in resolveClientCartItems.
+      unit = Math.round(Number(it.unit_price) || 0);
+      lineSubtotal = Number(it.line_total) || 0;
+    } else {
+      const line = await computeCartTotals([it], 0);
+      unit = Math.round(line.subtotal / it.quantity);
+      lineSubtotal = line.subtotal;
+    }
     const { data: oiRow, error: oiErr } = await db.from('order_items').insert({
       order_id: orderId,
       product_id: it.product_id ?? null,
@@ -60,7 +160,7 @@ export async function createOrderFromCart(
       variant_size: it.variant_size ?? null,
       quantity: it.quantity,
       unit_price: unit,
-      line_total: line.subtotal,
+      line_total: lineSubtotal,
     }).select('id').single();
     if (oiErr) throw new Error(`Order item creation failed: ${oiErr.message}`);
     const orderItemId = Number(oiRow!.id);
