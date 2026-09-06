@@ -187,8 +187,8 @@ function showView(id) {
 const NAV_MAP = {
   'categories': 0, 'products': 0, 'product-detail': 0,
   'packages': 1, 'package': 1,
-  'food-packs': 2, 'food-pack-detail': 2,
-  'cart': 3, 'checkout': 3,
+  'cart': 2, 'checkout': 2,
+  'food-packs': 3, 'food-pack-detail': 3,
   'orders': 4, 'order-detail': 4,
 };
 
@@ -211,16 +211,31 @@ let prevCartCount = 0;
 
 function updateCartBadge() {
   const badge = $id('cart-badge');
-  if (!badge) return;
+  const headerBadge = $id('header-cart-badge');
   const count = cart.items.reduce((s, i) => s + i.quantity, 0);
-  badge.textContent = count;
-  badge.classList.toggle('hidden', count === 0);
+  
+  if (badge) {
+    badge.textContent = count;
+    badge.classList.toggle('hidden', count === 0);
+  }
+  
+  if (headerBadge) {
+    headerBadge.textContent = count;
+    headerBadge.classList.toggle('hidden', count === 0);
+  }
 
   // Animate badge when item is added (count increases)
   if (count > prevCartCount) {
-    badge.classList.remove('badge-bounce');
-    void badge.offsetWidth; // Trigger reflow to restart animation
-    badge.classList.add('badge-bounce');
+    if (badge) {
+      badge.classList.remove('badge-bounce');
+      void badge.offsetWidth; // Trigger reflow to restart animation
+      badge.classList.add('badge-bounce');
+    }
+    if (headerBadge) {
+      headerBadge.classList.remove('badge-pop');
+      void headerBadge.offsetWidth; // Trigger reflow to restart animation
+      headerBadge.classList.add('badge-pop');
+    }
   }
   prevCartCount = count;
 }

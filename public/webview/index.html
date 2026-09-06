@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260905-10">
+  <link rel="stylesheet" href="style.css?v=20260907-1">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -34,16 +34,40 @@
   <div id="app">
     <!-- Header -->
     <header class="header">
-      <div class="header-content">
-        <div class="header-logo">🍽️</div>
-        <div class="header-text">
-          <h1>Postre Food Products</h1>
-          <p class="header-sub" id="header-sub">Order online</p>
+      <div class="header-top">
+        <div class="header-content">
+          <div class="header-logo">
+            <div class="logo-circle">
+              <span class="logo-icon">🍽️</span>
+            </div>
+            <div class="logo-accent"></div>
+          </div>
+          <div class="header-text">
+            <h1>Postre Food Products</h1>
+            <p class="header-sub" id="header-sub">Order online</p>
+          </div>
+          <div class="header-actions">
+            <button class="header-btn" onclick="showOrders()" title="My Orders">
+              <span class="header-btn-icon">📜</span>
+            </button>
+            <button class="header-btn" onclick="showCart()" title="Cart">
+              <span class="header-btn-icon">🛒</span>
+              <span id="header-cart-badge" class="header-badge hidden">0</span>
+            </button>
+          </div>
         </div>
       </div>
       <div class="contact-strip" id="contact-strip">
-        <a class="contact-item" id="contact-phone" href="#"><span>📞</span><span id="contact-phone-text"></span></a>
-        <span class="contact-item" id="contact-hours"><span>🕘</span><span id="contact-hours-text"></span></span>
+        <div class="contact-divider"></div>
+        <a class="contact-item" id="contact-phone" href="#">
+          <span class="contact-icon">📞</span>
+          <span id="contact-phone-text"></span>
+        </a>
+        <span class="contact-separator">•</span>
+        <span class="contact-item" id="contact-hours">
+          <span class="contact-icon">🕘</span>
+          <span id="contact-hours-text"></span>
+        </span>
       </div>
     </header>
 
@@ -203,33 +227,46 @@
 
     <!-- Bottom navigation -->
     <nav class="bottom-nav" id="bottom-nav">
-      <button class="nav-btn active" onclick="showCategories()">
-        <span class="nav-icon">📋</span>
-        <span>Menu</span>
-      </button>
-      <button class="nav-btn" onclick="showPackages()">
-        <span class="nav-icon">🎁</span>
-        <span>Packages</span>
-      </button>
-      <button class="nav-btn" onclick="showFoodPacks()">
-        <span class="nav-icon">🍱</span>
-        <span>Food Packs</span>
-      </button>
-      <button class="nav-btn" onclick="showCart()">
-        <span class="nav-icon">🛒</span>
-        <span>Cart</span>
-        <span id="cart-badge" class="badge hidden">0</span>
-      </button>
-      <button class="nav-btn" onclick="showOrders()">
-        <span class="nav-icon">📜</span>
-        <span>Orders</span>
-      </button>
+      <div class="nav-wrapper">
+        <button class="nav-btn active" onclick="showCategories()" data-view="categories">
+          <span class="nav-icon-wrapper">
+            <span class="nav-icon">📋</span>
+          </span>
+          <span class="nav-label">Menu</span>
+        </button>
+        <button class="nav-btn" onclick="showPackages()" data-view="packages">
+          <span class="nav-icon-wrapper">
+            <span class="nav-icon">🎁</span>
+          </span>
+          <span class="nav-label">Packages</span>
+        </button>
+        <button class="nav-btn nav-btn-center" onclick="showCart()" data-view="cart">
+          <span class="nav-icon-wrapper nav-icon-cart">
+            <span class="nav-icon">🛒</span>
+            <span id="cart-badge" class="badge hidden">0</span>
+          </span>
+          <span class="nav-label">Cart</span>
+        </button>
+        <button class="nav-btn" onclick="showFoodPacks()" data-view="food-packs">
+          <span class="nav-icon-wrapper">
+            <span class="nav-icon">🍱</span>
+          </span>
+          <span class="nav-label">Food Packs</span>
+        </button>
+        <button class="nav-btn" onclick="showOrders()" data-view="orders">
+          <span class="nav-icon-wrapper">
+            <span class="nav-icon">📜</span>
+          </span>
+          <span class="nav-label">Orders</span>
+        </button>
+        <div class="nav-indicator"></div>
+      </div>
     </nav>
 
     <!-- Toast notification -->
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260905-10"></script>
+  <script src="app.js?v=20260907-1"></script>
 </body>
 </html>
