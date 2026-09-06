@@ -701,32 +701,101 @@ views.reservations = async (main) => {
 /* ================= MENU ================= */
 views.menu = async (main) => {
   const [products, cats] = await Promise.all([api('/products'), api('/categories')]);
+  const activeTab = sessionStorage.getItem('menuTab') || 'products';
+
+  const renderProducts = () => {
+    const filt = document.getElementById('mf-filter')?.value || 'all';
+    const catId = document.getElementById('mf-category')?.value || 'all';
+    const search = (document.getElementById('mf-search')?.value || '').toLowerCase().trim();
+    const tbody = document.getElementById('prod-tbody');
+    let filtered = products;
+    if (catId !== 'all') filtered = filtered.filter((p) => p.category_id === Number(catId));
+    if (filt === 'active') filtered = filtered.filter((p) => p.active && !p.unavailable);
+    else if (filt === 'inactive') filtered = filtered.filter((p) => !p.active);
+    else if (filt === 'unavailable') filtered = filtered.filter((p) => p.unavailable);
+    if (search) filtered = filtered.filter((p) => (p.name || '').toLowerCase().includes(search) || (p.description || '').toLowerCase().includes(search));
+    tbody.innerHTML = filtered.length ? filtered.map((p) => `
+      <tr class="prod-row">
+        <td>${imgTag(p.photo_url, p.name)}</td>
+        <td><b>${esc(p.name)}</b><br><span class="muted">${esc(p.description || '')}</span></td>
+        <td>${esc((cats.find((c) => c.id === p.category_id) || {}).name || '—')}</td>
+        <td>${(p.variants || []).map((v) => `${esc(v.size)} ${peso(v.price)}`).join(' • ') || '<span class="muted">none</span>'}</td>
+        <td>${p.unavailable ? '<span class="badge b-CANCELLED">Unavailable</span>' : (p.active ? '<span class="badge b-CONFIRMED">Available</span>' : '<span class="badge b-COMPLETED">Inactive</span>')}</td>
+        <td><div class="row-actions">
+          <button class="btn ghost sm" data-edit="${p.id}">Edit</button>
+          <button class="btn ghost sm" data-variants="${p.id}">Prices</button>
+          <button class="btn danger sm" data-deact="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="6" class="muted">No products match your filters.</td></tr>';
+  };
+
+  const renderCategories = () => {
+    const tbody = document.getElementById('cat-tbody');
+    tbody.innerHTML = cats.length ? cats.map((c) => `
+      <tr>
+        <td><b>${esc(c.name)}</b></td>
+        <td>${esc(String(c.sort_order ?? 0))}</td>
+        <td>${products.filter((p) => p.category_id === c.id).length}</td>
+        <td>${c.active ? '<span class="badge b-CONFIRMED">Active</span>' : '<span class="badge b-CANCELLED">Hidden</span>'}</td>
+        <td><div class="row-actions">
+          <button class="btn ghost sm" data-cat-edit="${c.id}">Rename</button>
+          <button class="btn danger sm" data-cat-toggle="${c.id}">${c.active ? 'Hide' : 'Show'}</button>
+          <button class="btn danger sm" data-cat-delete="${c.id}">Delete</button>
+        </div></td>
+      </tr>`).join('') : '<tr><td colspan="5" class="muted">No categories.</td></tr>';
+  };
+
   main.innerHTML = `
     <h2 class="page-title">Menu</h2>
-    <div class="card">
-      <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-        <button class="btn sm" id="prod-new">＋ Add Product</button>
-        <button class="btn ghost sm" id="cat-new">＋ Add Category</button>
+    <div class="tabs" id="menu-tabs">
+      <button class="tab-btn${activeTab === 'products' ? ' active' : ''}" data-mtab="products">🍽️ Products</button>
+      <button class="tab-btn${activeTab === 'categories' ? ' active' : ''}" data-mtab="categories">🗂️ Categories</button>
+    </div>
+    <div class="tab-pane${activeTab === 'products' ? ' active' : ''}" data-mpane="products">
+      <div class="card">
+        <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:flex-end">
+          <button class="btn sm" id="prod-new">＋ Add Product</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;align-items:flex-end">
+            <div class="field" style="margin-bottom:0"><label>Search</label><input id="mf-search" placeholder="Name or description…" style="width:180px"></div>
+            <div class="field" style="margin-bottom:0"><label>Category</label><select id="mf-category" style="width:140px"><option value="all">All Categories</option>${cats.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+            <div class="field" style="margin-bottom:0"><label>Status</label><select id="mf-filter" style="width:130px"><option value="all">All</option><option value="active">Available</option><option value="inactive">Inactive</option><option value="unavailable">Unavailable</option></select></div>
+          </div>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Photo</th><th>Product</th><th>Category</th><th>Variants (M/L)</th><th>Availability</th><th>Actions</th></tr></thead>
+          <tbody id="prod-tbody"></tbody>
+        </table></div>
       </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Photo</th><th>Product</th><th>Category</th><th>Variants (M/L)</th><th>Availability</th><th>Actions</th></tr></thead>
-        <tbody>
-        ${products.map((p) => `
-          <tr>
-            <td>${imgTag(p.photo_url, p.name)}</td>
-            <td><b>${esc(p.name)}</b><br><span class="muted">${esc(p.description || '')}</span></td>
-            <td>${esc((cats.find((c) => c.id === p.category_id) || {}).name || '—')}</td>
-            <td>${(p.variants || []).map((v) => `${esc(v.size)} ${peso(v.price)}`).join(' • ') || '<span class="muted">none</span>'}</td>
-            <td>${p.unavailable ? '<span class="badge b-CANCELLED">Unavailable</span>' : (p.active ? '<span class="badge b-CONFIRMED">Available</span>' : '<span class="badge b-COMPLETED">Inactive</span>')}</td>
-            <td><div class="row-actions">
-              <button class="btn ghost sm" data-edit="${p.id}">Edit</button>
-              <button class="btn ghost sm" data-variants="${p.id}">Prices</button>
-              <button class="btn danger sm" data-deact="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
-            </div></td>
-          </tr>`).join('') || '<tr><td colspan="6" class="muted">No products.</td></tr>'}
-        </tbody></table></div>
+    </div>
+    <div class="tab-pane${activeTab === 'categories' ? ' active' : ''}" data-mpane="categories">
+      <div class="card">
+        <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+          <button class="btn sm" id="cat-new">＋ Add Category</button>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Sort</th><th>Products</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="cat-tbody"></tbody>
+        </table></div>
+      </div>
     </div>`;
 
+  renderProducts();
+  renderCategories();
+
+  // ---- Tab switching ----
+  main.querySelectorAll('#menu-tabs .tab-btn').forEach((b) => b.addEventListener('click', () => {
+    sessionStorage.setItem('menuTab', b.dataset.mtab);
+    main.querySelectorAll('#menu-tabs .tab-btn').forEach((x) => x.classList.toggle('active', x === b));
+    main.querySelectorAll('[data-mpane]').forEach((p) => p.classList.toggle('active', p.dataset.mpane === b.dataset.mtab));
+  }));
+
+  // ---- Product filter events ----
+  ['mf-search', 'mf-category', 'mf-filter'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', renderProducts);
+    if (el) el.addEventListener('change', renderProducts);
+  });
+  // ---- Product modals & actions (event delegation for tabbed tables) ----
   const productForm = (p) => modal(`<h3>${p ? 'Edit' : 'New'} Product</h3>
     <div class="field"><label>Name</label><input id="pf-name" value="${esc(p?.name || '')}"></div>
     <div class="field"><label>Category</label><select id="pf-cat">${cats.map((c) => `<option value="${c.id}" ${p?.category_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
@@ -762,41 +831,87 @@ views.menu = async (main) => {
     } catch (err) { toast(err.message, true); }
   };
   main.querySelector('#prod-new').addEventListener('click', () => openProductForm(null));
-  main.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => openProductForm(products.find((x) => x.id == b.dataset.edit))));
-  main.querySelectorAll('[data-variants]').forEach((b) => b.addEventListener('click', () => {
-    const p = products.find((x) => x.id == b.dataset.variants);
-    const m = p.variants.find((v) => v.size === 'M'), l = p.variants.find((v) => v.size === 'L');
-    modal(`<h3>M/L Prices — ${esc(p.name)}</h3>
-      <div class="row2">
-        <div class="field"><label>M price (₱)</label><input type="number" id="vp-m" value="${m?.price ?? ''}"></div>
-        <div class="field"><label>L price (₱)</label><input type="number" id="vp-l" value="${l?.price ?? ''}"></div>
-      </div>
-      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" id="vp-save">Save</button></div>`);
-    document.getElementById('vp-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-      await api(`/products/${p.id}/variants`, {
-        method: 'PUT', body: {
-          variants: [
-            { size: 'M', price: Number(document.getElementById('vp-m').value) },
-            { size: 'L', price: Number(document.getElementById('vp-l').value) },
-          ]
-        }
+  main.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-edit]');
+    if (btn) openProductForm(products.find((x) => x.id == btn.dataset.edit));
+  });
+  main.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-variants]');
+    if (btn) {
+      const p = products.find((x) => x.id == btn.dataset.variants);
+      const m = p.variants.find((v) => v.size === 'M'), l = p.variants.find((v) => v.size === 'L');
+      modal(`<h3>M/L Prices — ${esc(p.name)}</h3>
+        <div class="row2">
+          <div class="field"><label>M price (₱)</label><input type="number" id="vp-m" value="${m?.price ?? ''}"></div>
+          <div class="field"><label>L price (₱)</label><input type="number" id="vp-l" value="${l?.price ?? ''}"></div>
+        </div>
+        <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" id="vp-save">Save</button></div>`);
+      document.getElementById('vp-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+        await api(`/products/${p.id}/variants`, {
+          method: 'PUT', body: {
+            variants: [
+              { size: 'M', price: Number(document.getElementById('vp-m').value) },
+              { size: 'L', price: Number(document.getElementById('vp-l').value) },
+            ]
+          }
+        });
+        closeModal(); toast('Prices updated'); navigate('menu');
+      }));
+    }
+  });
+  main.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-deact]');
+    if (btn) {
+      const p = products.find((x) => x.id == btn.dataset.deact);
+      withBtn(btn, async () => {
+        await api(`/products/${p.id}`, { method: 'PUT', body: { active: p.active ? 0 : 1 } });
+        toast(p.active ? 'Product disabled' : 'Product enabled'); navigate('menu');
       });
-      closeModal(); toast('Prices updated'); navigate('menu');
-    }));
-  }));
-  main.querySelectorAll('[data-deact]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-    const p = products.find((x) => x.id == b.dataset.deact);
-    await api(`/products/${p.id}`, { method: 'PUT', body: { active: p.active ? 0 : 1 } });
-    toast(p.active ? 'Product disabled' : 'Product enabled'); navigate('menu');
-  })));
-  main.querySelector('#cat-new').addEventListener('click', () => {
-    modal(`<h3>New Category</h3><div class="field"><label>Name</label><input id="cn-name"></div>
-      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="cn-save">Add</button></div>`);
+    }
+  });
+
+  // ---- Category modals & actions ----
+  const openCategoryForm = (c) => {
+    modal(`<h3>${c ? 'Edit Category' : 'New Category'}</h3>
+      <div class="field"><label>Name</label><input id="cn-name" value="${esc(c?.name || '')}"></div>
+      <div class="field"><label>Sort Order</label><input type="number" id="cn-sort" value="${c?.sort_order ?? 0}"></div>
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="cn-save">Save</button></div>`);
     document.getElementById('cn-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-      await api('/categories', { method: 'POST', body: { name: document.getElementById('cn-name').value } });
-      closeModal(); toast('Category added'); navigate('menu');
+      const name = document.getElementById('cn-name').value.trim();
+      if (!name) { toast('Category name is required.', true); return; }
+      const sort_order = Number(document.getElementById('cn-sort').value) || 0;
+      if (c) await api(`/categories/${c.id}`, { method: 'PUT', body: { name, sort_order } });
+      else await api('/categories', { method: 'POST', body: { name, sort_order } });
+      closeModal(); toast(c ? 'Category updated' : 'Category added'); navigate('menu');
     }));
+  };
+  main.querySelector('#cat-new').addEventListener('click', () => openCategoryForm(null));
+  main.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cat-edit]');
+    if (btn) openCategoryForm(cats.find((x) => x.id == btn.dataset.catEdit));
+  });
+  main.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cat-toggle]');
+    if (btn) {
+      const c = cats.find((x) => x.id == btn.dataset.catToggle);
+      withBtn(btn, async () => {
+        await api(`/categories/${c.id}`, { method: 'PUT', body: { active: c.active ? 0 : 1 } });
+        toast(c.active ? 'Category hidden from customers' : 'Category shown'); navigate('menu');
+      });
+    }
+  });
+  main.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cat-delete]');
+    if (btn) {
+      const c = cats.find((x) => x.id == btn.dataset.catDelete);
+      const prodCount = products.filter((p) => p.category_id === c.id).length;
+      if (!confirm(`Delete category "${c.name}"? ${prodCount > 0 ? `Warning: ${prodCount} product(s) in this category will become uncategorized.` : ''}`)) return;
+      withBtn(btn, async () => {
+        await api(`/categories/${c.id}`, { method: 'DELETE' });
+        toast('Category deleted'); navigate('menu');
+      });
+    }
   });
 };
 

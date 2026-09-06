@@ -86,10 +86,11 @@ r.post('/categories', async (req, res) => {
   res.json({ id });
 });
 r.put('/categories/:id', async (req, res) => {
-  const { name, active } = req.body;
+  const { name, active, sort_order } = req.body;
   const upd: Record<string, any> = {};
   if (name != null) upd.name = name;
   if (active != null) upd.active = active;
+  if (sort_order != null) upd.sort_order = sort_order;
   if (Object.keys(upd).length > 0) await supa().from('categories').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });

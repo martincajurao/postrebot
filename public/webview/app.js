@@ -115,6 +115,31 @@ function showToast(msg) {
   showToast._t = setTimeout(() => t.classList.add('hidden'), 2500);
 }
 
+// ---------- Image lightbox ----------
+// Tap a thumbnail → fullscreen overlay with the full-size photo.
+// Tapping anywhere on the overlay (or the ✕) closes it.
+function openImageLightbox(event, url, name) {
+  if (event && event.stopPropagation) event.stopPropagation();
+  let lb = document.getElementById('img-lightbox');
+  if (!lb) {
+    lb = document.createElement('div');
+    lb.id = 'img-lightbox';
+    lb.className = 'img-lightbox';
+    lb.addEventListener('click', closeImageLightbox);
+    document.body.appendChild(lb);
+  }
+  lb.innerHTML = `<img class="img-lightbox-img" src="${esc(absUrl(url))}" alt="${esc(name || '')}">`;
+  lb.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeImageLightbox() {
+  const lb = document.getElementById('img-lightbox');
+  if (!lb) return;
+  lb.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
 // #loading-view has an inline display:flex that beats the .view{display:none} rule,
 // so toggling the 'active' class alone never hides the spinner. Set the inline
 // display explicitly instead.
@@ -418,25 +443,25 @@ function localAddItem(kind, id, quantity, size, slotChoices) {
   return item;
 }
 
-/** Recompute display totals: subtotal = sum of menu items (gross),
- *  discount = sum of package discounts, total = subtotal − discount. */
+/** Recompute display totals: every line is priced NET (package discount already
+ *  applied and shown dashed on the item itself), so subtotal = total directly. */
 function recalcCartTotals() {
   let subtotal = 0;
   let discount = 0;
   const breakdown = [];
   for (const it of cart.items) {
-    const unit = cartItemUnitPrice(it);
+    const unit = cartItemNetUnitPrice(it);
     if (unit === null || unit === undefined) continue;
     const line = unit * it.quantity;
     subtotal += line;
     breakdown.push({ label: (it.name || 'Item') + ' x' + it.quantity, amount: line });
     if (it.package_id) {
-      const pkg = packages.find((p) => Number(p.id) === Number(it.package_id));
-      if (pkg && Number(pkg.discount) > 0) discount += Math.min(Number(pkg.discount), Math.max(0, unit)) * it.quantity;
+      const gross = cartItemGrossUnitPrice(it);
+      if (gross !== null && gross > unit + 0.001) discount += (gross - unit) * it.quantity;
     }
   }
-  // Formula: sum(menu items) − sum(discounts) = total
-  cart.totals = { subtotal, delivery: 0, discount, total: subtotal - discount, breakdown };
+  // Lines are already discounted — no separate deduction applied to the total.
+  cart.totals = { subtotal, delivery: 0, discount, total: subtotal, breakdown };
 }
 
 function clearLocalCart() {
@@ -623,18 +648,21 @@ function showProducts(categoryId) {
     const unavailable = Number(p.unavailable) === 1;
     const vs = productVariants(p);
     const selSize = cardSizes['product-' + p.id] || (vs[0] ? vs[0].size : null);
+    // Sizes inline in the price row to save vertical space on the card.
     const sizePills = vs.length > 1
-      ? `<div class="card-sizes">${vs.map((v) =>
+      ? vs.map((v) =>
           `<button class="size-pill${v.size === selSize ? ' selected' : ''}" onclick="selectCardSize(event, 'product', ${p.id}, '${esc(v.size)}')">${esc(v.size)}</button>`
-        ).join('')}</div>`
+        ).join('')
       : '';
     return `<div class="product-card${unavailable ? ' unavailable' : ''}" ${unavailable ? '' : `onclick="showProductDetail(${p.id})"`}>
       ${imageHtml(p.photo_url, p.name)}
       <div class="info">
         <div class="name">${esc(p.name)}</div>
         ${p.description ? `<div class="desc">${esc(p.description)}</div>` : ''}
-        <div class="price card-price">${productCardPrice(p, selSize)}</div>
-        ${sizePills}
+        <div class="price-row">
+          <span class="price card-price">${productCardPrice(p, selSize)}</span>
+          ${sizePills ? `<span class="card-sizes card-sizes-inline">${sizePills}</span>` : ''}
+        </div>
         ${unavailable ? '' : `<div class="card-actions"><button class="card-add-btn" onclick="addToCartProductQuick(${p.id}, event)">+ Add to Cart</button></div>`}
         ${unavailable ? '<span class="badge-flag">Unavailable</span>' : ''}
       </div>
@@ -1005,8 +1033,11 @@ function renderPackageDetail() {
           ${options.map((opt) => {
             const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
             const upgrade = Number(opt.upgrade_price) || 0;
+            const thumb = opt.photo_url
+              ? `<img class="opt-thumb" src="${esc(absUrl(opt.photo_url))}" alt="" title="View photo" loading="lazy" onclick="openImageLightbox(event, '${esc(absUrl(opt.photo_url))}', '${esc(opt.name)}')" onerror="this.remove()">`
+              : '';
             return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id})">
-              ${esc(opt.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
+              ${thumb}${esc(opt.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
             </span>`;
           }).join('')}
         </div>
@@ -1285,6 +1316,47 @@ function cartItemUnitPrice(item) {
   return null;
 }
 
+/** Net (discounted) unit price for a cart line — what the customer actually pays. */
+function cartItemNetUnitPrice(item) {
+  return cartItemUnitPrice(item);
+}
+
+/** Gross (pre-discount) unit price for a cart line — used for the struck-through "was" price. */
+function cartItemGrossUnitPrice(item) {
+  if (item.package_id) {
+    const pkg = packages.find((p) => Number(p.id) === Number(item.package_id));
+    if (!pkg || !(Number(pkg.discount) > 0)) return null;
+    const choices = {};
+    const slotSizes = {};
+    (item.slot_choices || []).forEach((c) => {
+      choices[Number(c.slot_number)] = Number(c.product_id);
+      if (c.size) slotSizes[Number(c.slot_number)] = c.size;
+    });
+    const priced = pricePackageChoices(pkg, choices, item.variant_size, slotSizes);
+    const discount = (priced.lines || [])
+      .filter((l) => Number(l.amount) < 0)
+      .reduce((s, l) => s + Math.abs(Number(l.amount)), 0);
+    return discount > 0 ? priced.total + discount : null;
+  }
+  return null;
+}
+
+/** Net (post-discount) unit price for a cart line — what the line actually costs. */
+function cartItemNetUnitPrice(item) {
+  if (item.package_id) {
+    const pkg = packages.find((p) => Number(p.id) === Number(item.package_id));
+    if (!pkg) return null;
+    const choices = {};
+    const slotSizes = {};
+    (item.slot_choices || []).forEach((c) => {
+      choices[Number(c.slot_number)] = Number(c.product_id);
+      if (c.size) slotSizes[Number(c.slot_number)] = c.size;
+    });
+    return pricePackageChoices(pkg, choices, item.variant_size, slotSizes).total;
+  }
+  return cartItemUnitPrice(item);
+}
+
 /** Composition text for package cart items, e.g. "Chicken (L), Pancit Bam-i". */
 function slotChoiceText(item) {
   if (!Array.isArray(item.slot_choices) || item.slot_choices.length === 0) return '';
@@ -1304,22 +1376,31 @@ function showCart() {
     container.innerHTML = '<div class="empty-state"><div class="icon">🛒</div><p>Your cart is empty</p></div>';
   } else {
     container.innerHTML = cart.items.map((item) => {
-      const unit = cartItemUnitPrice(item);
-      const line = unit !== null && unit !== undefined ? unit * item.quantity : null;
+      const netUnit = cartItemNetUnitPrice(item);
+      const grossUnit = cartItemGrossUnitPrice(item);
+      const line = netUnit !== null && netUnit !== undefined ? netUnit * item.quantity : null;
       const composition = slotChoiceText(item);
+      // Show the ALREADY-DISCOUNTED price; the pre-discount price is dashed next to it.
+      const perLine = netUnit !== null && netUnit !== undefined
+        ? `<span class="price-line-unit">${formatMoney(netUnit)} × ${item.quantity}</span>`
+        : `<span class="price-line-cart">Qty: ${item.quantity}</span>`;
+      const wasHtml = (grossUnit !== null && netUnit !== null && grossUnit > netUnit + 0.001)
+        ? `<span class="price-was">${formatMoney(grossUnit)}</span>`
+        : '';
+      const lineTotal = line !== null
+        ? `<span class="price-line-total">${formatMoney(line)}</span>`
+        : '';
       return `<div class="cart-item">
         <div class="item-info">
-          <div class="item-name">${esc(item.name)}</div>
+          <div class="item-name">${esc(item.name)}${wasHtml}</div>
           ${composition ? `<div class="item-meta">${esc(composition)}</div>` : ''}
-          ${unit !== null && unit !== undefined
-            ? `<div class="item-price">${formatMoney(unit)} × ${item.quantity}${line !== null ? ` = <strong>${formatMoney(line)}</strong>` : ''}</div>`
-            : `<div class="item-price">Qty: ${item.quantity}</div>`}
+          <div class="price-line-row">${perLine}${lineTotal}</div>
         </div>
         <div class="qty-controls">
-          <button onclick="updateCartItem(${item.id}, ${item.quantity - 1})">−</button>
-          <button onclick="updateCartItem(${item.id}, ${item.quantity + 1})">+</button>
+          <button onclick="updateCartItem(${item.id}, ${item.quantity - 1})" aria-label="Decrease quantity">−</button>
+          <button onclick="updateCartItem(${item.id}, ${item.quantity + 1})" aria-label="Increase quantity">+</button>
         </div>
-        <button class="remove-btn" onclick="removeCartItem(${item.id})">🗑️</button>
+        <button class="remove-btn" onclick="removeCartItem(${item.id})" aria-label="Remove item">🗑️</button>
       </div>`;
     }).join('');
   }
@@ -1332,9 +1413,9 @@ function showCart() {
     const neg = Number(b.amount) < 0;
     lines += `<div class="total-row line-item"><span>${esc(b.label)}</span><span>${neg ? '−' : ''}${formatMoney(Math.abs(b.amount))}</span></div>`;
   }
-  lines += `<div class="total-row"><span>Subtotal</span><span>${formatMoney(t.subtotal)}</span></div>`;
-  if (Number(t.discount) > 0) lines += `<div class="total-row discount"><span>Savings</span><span>−${formatMoney(t.discount)}</span></div>`;
-  lines += `<div class="total-row"><span>Delivery</span><span>${formatMoney(t.delivery)}</span></div>`;
+  lines += `<div class="total-row"><span>Subtotal${cart.items.length > 0 ? ` (${cart.items.reduce((s, i) => s + i.quantity, 0)} item${cart.items.reduce((s, i) => s + i.quantity, 0) === 1 ? '' : 's'})` : ''}</span><span>${formatMoney(t.subtotal)}</span></div>`;
+  if (Number(t.discount) > 0) lines += `<div class="total-row discount"><span>Package Savings (already applied)</span><span>−${formatMoney(t.discount)}</span></div>`;
+  lines += `<div class="total-row"><span>Delivery</span><span>${Number(t.delivery) > 0 ? formatMoney(t.delivery) : 'FREE'}</span></div>`;
   lines += `<div class="total-row grand"><span>Total</span><span class="value">${formatMoney(t.total)}</span></div>`;
   totals.innerHTML = lines;
 
@@ -1820,6 +1901,14 @@ async function init() {
   if (failed.length > 0) {
     console.warn('[webview] ' + failed.length + ' loader(s) failed:', failed.map((f) => f.reason && f.reason.message));
   }
+
+  // loadCart() runs in parallel with the catalog loaders, so its initial
+  // recalcCartTotals() sees an empty catalog and stores 0 totals for every
+  // line. Now that products/packages/food packs are loaded, re-price the
+  // restored cart and persist the corrected totals.
+  recalcCartTotals();
+  storageSet(LOCAL_CART_KEY(), JSON.stringify(cart));
+  updateCartBadge();
   console.log('[webview] init complete →', {
     categories: categories.length,
     products: products.length,
