@@ -54,6 +54,11 @@ app.use('/webview', express.static(path.join(__dirname, 'public', 'webview'), {
   },
 }));
 
+// The admin panel can also be opened INSIDE Messenger's webview (secret chat
+// trigger → "Open Admin Panel" button). Desktop Messenger renders webviews in
+// an iframe, so /admin needs the same frame permissions as /webview. This also
+// restricts framing to same-origin + Meta domains only.
+app.use('/admin', allowMessengerFraming);
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));

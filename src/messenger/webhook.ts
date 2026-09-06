@@ -13,6 +13,7 @@ import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, ge
 import { sendPushToAdmins } from '../services/push';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
+import { signWebviewPsid } from '../api/auth';
 
 const r = Router();
 
@@ -73,6 +74,26 @@ let requestBaseUrl = '';
 function webviewUrl(): string {
   const base = ENV_BASE_URL || requestBaseUrl;
   return base ? base.replace(/\/+$/, '') + '/webview' : '';
+}
+
+/** Public URL for the admin panel (BASE_URL or request origin + /admin) */
+function adminPanelUrl(): string {
+  const base = ENV_BASE_URL || requestBaseUrl;
+  return base ? base.replace(/\/+$/, '') + '/admin' : '';
+}
+
+/**
+ * Secret chat keyword that unlocks the admin panel webview (default: "admin2020").
+ * Override it any time via the ADMIN_TRIGGER_KEY env var.
+ * Matching is forgiving — case-insensitive and spaces/punctuation are ignored,
+ * so "Admin 2020!" matches too. The panel itself still requires the admin
+ * username + password login, so knowing the key alone grants nothing.
+ */
+const ADMIN_TRIGGER_KEY = (process.env.ADMIN_TRIGGER_KEY || 'admin2020').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function isAdminTrigger(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return t.length > 0 && t === ADMIN_TRIGGER_KEY;
 }
 
 /** Capture the public origin from each webhook request (call before handling). */
@@ -739,6 +760,29 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       }
       return sendText(psid, '🌐 Web ordering is coming soon! For now, please use the menu below to order.');
     }
+    case 'ADMIN_PANEL': {
+      const url = adminPanelUrl();
+      if (url) {
+        // Bot-signed psid lets the webview auto-login from the remembered
+        // session: log in once, then this opens straight into the dashboard.
+        const signed = signWebviewPsid(psid);
+        const link = `${url}?psid=${encodeURIComponent(signed.psid)}&ts=${signed.ts}&sig=${signed.sig}`;
+        console.log(`[webhook] ADMIN_PANEL payload received from psid=${psid} — url=${link}`);
+        const result = await sendUrlButton(
+          psid,
+          '🔐 Admin access unlocked.\n\nTap the button below to open the admin panel inside Messenger.\nFirst time only: log in with your admin username and password — after that you go straight in.',
+          '🔐 Open Admin Panel',
+          link,
+        );
+        console.log(`[webhook] ADMIN_PANEL sendUrlButton result: ok=${result.ok}, status=${result.status}`);
+        if (!result.ok) {
+          console.error(`[webhook] ADMIN_PANEL send FAILED for psid=${psid}: ${result.body}`);
+          await safeSend(sendText(psid, '⚠️ Unable to open the admin panel right now. Please try again later.'));
+        }
+        return result;
+      }
+      return sendText(psid, '⚠️ The admin panel is not reachable yet (no public HTTPS URL configured).');
+    }
     case 'MENU_ORDER':
       return showCategories(psid);
     case 'MENU_PACKAGES':
@@ -1009,6 +1053,12 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
 }
 
 async function handleText(psid: string, text: string) {
+  // 🔐 Secret admin trigger — checked BEFORE any bot state so it works in ANY
+  // state (even mid-checkout): typing the key opens the admin panel webview.
+  if (isAdminTrigger(text)) {
+    console.log(`[webhook] admin trigger received from psid=${psid} — opening admin panel webview`);
+    return handlePayload(psid, 'ADMIN_PANEL');
+  }
   const st = await getState(psid);
   const state = st.state;
   const ctx = st.ctx || {};

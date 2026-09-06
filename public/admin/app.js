@@ -6,6 +6,13 @@ let ME_ID = Number(localStorage.getItem('me_id')) || 0;
 let ROLE = localStorage.getItem('role') || 'ADMIN';
 let currentView = 'dashboard';
 
+// Messenger webview params (psid/ts/sig, bot-signed) — enable "log in once, remembered"
+const WV = (() => {
+  const q = new URLSearchParams(location.search);
+  const psid = q.get('psid'), ts = q.get('ts'), sig = q.get('sig');
+  return psid && ts && sig ? { psid, ts, sig } : null;
+})();
+
 // ---------- helpers ----------
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
@@ -13,7 +20,7 @@ async function api(path, opts = {}) {
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN, ...(opts.headers || {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (res.status === 401) { logout(); throw new Error('Session expired'); }
+  if (res.status === 401) { recoverSession().catch(() => {}); throw new Error('Session expired'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -66,6 +73,40 @@ function logout() {
   document.getElementById('login-view').style.display = 'flex';
 }
 
+// ---- Messenger webview "remembered login" ----
+// Log in once; the server remembers this Messenger account (psid) for 30 days
+// (sliding), and every later "admin2020" opens straight into the dashboard.
+function webviewSigQS() {
+  return WV ? `psid=${encodeURIComponent(WV.psid)}&ts=${encodeURIComponent(WV.ts)}&sig=${encodeURIComponent(WV.sig)}` : '';
+}
+
+async function tryRememberedLogin() {
+  if (!WV) return false;
+  try {
+    const res = await fetch(API + '/remembered?' + webviewSigQS());
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    if (!data.token) return false;
+    TOKEN = data.token; ME = data.username || ''; ME_ID = Number(data.id) || 0; ROLE = data.role || 'ADMIN';
+    localStorage.setItem('token', TOKEN); localStorage.setItem('me', ME);
+    localStorage.setItem('me_id', String(ME_ID)); localStorage.setItem('role', ROLE);
+    console.log('[admin] webview remembered login ok');
+    return true;
+  } catch { return false; }
+}
+
+/** 401 recovery: inside the Messenger webview, silently re-login from the
+ *  remembered session before falling back to the login page. */
+async function recoverSession() {
+  TOKEN = '';
+  if (await tryRememberedLogin()) {
+    showApp();
+    navigate(currentView);
+    return;
+  }
+  logout();
+}
+
 function showApp() {
   document.getElementById('login-view').style.display = 'none';
   document.getElementById('app').style.display = 'block';
@@ -78,7 +119,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   try {
     const res = await fetch('/api/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: document.getElementById('login-user').value, password: document.getElementById('login-pass').value }),
+      body: JSON.stringify({ username: document.getElementById('login-user').value, password: document.getElementById('login-pass').value, ...(WV ? { psid: WV.psid, ts: WV.ts, sig: WV.sig } : {}) }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Login failed');
@@ -90,7 +131,11 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     showApp();
   } catch (err) { document.getElementById('login-err').textContent = err.message; }
 });
-document.getElementById('logout-btn').addEventListener('click', logout);
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  // In the webview, also drop the server-side remembered session for this psid.
+  if (WV) { try { await fetch(API + '/remembered/forget?' + webviewSigQS(), { method: 'POST' }); } catch { /* best effort */ } }
+  logout();
+});
 
 // ---------- navigation (single source of truth) ----------
 const NAV = [
@@ -254,7 +299,7 @@ async function uploadImage(file) {
   const fd = new FormData();
   fd.append('image', file);
   const res = await fetch(API + '/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: fd });
-  if (res.status === 401) { logout(); throw new Error('Session expired'); }
+  if (res.status === 401) { recoverSession().catch(() => {}); throw new Error('Session expired'); }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Upload failed');
   return data.url;
@@ -1456,4 +1501,9 @@ views.images = async (main) => {
 
 /* ================= APP BOOT =================
  * Runs last so every view above is registered before the first navigate(). */
-if (TOKEN) showApp();
+(async () => {
+  if (TOKEN) { showApp(); return; }
+  // Messenger webview: log in once — later "admin2020" opens auto-login via
+  // the remembered session; otherwise the login page shows (default state).
+  if (await tryRememberedLogin()) showApp();
+})();

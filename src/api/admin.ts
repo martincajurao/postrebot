@@ -1,7 +1,7 @@
 ﻿import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { supa } from '../db/supabase';
-import { authMiddleware, requireRole } from './auth';
+import { authMiddleware, requireRole, verifyWebviewPsid, rememberAdminForPsid, getRememberedAdmin, forgetRememberedAdmin, issueAdminToken } from './auth';
 import { updateOrderStatus, updatePaymentStatus } from '../services/orders';
 import { getVapidPublicKey, storeSubscription, removeSubscription, sendPushToAdmins, getPushStatus } from '../services/push';
 import {
@@ -12,6 +12,44 @@ import { computeCartTotals } from '../services/pricing';
 import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
 const r = Router();
+
+// ---- Messenger webview "remembered login" (public — HMAC-signed psid guard) ----
+// The bot opens /admin with psid+ts+sig signed with JWT_SECRET. An admin who
+// logged in once from the webview stays remembered for 30 days (sliding), so
+// the next "admin2020" opens straight into the dashboard with no login prompt.
+r.get('/remembered', async (req, res) => {
+  try {
+    const { psid, ts, sig } = req.query as Record<string, string>;
+    if (!psid || !ts || !sig || !verifyWebviewPsid(String(psid), String(ts), String(sig))) {
+      return res.status(401).json({ error: 'Invalid or expired webview signature' });
+    }
+    const remembered = await getRememberedAdmin(String(psid));
+    if (!remembered) return res.status(404).json({ error: 'No remembered session — please log in once' });
+    const token = issueAdminToken({ id: remembered.admin_id, username: remembered.username, role: remembered.role });
+    await rememberAdminForPsid(String(psid), remembered); // slide the 30-day window
+    console.log(`[admin] webview remembered login: psid=${psid} user=${remembered.username}`);
+    return res.json({ token, id: remembered.admin_id, username: remembered.username, role: remembered.role });
+  } catch (e: any) {
+    console.error('[admin] /remembered error:', e?.message || e);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+r.post('/remembered/forget', async (req, res) => {
+  try {
+    const { psid, ts, sig } = req.query as Record<string, string>;
+    if (!psid || !ts || !sig || !verifyWebviewPsid(String(psid), String(ts), String(sig))) {
+      return res.status(401).json({ error: 'Invalid or expired webview signature' });
+    }
+    await forgetRememberedAdmin(String(psid));
+    console.log(`[admin] webview remembered session forgotten: psid=${psid}`);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    console.error('[admin] /remembered/forget error:', e?.message || e);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 r.use(authMiddleware);
 
 // ---- Dashboard ----
