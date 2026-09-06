@@ -378,7 +378,10 @@ r.post('/orders/:id/confirm', async (req, res) => {
   const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   if (order.status !== 'PENDING') return res.status(400).json({ error: 'Only pending orders can be confirmed' });
-  const newTotal = Math.max(0,(Number(order.subtotal) ||  0) - (Number(order.additional_discount) ||  0) + fee);
+  // The stored total already has the package discounts deducted at order time
+  // (total = subtotal − discount). Confirming just adds the admin-set delivery
+  // fee and re-applies any additional deduction.
+  const newTotal = Math.max(0, (Number(order.total) || 0) + fee - (Number(order.additional_discount) || 0));
   await supa().from('orders').update({ status: 'CONFIRMED', delivery_fee: fee, total: newTotal }).eq('id', order.id);
   await supa().from('order_status_history').insert({ order_id: order.id, status: 'CONFIRMED' });
   if (order.customer_id) {

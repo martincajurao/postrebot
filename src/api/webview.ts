@@ -441,8 +441,11 @@ r.get('/orders/:id', async (req, res) => {
     if (!orderId) return res.status(400).json({ error: 'Invalid order ID' });
     const order = await getOrderById(orderId);
     if (!order) return res.status(404).json({ error: 'Not found' });
+    // Derived savings: everything deducted between the menu prices (subtotal)
+    // and the charged total — package discounts + any admin deduction.
+    const derivedDiscount = Math.max(0, (Number(order.subtotal) || 0) - (Number(order.total) || 0) + (Number(order.delivery_fee) || 0));
     const items = await getOrderItems(orderId);
-    res.json({ ...order, items });
+    res.json({ ...order, discount: derivedDiscount, items });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

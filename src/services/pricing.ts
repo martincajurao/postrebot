@@ -169,7 +169,9 @@ export async function priceFoodPack(foodPackId: number): Promise<{ price: number
 }
 
 /** Compute total for a cart: items = [{product_id?, package_id?, food_pack_id?, variant_size?, quantity, slot_choices?}]
- *  Cart total = sum of item lines − package discounts (discount applies per discounted package unit). */
+ *  Formula: subtotal = sum of menu-item prices (before discounts) · discount = sum of discounts ·
+ *  total = subtotal − discount + delivery. The package discount is capped per package unit,
+ *  never dropping a line below zero. */
 export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<{ subtotal: number; delivery: number; discount: number; total: number; breakdown: any[] }> {
   const breakdown: any[] = [];
   let subtotal = 0;
@@ -182,12 +184,18 @@ export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<
         subtotal += price * item.quantity;
       } else if (item.package_id) {
         const { total, breakdown: bd } = await pricePackage(item.package_id, item.slot_choices, item.variant_size);
-        // Scale the per-unit breakdown to the quantity so lines sum to the subtotal
+        // pricePackage returns the NET per-unit amount (base + upgrades − discount)
+        // plus a negative discount line. Rebuild the GROSS item price so the cart
+        // reads: sum(menu items) − sum(discounts) = total.
+        const perUnitDiscount = bd.filter((l: any) => l.amount < 0).reduce((s: number, l: any) => s + (-l.amount), 0);
+        const grossPerUnit = total + perUnitDiscount;
+        // Scale the per-unit breakdown to the quantity (positive lines are gross
+        // components, the negative line is the discount — they sum to the net amount).
         for (const line of bd) {
           breakdown.push({ ...line, amount: line.amount * item.quantity });
-          if (line.amount < 0) discount += -line.amount * item.quantity;
         }
-        subtotal += total * item.quantity;
+        subtotal += grossPerUnit * item.quantity;
+        discount += perUnitDiscount * item.quantity;
       } else if (item.product_id) {
         const price = await priceProduct(item.product_id, item.variant_size);
         const { data: prod } = await supa().from('products').select('name').eq('id', item.product_id).maybeSingle();
@@ -198,7 +206,7 @@ export async function computeCartTotals(items: any[], deliveryFee = 0): Promise<
       console.warn(`[computeCartTotals] Could not price item #${item.id}:`, err?.message || err);
     }
   }
-  // subtotal already has discounts baked in (package lines are net); total = items − discount + delivery
-  const total = subtotal + deliveryFee;
+  // total = sum(menu items) − sum(discounts) + delivery
+  const total = Math.max(0, subtotal - discount) + deliveryFee;
   return { subtotal, delivery: deliveryFee, discount, total, breakdown };
 }

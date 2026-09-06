@@ -418,7 +418,8 @@ function localAddItem(kind, id, quantity, size, slotChoices) {
   return item;
 }
 
-/** Recompute display totals from the loaded catalog. */
+/** Recompute display totals: subtotal = sum of menu items (gross),
+ *  discount = sum of package discounts, total = subtotal − discount. */
 function recalcCartTotals() {
   let subtotal = 0;
   let discount = 0;
@@ -434,7 +435,7 @@ function recalcCartTotals() {
       if (pkg && Number(pkg.discount) > 0) discount += Math.min(Number(pkg.discount), Math.max(0, unit)) * it.quantity;
     }
   }
-  // Fix: total = subtotal - discount
+  // Formula: sum(menu items) − sum(discounts) = total
   cart.totals = { subtotal, delivery: 0, discount, total: subtotal - discount, breakdown };
 }
 
@@ -1252,7 +1253,15 @@ function cartItemUnitPrice(item) {
       choices[Number(c.slot_number)] = Number(c.product_id);
       if (c.size) slotSizes[Number(c.slot_number)] = c.size;
     });
-    return pricePackageChoices(pkg, choices, item.variant_size, slotSizes).total;
+    // GROSS (pre-discount) unit price: the cart lists every menu item at its
+    // full price and shows the package discount as a separate deduction
+    // (subtotal − discount = total). pricePackageChoices returns the net total
+    // plus a negative "Package discount" line — add the discount back.
+    const priced = pricePackageChoices(pkg, choices, item.variant_size, slotSizes);
+    const pkgDiscount = (priced.lines || [])
+      .filter((l) => Number(l.amount) < 0)
+      .reduce((s, l) => s + Math.abs(Number(l.amount)), 0);
+    return priced.total + pkgDiscount;
   }
   if (item.product_id) {
     const p = products.find((x) => Number(x.id) === Number(item.product_id));
@@ -1310,8 +1319,8 @@ function showCart() {
     const neg = Number(b.amount) < 0;
     lines += `<div class="total-row line-item"><span>${esc(b.label)}</span><span>${neg ? '−' : ''}${formatMoney(Math.abs(b.amount))}</span></div>`;
   }
-  if (Number(t.discount) > 0) lines += `<div class="total-row discount"><span>Savings</span><span>−${formatMoney(t.discount)}</span></div>`;
   lines += `<div class="total-row"><span>Subtotal</span><span>${formatMoney(t.subtotal)}</span></div>`;
+  if (Number(t.discount) > 0) lines += `<div class="total-row discount"><span>Savings</span><span>−${formatMoney(t.discount)}</span></div>`;
   lines += `<div class="total-row"><span>Delivery</span><span>${formatMoney(t.delivery)}</span></div>`;
   lines += `<div class="total-row grand"><span>Total</span><span class="value">${formatMoney(t.total)}</span></div>`;
   totals.innerHTML = lines;

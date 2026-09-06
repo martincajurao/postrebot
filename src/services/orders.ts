@@ -47,6 +47,9 @@ async function resolveClientCartItems(rawItems: any[]): Promise<any[]> {
       const itemDiscount = breakdown
         .filter((b: any) => b.amount < 0)
         .reduce((s: number, b: any) => s + -b.amount, 0) * quantity;
+      // line_total is the GROSS menu price (before the package discount) so the
+      // stored order always reads: subtotal − discount + delivery_fee = total.
+      const grossLine = total * quantity + itemDiscount;
       out.push({
         product_id: null,
         package_id: packageId,
@@ -55,8 +58,8 @@ async function resolveClientCartItems(rawItems: any[]): Promise<any[]> {
         quantity,
         slot_choices: slotChoices,
         name: `${pkg?.name || 'Package'} (package)`,
-        unit_price: Math.round(total / quantity),
-        line_total: total * quantity,
+        unit_price: Math.round(grossLine / quantity),
+        line_total: grossLine,
         discount: itemDiscount,
       });
     } else {
@@ -78,12 +81,14 @@ async function resolveClientCartItems(rawItems: any[]): Promise<any[]> {
   return out;
 }
 
-/** Totals for a client-resolved cart (already priced per line). */
+/** Totals for a client-resolved cart (already priced per line).
+ *  Formula: subtotal = sum of menu-item lines (gross) · discount = sum of discounts ·
+ *  total = subtotal − discount. */
 function totalsFromResolvedItems(items: any[]) {
   const subtotal = items.reduce((s, it) => s + (Number(it.line_total) || 0), 0);
   const discount = items.reduce((s, it) => s + (Number(it.discount) || 0), 0);
   const breakdown = items.map((it) => ({ label: `${it.name} x${it.quantity}`, amount: it.line_total }));
-  return { subtotal, delivery: 0, discount, total: subtotal, breakdown };
+  return { subtotal, delivery: 0, discount, total: Math.max(0, subtotal - discount), breakdown };
 }
 
 export async function nextOrderNumber(): Promise<string> {
@@ -198,7 +203,9 @@ export async function createOrderFromCart(
   }
 
   await clearCart(psid);
-  return { orderId, orderNumber, total: totals.total };
+  // discount = package deductions at order time (subtotal − total), exposed so
+  // confirmations and admin flows can show: subtotal − discount + fee = total.
+  return { orderId, orderNumber, total: totals.total, subtotal: totals.subtotal, discount: totals.discount };
 }
 
 export async function updateOrderStatus(orderId: number, status: string): Promise<void> {

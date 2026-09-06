@@ -1219,7 +1219,169 @@ views.delivery = async (main) => {
   }));
 };
 
+/* ================= PUSH NOTIFICATIONS & SOUND ================= */
+// Backed by /api/admin/push/* + /admin/sw.js. The service worker shows the OS
+// notification and forwards the payload to this page (postMessage 'push-order'),
+// where the chime plays and the order is read aloud (while the page is open).
+const PUSH_SOUND_KEY = 'push_sound';   // '0' = off, missing/'1' = on (default on)
+const PUSH_VOICE_KEY = 'push_voice';   // '0' = off, missing/'1' = on (default on)
+let pushReg = null;
+let audioCtx = null;
+
+function pushSoundOn() { return localStorage.getItem(PUSH_SOUND_KEY) !== '0'; }
+function pushVoiceOn() { return localStorage.getItem(PUSH_VOICE_KEY) !== '0'; }
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+/** Two-tone chime (WebAudio). Requires a prior user gesture to unlock audio. */
+function playChime() {
+  if (!pushSoundOn()) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t0 = audioCtx.currentTime;
+    [[880, 0], [1174.7, 0.18]].forEach(([freq, at]) => {   // A5 → D6
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t0 + at);
+      gain.gain.exponentialRampToValueAtTime(0.25, t0 + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.5);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0 + at);
+      osc.stop(t0 + at + 0.55);
+    });
+  } catch (e) { console.warn('[push] chime failed', e); }
+}
+
+/** Read the order aloud (emojis stripped, ₱ spoken as "pesos"). */
+function speakOrder(text) {
+  if (!pushVoiceOn() || !('speechSynthesis' in window)) return;
+  try {
+    const clean = String(text || '')
+      .replace(/₱/g, ' pesos ')
+      .replace(/[^\p{L}\p{N}\s.,!?:;'%-]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!clean) return;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(new SpeechSynthesisUtterance(clean));
+  } catch (e) { console.warn('[push] voice failed', e); }
+}
+
+async function ensurePushSW() {
+  if (!('serviceWorker' in navigator)) return null;
+  if (pushReg) return pushReg;
+  try {
+    pushReg = await navigator.serviceWorker.register('/admin/sw.js');
+    return pushReg;
+  } catch (e) { console.warn('[push] service worker registration failed', e); return null; }
+}
+/** Ask permission, subscribe via the VAPID key, store it server-side. */
+async function subscribePush() {
+  const reg = await ensurePushSW();
+  if (!reg) throw new Error('Service worker unavailable in this browser');
+  const { publicKey } = await api('/push/vapid-public-key');
+  if (!publicKey) throw new Error('Server push not configured (VAPID keys missing on the server)');
+  if (!('Notification' in window)) throw new Error('Notifications not supported here');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Notification permission ' + perm);
+  const existing = await reg.pushManager.getSubscription().catch(() => null);
+  const sub = existing || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+  const j = sub.toJSON();
+  await api('/push/subscribe', { method: 'POST', body: { endpoint: j.endpoint, keys: j.keys } });
+  localStorage.setItem('push_vapid_key', publicKey);
+  return sub;
+}
+
+/** Unsubscribe this browser and drop it server-side. */
+async function unsubscribePush() {
+  const reg = await ensurePushSW();
+  if (!reg) return;
+  const sub = await reg.pushManager.getSubscription().catch(() => null);
+  if (!sub) return;
+  const endpoint = sub.endpoint;
+  await sub.unsubscribe().catch(() => {});
+  await api('/push/unsubscribe?endpoint=' + encodeURIComponent(endpoint), { method: 'POST' }).catch(() => {});
+}
+
+/** SETUP.md §6c: if the server VAPID keys changed, re-subscribe automatically. */
+async function autoResubscribeIfKeyChanged() {
+  const reg = await ensurePushSW();
+  if (!reg) return;
+  const sub = await reg.pushManager.getSubscription().catch(() => null);
+  if (!sub) return;
+  const { publicKey } = await api('/push/vapid-public-key');
+  const savedKey = localStorage.getItem('push_vapid_key');
+  if (!publicKey || (savedKey && savedKey === publicKey)) return;
+  const endpoint = sub.endpoint;
+  await sub.unsubscribe().catch(() => {});
+  api('/push/unsubscribe?endpoint=' + encodeURIComponent(endpoint), { method: 'POST' }).catch(() => {});
+  await subscribePush();
+  toast('Push keys changed — this device was re-subscribed');
+}
+/** Unlock audio on the first user interaction (browser autoplay policy). */
+document.addEventListener('click', () => {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch { /* audio unsupported */ }
+}, { once: true });
+
+// Chime + voice for every push the service worker forwards to this page.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (ev) => {
+    const d = ev.data || {};
+    if (d.type === 'push-order') {
+      playChime();
+      speakOrder((d.title || '') + '. ' + (d.body || ''));
+    }
+  });
+}
+
+function updatePushToggles() {
+  const s = document.getElementById('push-sound-toggle');
+  const v = document.getElementById('push-voice-toggle');
+  if (s) s.textContent = pushSoundOn() ? '🔊 On' : '🔇 Off';
+  if (v) v.textContent = pushVoiceOn() ? '🗣️ On' : '🚫 Off';
+}
+
+/** Refresh the 🔔 card status line (server, devices, browser, this device). */
+async function renderPushCard() {
+  const line = document.getElementById('push-status-line');
+  if (!line) return;
+  try {
+    await autoResubscribeIfKeyChanged();
+    const [status, keyRes] = await Promise.all([api('/push/status'), api('/push/vapid-public-key')]);
+    const reg = await ensurePushSW();
+    const sub = reg ? await reg.pushManager.getSubscription().catch(() => null) : null;
+    const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+    line.textContent = [
+      'Server: ' + (status.configured ? '✅ configured' : '⚠️ not configured (VAPID keys missing)'),
+      'Devices: ' + (status.subscriptions || 0),
+      'Browser permission: ' + perm,
+      'This device: ' + (sub ? '✅ subscribed' : 'not subscribed'),
+    ].join('  ·  ');
+  } catch (e) {
+    line.textContent = '⚠️ Could not load push status — ' + (e?.message || e);
+  }
+}
+
 /* ================= SETTINGS ================= */
+
+
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 views.settings = async (main) => {
   const [hours, blocked, slots] = await Promise.all([
@@ -1227,6 +1389,17 @@ views.settings = async (main) => {
   ]);
   main.innerHTML = `
     <h2 class="page-title">Settings</h2>
+    <div class="card"><h3>🔔 Push Notifications &amp; Sound</h3>
+      <p class="muted" id="push-status-line">Checking…</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+        <button class="btn sm" id="push-enable">Enable on this device</button>
+        <button class="btn ghost sm" id="push-disable">Disable on this device</button>
+        <button class="btn ghost sm" id="push-test">Send test notification</button>
+      </div>
+      <div class="slot-row"><span>🔊 Chime on new order</span><button class="btn ghost sm" id="push-sound-toggle"></button></div>
+      <div class="slot-row"><span>🗣️ Read orders aloud</span><span class="row-actions"><button class="btn ghost sm" id="push-voice-toggle"></button><button class="btn ghost sm" id="push-voice-test">Test voice</button></span></div>
+      <p class="muted" style="font-size:12px">Chime + voice play while this page is open (even in a background tab) — set per browser. The OS notification itself comes from the service worker.</p>
+    </div>
     <div class="card"><h3>🕐 Business Hours</h3>
       ${hours.map((h) => `
         <div class="slot-row" data-day="${h.day_of_week}">
@@ -1315,6 +1488,37 @@ views.settings = async (main) => {
       closeModal(); toast('Saved'); navigate('settings');
     });
   }));
+
+  // ---- 🔔 Push notifications & sound ----
+  updatePushToggles();
+  renderPushCard();
+  main.querySelector('#push-enable').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    await subscribePush();
+    toast('Notifications enabled on this device');
+    renderPushCard();
+  }));
+  main.querySelector('#push-disable').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    await unsubscribePush();
+    toast('Notifications disabled on this device');
+    renderPushCard();
+  }));
+  main.querySelector('#push-test').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const r = await api('/push/test', { method: 'POST' });
+    toast(`Test push sent to ${r.sent}/${r.total} device(s)`, !r.sent);
+  }));
+  main.querySelector('#push-sound-toggle').addEventListener('click', () => {
+    localStorage.setItem(PUSH_SOUND_KEY, pushSoundOn() ? '0' : '1');
+    updatePushToggles();
+    if (pushSoundOn()) playChime();
+  });
+  main.querySelector('#push-voice-toggle').addEventListener('click', () => {
+    localStorage.setItem(PUSH_VOICE_KEY, pushVoiceOn() ? '0' : '1');
+    updatePushToggles();
+    if (pushVoiceOn()) speakOrder('Voice announcements enabled.');
+  });
+  main.querySelector('#push-voice-test').addEventListener('click', () => {
+    speakOrder('Test. New order P P 1042. Delivery. Total: 450 pesos.');
+  });
 };
 
 /* ================= ADMINS (staff accounts) ================= */
@@ -1507,3 +1711,8 @@ views.images = async (main) => {
   // the remembered session; otherwise the login page shows (default state).
   if (await tryRememberedLogin()) showApp();
 })();
+
+/* ---- Push: register the service worker + auto-resubscribe if keys changed ---- */
+ensurePushSW().then(() => {
+  if (TOKEN) autoResubscribeIfKeyChanged().catch(() => {});
+}).catch(() => {});

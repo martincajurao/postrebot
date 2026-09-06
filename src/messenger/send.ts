@@ -489,6 +489,7 @@ export async function sendOrderConfirmation(psid: string, order: any, items: any
     `✅ ORDER CONFIRMED\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
     `📋 Order #: ${order.order_number}\n` +
+    `${Number(order.discount) > 0 ? `🏷️ Discount: -₱${Number(order.discount).toLocaleString('en-PH')}\n` : ''}` +
     `💰 Total: ₱${Number(order.total).toLocaleString('en-PH')}\n` +
     `📦 ${order.order_type === 'delivery' ? 'Delivery' : 'Pickup'}${order.address ? `\n📍 ${order.address}` : ''}\n` +
     `📅 ${order.fulfillment_date || 'ASAP'} at ${order.time_slot || 'ASAP'}\n` +

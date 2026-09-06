@@ -371,7 +371,7 @@ async function showCart(psid: string) {
       }
       await sendText(psid, `⚠️ ${broken} item(s) in your cart are no longer available and were removed.`);
     }
-    totals = { subtotal, delivery: 0, discount, total: subtotal };
+    totals = { subtotal, delivery: 0, discount, total: Math.max(0, subtotal - discount) };
     if (keep.length === 0) {
       await sendText(psid, '🛒 Your cart is empty.\n\nBrowse our menu to add items!');
       return mainMenu(psid);
@@ -394,8 +394,9 @@ async function showCart(psid: string) {
     `━━━━━━━━━━━━━━━━━━━\n` +
     `${lines}\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
-    `${totals.delivery > 0 ? `📦 Delivery: ${money(totals.delivery)}\n` : ''}` +
+    `📋 Subtotal: ${money(totals.subtotal)}\n` +
     `${totals.discount > 0 ? `🏷️ Discount: -${money(totals.discount)}\n` : ''}` +
+    `${totals.delivery > 0 ? `📦 Delivery: ${money(totals.delivery)}\n` : ''}` +
     `💰 TOTAL: ${money(totals.total)}`
   );
   return sendQuickReplies(psid, 'What would you like to do?', [
