@@ -90,7 +90,7 @@ function absUrl(u) {
   return u.startsWith('/') ? u : '/' + u;
 }
 
-/** Image with a graceful fallback for missing/broken photos. */
+/** Image with a graceful fallback for missing/broken photos. Click opens fullscreen lightbox. */
 function imageHtml(url, alt, cls) {
   url = absUrl(url);
   const attrs = cls ? ` class="${cls}"` : '';
@@ -103,7 +103,9 @@ function imageHtml(url, alt, cls) {
   }
 
   // On error: mark the wrapper so CSS hides the broken <img> and shows the fallback icon.
-  return `<div class="${wrapCls}"><img${attrs} src="${esc(url)}" alt="${altText}" loading="lazy" onerror="this.onerror=null;this.parentNode.classList.add('img-broken')"><span class="img-fallback" aria-hidden="true">📷</span></div>`;
+  // Click opens the fullscreen image lightbox.
+  const lightboxOnclick = `onclick="openImageLightbox(event, '${esc(url)}', '${altText}');"`;
+  return `<div class="${wrapCls}" ${lightboxOnclick} style="cursor:zoom-in"><img${attrs} src="${esc(url)}" alt="${altText}" loading="lazy" onerror="this.onerror=null;this.parentNode.classList.add('img-broken')"><span class="img-fallback" aria-hidden="true">📷</span></div>`;
 }
 
 function showToast(msg) {

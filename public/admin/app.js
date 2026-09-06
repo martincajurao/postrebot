@@ -102,6 +102,7 @@ async function recoverSession() {
   if (await tryRememberedLogin()) {
     showApp();
     navigate(currentView);
+    autoSubscribePush();
     return;
   }
   logout();
@@ -113,6 +114,28 @@ function showApp() {
   document.getElementById('whoami').textContent = ME + (ROLE === 'ADMIN' ? ' · Admin' : ' · Staff');
   document.querySelectorAll('[data-view="admins"]').forEach((a) => { a.style.display = ROLE === 'ADMIN' ? '' : 'none'; });
   navigate('dashboard');
+  // Auto-subscribe to push notifications if permission was already granted
+  autoSubscribePush();
+  // If permission not yet asked, show a one-time prompt
+  if ('Notification' in window && Notification.permission === 'default' && !localStorage.getItem('push_prompt_shown')) {
+    localStorage.setItem('push_prompt_shown', '1');
+    setTimeout(() => {
+      toast('🔔 Enable push notifications for new order alerts! Click here to enable.', false);
+      // Make the toast clickable to trigger permission request
+      const toastEl = document.querySelector('#toast .toast:last-child');
+      if (toastEl) {
+        toastEl.style.cursor = 'pointer';
+        toastEl.addEventListener('click', async () => {
+          try {
+            await subscribePush();
+            toast('✅ Push notifications enabled! You will now receive order alerts.');
+          } catch (e) {
+            toast('Could not enable notifications: ' + (e.message || 'permission denied'), true);
+          }
+        });
+      }
+    }, 1500);
+  }
 }
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1444,6 +1467,36 @@ async function autoResubscribeIfKeyChanged() {
   api('/push/unsubscribe?endpoint=' + encodeURIComponent(endpoint), { method: 'POST' }).catch(() => {});
   await subscribePush();
   toast('Push keys changed — this device was re-subscribed');
+}
+
+/** Auto-subscribe to push notifications on page load if permission is granted. */
+async function autoSubscribePush() {
+  if (!('serviceWorker' in navigator) || !('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  try {
+    const reg = await ensurePushSW();
+    if (!reg) return;
+    const { publicKey } = await api('/push/vapid-public-key').catch(() => ({}));
+    if (!publicKey) return;
+    // Check if already subscribed
+    const existing = await reg.pushManager.getSubscription().catch(() => null);
+    if (existing) {
+      // Ensure server has the subscription (re-subscribe if missing)
+      const j = existing.toJSON();
+      await api('/push/subscribe', { method: 'POST', body: { endpoint: j.endpoint, keys: j.keys } }).catch(() => {});
+      localStorage.setItem('push_vapid_key', publicKey);
+      console.log('[push] Auto-subscribed: existing subscription restored');
+    } else {
+      // Permission granted but no subscription - create one
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+      const j = sub.toJSON();
+      await api('/push/subscribe', { method: 'POST', body: { endpoint: j.endpoint, keys: j.keys } });
+      localStorage.setItem('push_vapid_key', publicKey);
+      console.log('[push] Auto-subscribed: new subscription created');
+    }
+  } catch (e) {
+    console.warn('[push] Auto-subscribe failed:', e?.message || e);
+  }
 }
 /** Unlock audio on the first user interaction (browser autoplay policy). */
 document.addEventListener('click', () => {
