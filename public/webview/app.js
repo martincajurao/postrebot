@@ -1,4 +1,4 @@
-// ===== Postre Food Products — Webview (order online) =====
+﻿// ===== Postre Food Products — Webview (order online) =====
 // Refactored so every field the REST API returns is reflected on the page:
 // categories, products + variants, packages + slots/options + upgrades + discounts,
 // food packs, cart line pricing, checkout, order history with item detail, and the
@@ -92,11 +92,16 @@ function absUrl(u) {
 function imageHtml(url, alt, cls) {
   url = absUrl(url);
   const attrs = cls ? ` class="${cls}"` : '';
-  const img = url
-    ? `<img${attrs} src="${esc(url)}" alt="${esc(alt || '')}" loading="lazy" onerror="this.style.display='none'">`
-    : '';
-  // Return only the image, no plate/utensils placeholder
-  return img ? `<div class="img-wrap ${cls}">${img}</div>` : '';
+  const altText = esc(alt || '');
+  const wrapCls = `img-wrap${cls ? ' ' + cls : ''}`.trim();
+
+  if (!url) {
+    // No photo stored — show an icon placeholder so the card slot isn't empty.
+    return `<div class="${wrapCls} no-image"><span class="img-placeholder" aria-hidden="true">📷</span></div>`;
+  }
+
+  // On error: mark the wrapper so CSS hides the broken <img> and shows the fallback icon.
+  return `<div class="${wrapCls}"><img${attrs} src="${esc(url)}" alt="${altText}" loading="lazy" onerror="this.onerror=null;this.parentNode.classList.add('img-broken')"><span class="img-fallback" aria-hidden="true">📷</span></div>`;
 }
 
 function showToast(msg) {
@@ -578,7 +583,7 @@ function packageDefaultChoices(pkg) {
 function selectCardSize(event, kind, id, size) {
   if (event && event.stopPropagation) event.stopPropagation();
   cardSizes[kind + '-' + Number(id)] = size;
-  const card = event && event.target ? event.target.closest('.product-card, .pkg-card') : null;
+    const card = event && event.target ? event.target.closest('.product-card') : null;
   if (!card) return;
   card.querySelectorAll('.size-pill').forEach((b) => b.classList.toggle('selected', b.textContent.trim() === String(size)));
   const priceEl = card.querySelector('.card-price');
@@ -728,47 +733,34 @@ function showPackages() {
   }
   container.innerHTML = packages.map((pkg) => {
     const saved = Number(pkg.discount) > 0;
-    const slots = pkg.slots || [];
-    const selSize = cardSizes['package-' + pkg.id] || 'M';
-    const defaults = packageDefaultChoices(pkg);
-    const canQuickAdd = !pkg.is_custom && (Number(pkg.selections) || slots.length || 0) <= defaults.length && defaults.length > 0;
+    const selSize = cardSizes["package-" + pkg.id] || "M";
 
     // Preview of the dishes included (default picks) — up to 3, then "+N more".
     const names = pkg.is_custom
       ? []
-      : slots.map((slot) => {
+      : (pkg.slots || []).map((slot) => {
           const opts = packageSlotOptions(pkg, slot);
           const def = opts.find((o) => Number(o.is_default) === 1) || opts[0];
           return def ? def.name : null;
         }).filter(Boolean);
     const dishPreview = names.length > 0
-      ? `<div class="pkg-dishes">${esc(names.slice(0, 3).join(', '))}${names.length > 3 ? ` +${names.length - 3} more` : ''}</div>`
-      : '';
+      ? `<div class="pkg-dishes">${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` +${names.length - 3} more` : ""}</div>`
+      : "";
 
-    const meta = pkg.is_custom
-      ? `Pick any ${esc(String(pkg.selections || slots.length || '?'))} dishes`
-      : `${slots.length || esc(String(pkg.selections || '?'))} dishes · Ready to order`;
-
-    return `<div class="pkg-card" onclick="showPackageDetail(${pkg.id})">
-      ${imageHtml(pkg.photo_url, pkg.name, 'pkg-img')}
-      <div class="pkg-body">
-        <div class="pkg-name">${esc(pkg.name)}</div>
-        ${pkg.description ? `<div class="pkg-meta">${esc(pkg.description)}</div>` : ''}
-        <div class="pkg-meta">${meta}</div>
+    return `<div class="product-card">
+      ${imageHtml(pkg.photo_url, pkg.name)}
+      <div class="info">
+        <div class="name">${esc(pkg.name)}</div>
+        ${pkg.description ? `<div class="desc">${esc(pkg.description)}</div>` : ""}
         ${dishPreview}
-        <div class="pkg-size-row">
-          <button class="size-pill${selSize === 'M' ? ' selected' : ''}" onclick="selectCardSize(event, 'package', ${pkg.id}, 'M')">M</button>
-          <button class="size-pill${selSize === 'L' ? ' selected' : ''}" onclick="selectCardSize(event, 'package', ${pkg.id}, 'L')">L</button>
-          <span class="pkg-price-line">
-            ${saved ? `<span class="was">${formatMoney(pkg.base_price)}</span>` : ''}
-            <span class="price card-price">${packageCardPrice(pkg, selSize)}</span>
-            ${saved ? `<span class="save">Save ${formatMoney(pkg.discount)}</span>` : ''}
-          </span>
+        <div class="price-line">
+          ${saved ? `<span class="was">${formatMoney(pkg.base_price)}</span>` : ""}
+          <span class="price card-price">${packageCardPrice(pkg, selSize)}</span>
+          ${saved ? `<span class="save">Save ${formatMoney(pkg.discount)}</span>` : ""}
         </div>
-        <div class="card-actions">
-          <button class="card-add-btn" onclick="${canQuickAdd ? `addToCartPackageQuick(${pkg.id}, event)` : `showPackageDetail(${pkg.id})`}">
-            ${canQuickAdd ? '+ Add to Cart' : 'Choose Dishes'}
-          </button>
+        <div class="card-actions dual">
+          <button class="card-add-btn" onclick="addToCartPackageQuick(${pkg.id}, event)">+ Add to Cart</button>
+          <button class="card-add-btn btn-outline" onclick="event.stopPropagation(); showPackageDetail(${pkg.id})">Customize</button>
         </div>
       </div>
     </div>`;
@@ -861,6 +853,20 @@ function variantPriceDiff(productId) {
   return Math.max(0, (Number(l && l.price) || 0) - (Number(m && m.price) || 0));
 }
 
+/**
+ * Display name for a package slot based on its position.
+ * Slot 1 = Chicken, Slot 2 = Pork/Beef/Seafood, Slot 3 = Noodles,
+ * Slot 4 = Desserts, Slot 5+ = Pork/Beef/Seafood (repeat of slot 2).
+ */
+function packageSlotDisplayName(slotNumber) {
+  const n = Number(slotNumber);
+  if (n === 1) return 'Chicken';
+  if (n === 2) return 'Pork/Beef/Seafood';
+  if (n === 3) return 'Noodles';
+  if (n === 4) return 'Desserts';
+  return 'Pork/Beef/Seafood';
+}
+
 function renderPackageDetail() {
   const pkg = currentPackage();
   if (!pkg) return;
@@ -878,7 +884,7 @@ function renderPackageDetail() {
       if (options.length === 0) return '';
       const cur = packageDetail.choices[Number(slot.slot_number)];
       return `<div class="package-slot">
-        <h4>${esc(slot.name) || 'Slot ' + slot.slot_number}</h4>
+        <h4>${packageSlotDisplayName(slot.slot_number)}</h4>
         <div class="slot-options">
           ${options.map((opt) => {
             const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);

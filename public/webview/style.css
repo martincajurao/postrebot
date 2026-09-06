@@ -285,7 +285,7 @@ body {
 }
 
 .product-card {
-  background: linear-gradient(145deg, #ffffff 0%, #fafbfc 100%);
+  background: #fff;
   border: 2px solid #f0f0f0;
   border-radius: 16px;
   overflow: hidden;
@@ -293,6 +293,7 @@ body {
   transition: all 0.2s ease;
   animation: card-enter 0.4s ease-out backwards;
   box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  position: relative;
 }
 
 .product-card:nth-child(1) { animation-delay: 0.05s; }
@@ -301,6 +302,11 @@ body {
 .product-card:nth-child(4) { animation-delay: 0.2s; }
 .product-card:nth-child(5) { animation-delay: 0.25s; }
 .product-card:nth-child(6) { animation-delay: 0.3s; }
+
+.product-card:hover {
+  border-color: #e74c3c;
+  box-shadow: 0 4px 16px rgba(231, 76, 60, 0.12);
+}
 
 .product-card:active {
   transform: scale(0.95);
@@ -312,16 +318,20 @@ body {
   height: 110px;
   object-fit: cover;
   background: #f8f9fa;
+  display: block;
 }
 
 .product-card .info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 12px;
 }
 
 .product-card .name {
-  font-weight: 600;
-  font-size: 0.85rem;
-  margin-bottom: 4px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin: 0;
   color: #2d3436;
   line-height: 1.3;
 }
@@ -329,7 +339,8 @@ body {
 .product-card .price {
   color: #e74c3c;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  margin: 2px 0;
 }
 
 /* === Product Detail === */
@@ -634,11 +645,17 @@ body {
 
 /* === Orders === */
 .order-card {
-  background: #f8f9fa;
+  background: #fff;
   border-radius: 14px;
   padding: 16px;
   margin-bottom: 12px;
   border: 1px solid #e9ecef;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+.order-card:hover {
+  border-color: #e74c3c;
+  box-shadow: 0 4px 16px rgba(231, 76, 60, 0.12);
 }
 
 .order-card .order-header {
@@ -654,9 +671,9 @@ body {
 }
 
 .order-card .order-status {
-  padding: 4px 10px;
+  padding: 4px 12px;
   border-radius: 20px;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
 }
 
@@ -668,9 +685,12 @@ body {
 .status-CANCELLED { background: #e74c3c; color: #fff; }
 
 .order-card .order-total {
-  font-weight: 700;
+  font-weight: 800;
   color: #e74c3c;
-  margin-top: 6px;
+  font-size: 1.1rem;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
 }
 
 /* === Success Screen === */
@@ -840,21 +860,32 @@ body {
 }
 
 /* === Shared display helpers used by app.js templates === */
+/* Image wrapper for cards — consistent background + overflow so broken / missing photos look intentional */
 .img-wrap {
   position: relative;
   display: block;
+  overflow: hidden;
+  background: #f8f9fa;
+  min-height: 110px;
 }
 
-.img-ghost {
-  width: 100%;
-  height: 110px;
-  display: flex;
+/* Placeholder icon — shown only when a photo URL is missing or fails to load */
+.img-placeholder,
+.img-fallback {
+  position: absolute;
+  inset: 0;
+  display: none;
   align-items: center;
   justify-content: center;
-  background: #f8f9fa;
-  font-size: 1.6rem;
+  font-size: 2rem;
   color: #b2bec3;
+  pointer-events: none;
+  user-select: none;
 }
+
+.img-wrap.no-image .img-placeholder { display: flex; }
+.img-wrap.img-broken .img-fallback { display: flex; }
+.img-wrap.img-broken img { display: none; }
 
 .category-card .count {
   font-size: 0.7rem;
@@ -864,7 +895,7 @@ body {
 .product-card .desc {
   font-size: 0.72rem;
   color: #999;
-  margin-bottom: 6px;
+  margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1099,77 +1130,23 @@ body {
   padding-bottom: 140px;
 }
 
-/* === Package Cards (horizontal) === */
-.pkg-card {
-  background: #fff;
-  border: 2px solid #f0f0f0;
-  border-radius: 16px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: row;
-  margin-bottom: 12px;
-}
-
-.pkg-card:active {
-  transform: scale(0.98);
-}
-
-.pkg-card .pkg-img {
-  width: 108px;
-  min-width: 108px;
-  height: auto;
-  min-height: 150px;
-  object-fit: cover;
-  background: #f8f9fa;
-}
-
-.pkg-body {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-
-.pkg-name {
-  font-weight: 700;
-  font-size: 0.92rem;
-  color: #2d3436;
-  line-height: 1.3;
-  margin-bottom: 4px;
-}
-
-.pkg-meta {
-  font-size: 0.72rem;
-  color: #999;
-  margin-bottom: 4px;
-}
-
 .pkg-dishes {
   font-size: 0.72rem;
   color: #636e72;
   line-height: 1.45;
-  margin-bottom: 8px;
+  margin: 0;
 }
 
-.pkg-size-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-
-.pkg-price-line {
+.pkg-price-line,
+.price-line {
   display: flex;
   align-items: baseline;
   gap: 7px;
   flex-wrap: wrap;
 }
 
-.pkg-price-line .price {
+.pkg-price-line .price,
+.price-line .price {
   color: #e74c3c;
   font-weight: 700;
   font-size: 1rem;
@@ -1183,6 +1160,7 @@ body {
   font-size: 0.8rem;
 }
 
+.price-line .save,
 .pkg-price-line .save,
 .save-badge {
   background: #fff5f5;
@@ -1198,7 +1176,7 @@ body {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin: 0;
 }
 
 .size-pill {
@@ -1221,19 +1199,43 @@ body {
 }
 
 .badge-flag {
-  display: inline-block;
-  background: #ffeaa7;
-  color: #b7791f;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #e74c3c;
+  color: #fff;
   font-size: 0.64rem;
   font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 8px;
-  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  z-index: 2;
 }
 
 /* Quick add-to-cart button on catalog cards */
 .card-actions {
-  margin-top: auto;
+  margin-top: 8px;
+}
+
+.card-actions.dual {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.card-actions.dual .card-add-btn {
+  flex: 1;
+  width: auto;
+}
+
+/* Outline variant for secondary buttons (e.g. "Customize") */
+.card-add-btn.btn-outline {
+  background: #fff;
+  border: 1.5px solid #e74c3c;
+  color: #e74c3c;
+}
+
+.card-add-btn.btn-outline:active {
+  background: #fef5f4;
 }
 
 .card-add-btn {
@@ -1257,8 +1259,9 @@ body {
 
 .serves {
   font-size: 0.72rem;
+  font-weight: 500;
   color: #636e72;
-  margin-bottom: 4px;
+  margin: 0;
 }
 
 .empty-state {
