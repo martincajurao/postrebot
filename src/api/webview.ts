@@ -12,6 +12,7 @@ import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, ca
 import { slotAvailability, isDateOpen } from '../services/reservations';
 import { sendPushToAdmins } from '../services/push';
 import { packageDefaults } from '../services/pricing';
+import { getStoreInfo } from '../services/store-info';
 
 const r = Router();
 
@@ -518,17 +519,18 @@ r.get('/enabled', async (_req, res) => {
 // ---- Config ----
 
 r.get('/config', async (_req, res) => {
+  const v = await getStoreInfo();
   res.json({
     payment: {
       cod: 'Pay in cash when your order arrives.',
-      gcash: process.env.PAYMENT_GCASH || 'GCash: 09753122085',
-      bank: process.env.PAYMENT_BANK || 'BDO: 0000-0000-0000',
+      gcash: v.payment_gcash,
+      bank: v.payment_bank,
     },
     contact: {
-      phone: process.env.CONTACT_PHONE || '0917-000-0000',
-      email: process.env.CONTACT_EMAIL || 'hello@postre.example',
-      address: process.env.CONTACT_ADDRESS || '123 Sample St.',
-      hours: process.env.CONTACT_HOURS || 'Mon-Sat, 10AM-7PM',
+      phone: v.contact_phone,
+      email: v.contact_email,
+      address: v.contact_address,
+      hours: v.contact_hours,
     },
   });
 });

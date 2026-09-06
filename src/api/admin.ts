@@ -9,6 +9,7 @@ import {
   rescheduleReservation, slotAvailability, isDateOpen,
 } from '../services/reservations';
 import { computeCartTotals } from '../services/pricing';
+import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
 import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
 const r = Router();
@@ -717,6 +718,33 @@ r.post('/push/test', async (_req, res) => {
     console.error('[push] test send error', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ---- Store info (payment + contact shown to customers) ----
+// Stored in app_settings (editable live in Admin → Settings → 💳 Payment & Contact);
+// the PAYMENT_*/CONTACT_* env vars remain the defaults. The Messenger bot and the
+// webview /config read these (short in-process cache, invalidated on save).
+r.get('/store-info', async (_req, res) => {
+  try {
+    res.json(await getStoreInfo());
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+r.put('/store-info', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const updates = STORE_INFO_KEYS.filter((k) => typeof body[k] === 'string');
+    if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
+    const now = new Date().toISOString();
+    for (const key of updates) {
+      const value = String(body[key]).slice(0, 300);
+      const { data: existing } = await supa().from('app_settings').select('key').eq('key', key).maybeSingle();
+      if (existing) await supa().from('app_settings').update({ value, updated_at: now }).eq('key', key);
+      else await supa().from('app_settings').insert({ key, value, updated_at: now });
+    }
+    invalidateStoreInfoCache();
+    res.json({ ok: true, updated: updates });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // ---- App Settings (webview toggle, etc.) ----

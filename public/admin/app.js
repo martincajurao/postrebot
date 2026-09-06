@@ -1384,11 +1384,18 @@ async function renderPushCard() {
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 views.settings = async (main) => {
-  const [hours, blocked, slots] = await Promise.all([
-    api('/business-hours'), api('/blocked-dates'), api('/time-slots'),
+  const [hours, blocked, slots, storeInfo] = await Promise.all([
+    api('/business-hours'), api('/blocked-dates'), api('/time-slots'), api('/store-info'),
   ]);
+  const activeTab = sessionStorage.getItem('settingsTab') || 'notifications';
   main.innerHTML = `
     <h2 class="page-title">Settings</h2>
+    <div class="tabs" id="settings-tabs">
+      <button class="tab-btn${activeTab === 'notifications' ? ' active' : ''}" data-tab="notifications">🔔 Notifications</button>
+      <button class="tab-btn${activeTab === 'schedule' ? ' active' : ''}" data-tab="schedule">🕐 Schedule</button>
+      <button class="tab-btn${activeTab === 'store' ? ' active' : ''}" data-tab="store">💳 Payment &amp; Contact</button>
+    </div>
+    <div class="tab-pane${activeTab === 'notifications' ? ' active' : ''}" data-pane="notifications">
     <div class="card"><h3>🔔 Push Notifications &amp; Sound</h3>
       <p class="muted" id="push-status-line">Checking…</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
@@ -1400,6 +1407,8 @@ views.settings = async (main) => {
       <div class="slot-row"><span>🗣️ Read orders aloud</span><span class="row-actions"><button class="btn ghost sm" id="push-voice-toggle"></button><button class="btn ghost sm" id="push-voice-test">Test voice</button></span></div>
       <p class="muted" style="font-size:12px">Chime + voice play while this page is open (even in a background tab) — set per browser. The OS notification itself comes from the service worker.</p>
     </div>
+    </div>
+    <div class="tab-pane${activeTab === 'schedule' ? ' active' : ''}" data-pane="schedule">
     <div class="card"><h3>🕐 Business Hours</h3>
       ${hours.map((h) => `
         <div class="slot-row" data-day="${h.day_of_week}">
@@ -1432,6 +1441,24 @@ views.settings = async (main) => {
         <input type="number" id="ts-cap" placeholder="capacity" style="width:110px" value="5">
         <button class="btn sm" id="ts-add">Add Slot</button>
       </div>
+    </div>
+    </div>
+    <div class="tab-pane${activeTab === 'store' ? ' active' : ''}" data-pane="store">
+    <div class="card"><h3>💳 Payment Details</h3>
+      <div class="field"><label>GCash (shown when the customer pays via GCash)</label><input id="si-gcash" value="${esc(storeInfo.payment_gcash || '')}"></div>
+      <div class="field"><label>Bank (shown for bank transfers)</label><input id="si-bank" value="${esc(storeInfo.payment_bank || '')}"></div>
+      <p class="muted" style="font-size:12px">Leave a field blank to fall back to the server default from the environment.</p>
+    </div>
+    <div class="card"><h3>📞 Contact Details</h3>
+      <div class="row2">
+        <div class="field"><label>Phone</label><input id="si-phone" value="${esc(storeInfo.contact_phone || '')}"></div>
+        <div class="field"><label>Email</label><input id="si-email" value="${esc(storeInfo.contact_email || '')}"></div>
+      </div>
+      <div class="field"><label>Address</label><input id="si-address" value="${esc(storeInfo.contact_address || '')}"></div>
+      <div class="field"><label>Business hours (short line)</label><input id="si-hours" value="${esc(storeInfo.contact_hours || '')}"></div>
+      <button class="btn" id="si-save">Save changes</button>
+      <p class="muted" style="font-size:12px;margin-top:8px">Shown to customers in the Messenger bot (payment instructions + Contact Us) and on the web ordering page — changes go live immediately.</p>
+    </div>
     </div>`;
 
   main.querySelectorAll('[data-bh-edit]').forEach((b) => b.addEventListener('click', () => {
@@ -1519,6 +1546,26 @@ views.settings = async (main) => {
   main.querySelector('#push-voice-test').addEventListener('click', () => {
     speakOrder('Test. New order P P 1042. Delivery. Total: 450 pesos.');
   });
+
+  // ---- Settings tabs ----
+  main.querySelectorAll('#settings-tabs .tab-btn').forEach((b) => b.addEventListener('click', () => {
+    sessionStorage.setItem('settingsTab', b.dataset.tab);
+    main.querySelectorAll('#settings-tabs .tab-btn').forEach((x) => x.classList.toggle('active', x === b));
+    main.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === b.dataset.tab));
+  }));
+
+  // ---- 💳 Payment & contact form ----
+  main.querySelector('#si-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    await api('/store-info', { method: 'PUT', body: {
+      payment_gcash: document.getElementById('si-gcash').value,
+      payment_bank: document.getElementById('si-bank').value,
+      contact_phone: document.getElementById('si-phone').value,
+      contact_email: document.getElementById('si-email').value,
+      contact_address: document.getElementById('si-address').value,
+      contact_hours: document.getElementById('si-hours').value,
+    } });
+    toast('Payment & contact details saved — live for customers');
+  }));
 };
 
 /* ================= ADMINS (staff accounts) ================= */

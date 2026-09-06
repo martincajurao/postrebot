@@ -1,4 +1,4 @@
-﻿// ===== Postre Food Products — Webview (order online) =====
+﻿﻿// ===== Postre Food Products — Webview (order online) =====
 // Refactored so every field the REST API returns is reflected on the page:
 // categories, products + variants, packages + slots/options + upgrades + discounts,
 // food packs, cart line pricing, checkout, order history with item detail, and the
@@ -188,7 +188,7 @@ function updateCartBadge() {
   const count = cart.items.reduce((s, i) => s + i.quantity, 0);
   badge.textContent = count;
   badge.classList.toggle('hidden', count === 0);
-  
+
   // Animate badge when item is added (count increases)
   if (count > prevCartCount) {
     badge.classList.remove('badge-bounce');
@@ -787,24 +787,56 @@ async function retryPackages() {
  */
 function packageSlotOptions(pkg, slot) {
   if (!pkg.is_custom) {
-    const opts = (slot.options || []).map((o) => {
+    const opts = slot.options || [];
+    const def = opts.find((o) => Number(o.is_default) === 1) || opts[0];
+    const defPrice = def ? productMenuPriceM(def.product_id) : 0;
+    return opts.map((o) => {
       const product = products.find((p) => Number(p.id) === Number(o.product_id));
-      return { ...o, category_id: product ? product.category_id : null };
+      // Surcharge = price difference vs the slot's default dish (+ any admin
+      // upgrade surcharge). The base price already covers the default dish, so
+      // the total works out to sum(selected dish menu prices) − package
+      // discount instead of double-counting full dish prices on top of base.
+      const admin = Number(o.upgrade_price) > 0 ? Number(o.upgrade_price) : 0;
+      const up = admin + Math.max(0, productMenuPriceM(o.product_id) - defPrice);
+      return { ...o, upgrade_price: up, category_id: product ? product.category_id : null };
     });
-    return opts;
+  }
+  // Custom packages: every active dish is allowed. Upgrade price comes from
+  // admin-defined package_options when present; otherwise fall back to the dish's
+  // M-size menu price so the total reacts when different dishes are chosen.
+  const upgradePrices = new Map();
+  const sizeUpgrades = new Map();
+  for (const s of pkg.slots || []) {
+    for (const o of s.options || []) {
+      const pid = Number(o.product_id);
+      if (Number(o.upgrade_price) > 0) upgradePrices.set(pid, Number(o.upgrade_price));
+      if (Number(o.size_upgrade_price) > 0) sizeUpgrades.set(pid, Number(o.size_upgrade_price));
+    }
   }
   return products
     .filter((p) => Number(p.unavailable) !== 1)
-    .map((p) => ({
-      id: null,
-      product_id: p.id,
-      name: p.name,
-      photo_url: p.photo_url,
-      upgrade_price: 0,
-      size_upgrade_price: 0,
-      is_default: 0,
-      category_id: p.category_id,
-    }));
+    .map((p) => {
+      const pid = Number(p.id);
+      const adminUpgrade = upgradePrices.get(pid);
+      let up;
+      if (adminUpgrade !== undefined) {
+        up = adminUpgrade;
+      } else {
+        // No admin-configured upgrade: use the dish's M-size menu price so
+        // the package total varies with the selected dish.
+        up = productMenuPriceM(pid);
+      }
+      return {
+        id: null,
+        product_id: p.id,
+        name: p.name,
+        photo_url: p.photo_url,
+        upgrade_price: up,
+        size_upgrade_price: sizeUpgrades.get(pid) || 0,
+        is_default: 0,
+        category_id: p.category_id,
+      };
+    });
 }
 
 function showPackageDetail(pkgId) {
@@ -864,6 +896,19 @@ function variantPriceDiff(productId) {
   const l = vs.find((v) => String(v.size).toUpperCase() === 'L');
   const m = vs.find((v) => String(v.size).toUpperCase() === 'M');
   return Math.max(0, (Number(l && l.price) || 0) - (Number(m && m.price) || 0));
+}
+
+/**
+ * A dish's M-size menu price (cheapest variant as fallback). Used as the
+ * upgrade price for slot options the admin hasn't priced explicitly, so the
+ * package total reacts when a different dish is selected in either kind of
+ * package (fixed or custom).
+ */
+function productMenuPriceM(productId) {
+  const p = products.find((x) => Number(x.id) === Number(productId));
+  const vs = productVariants(p);
+  const m = vs.find((v) => String(v.size).toUpperCase() === 'M') || vs[0];
+  return Number(m && m.price) || 0;
 }
 
 /**
@@ -960,7 +1005,7 @@ function renderPackageDetail() {
           ${options.map((opt) => {
             const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
             const upgrade = Number(opt.upgrade_price) || 0;
-            return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id}, this)">
+            return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id})">
               ${esc(opt.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
             </span>`;
           }).join('')}
@@ -1007,44 +1052,12 @@ function selectPackageSlotSize(event, slotNumber, size) {
   renderPackageDetail();
 }
 
-function selectPackageSlot(slotNumber, productId, el) {
-  if (!el) return;
-  el.parentElement.querySelectorAll('.slot-option').forEach((o) => o.classList.remove('selected'));
-  el.classList.add('selected');
+function selectPackageSlot(slotNumber, productId) {
+  // Update the choice for this slot
   packageDetail.choices[slotNumber] = productId;
-  const pkg = currentPackage();
-  if (!pkg) return;
-  const needed = Number(pkg.selections) || (pkg.slots || []).length || 0;
-  const chosen = Object.keys(packageDetail.choices).length;
-  const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size, packageDetail.slotSizes);
-  const totalEl = $id('package-detail').querySelector('.price-total');
-  if (totalEl) {
-    totalEl.textContent = formatMoney(pricing.total * packageDetail.qty);
-    totalEl.classList.remove('flash');
-    void totalEl.offsetWidth;
-    totalEl.classList.add('flash');
-  }
-  const btn = $id('package-detail').querySelector('.btn-checkout');
-  if (btn) {
-    btn.disabled = chosen < needed;
-    btn.textContent = chosen >= needed ? 'Add to Cart' : `Choose ${needed} dishes (${chosen}/${needed})`;
-  }
-  const counter = $id('package-detail').querySelector('.detail-desc strong');
-  if (counter && pkg.is_custom) counter.textContent = `${chosen}/${needed}`;
-  // Reactive L-button price for this slot (depends on the chosen dish)
-  const slotEl = el.closest('.package-slot');
-  if (slotEl) {
-    const lBtn = slotEl.querySelector('.slot-size-btn:last-child');
-    if (lBtn) {
-      const realSlot = (pkg.slots || []).find((s) => Number(s.slot_number) === Number(slotNumber)) || { slot_number: slotNumber };
-      const allOptions = packageSlotOptions(pkg, realSlot);
-      const opts = filterOptionsByGroup(allOptions, slotGroupFor(pkg, realSlot, (pkg.slots || []).length));
-      const opt = opts.find((o) => Number(o.product_id) === Number(productId));
-      let up = opt ? Number(opt.size_upgrade_price) || 0 : 0;
-      if (!up) up = variantPriceDiff(productId);
-      lBtn.innerHTML = `L${up > 0 ? ` <em>+${formatMoney(up)}</em>` : ''}`;
-    }
-  }
+  // Re-render the entire detail view so the total, counter, button, and
+  // per-slot L-button upgrade prices all recalculate consistently.
+  renderPackageDetail();
 }
 
 function selectPackageSize(size) {

@@ -14,22 +14,28 @@ import { sendPushToAdmins } from '../services/push';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
 import { signWebviewPsid } from '../api/auth';
+import { getStoreInfo, StoreInfo } from '../services/store-info';
 
 const r = Router();
 
-// ---------- env-driven configurables (payment/contact/admin) ----------
-// Set these in .env so real accounts live in one place, not buried in code.
-const PAYMENT_INFO: Record<string, string> = {
-  cod: 'Pay in cash when your order arrives.',
-  gcash: process.env.PAYMENT_GCASH || 'GCash: 09753122085 (M*rt*n N*ko C.). Send the receipt to confirm.',
-  bank: process.env.PAYMENT_BANK || 'BDO: 0000-0000-0000 (Not Available). Send the receipt to confirm.',
-};
-const CONTACT_INFO = {
-  phone: process.env.CONTACT_PHONE || '0917-000-0000',
-  email: process.env.CONTACT_EMAIL || 'hello@postre.example',
-  address: process.env.CONTACT_ADDRESS || '123 Sample St.',
-  hours: process.env.CONTACT_HOURS || 'Mon-Sat, 10AM-7PM',
-};
+// ---------- payment/contact info (Admin → Settings → 💳 Payment & Contact) ----------
+// Values come from app_settings (editable live in the admin panel) with the
+// PAYMENT_*/CONTACT_* env vars as defaults — cached briefly in store-info.ts.
+function paymentInfo(v: StoreInfo): Record<string, string> {
+  return {
+    cod: 'Pay in cash when your order arrives.',
+    gcash: v.payment_gcash,
+    bank: v.payment_bank,
+  };
+}
+function contactInfo(v: StoreInfo) {
+  return {
+    phone: v.contact_phone,
+    email: v.contact_email,
+    address: v.contact_address,
+    hours: v.contact_hours,
+  };
+}
 const ADMIN_PSID = process.env.ADMIN_PSID || '';
 
 /** Fire-and-forget send that never breaks the flow — a failed message is logged only. */
@@ -582,6 +588,31 @@ async function packageTotal(packageId: number, choices: Record<number, number>, 
   }
 }
 
+/**
+ * Running total for custom packages that updates reactively as dishes are selected.
+ * For incomplete selections, sums base_price + upgrade prices of chosen dishes.
+ * Returns null only when the package is invalid.
+ */
+async function runningPackageTotal(packageId: number, choices: Record<number, number>): Promise<number | null> {
+  const pkg = await getPackage(packageId);
+  if (!pkg) return null;
+  let total = Number(pkg.base_price) || 0;
+  const upgradePrices = await getCustomSlotOptionUpgrades(packageId);
+  for (const [slot, productId] of Object.entries(choices || {})) {
+    const upgrade = upgradePrices.get(Number(productId)) || 0;
+    total += upgrade;
+  }
+  return total;
+}
+
+/** Get a map of product_id -> upgrade_price for a custom package's options. */
+async function getCustomSlotOptionUpgrades(packageId: number): Promise<Map<number, number>> {
+  const opts = await getCustomSlotOptions(packageId);
+  const map = new Map<number, number>();
+  for (const o of opts) map.set(o.product_id, o.upgrade_price);
+  return map;
+}
+
 async function showPackageDetails(psid: string, packageId: number, ctx?: any) {
   const pkg = await getPackage(packageId);
   if (!pkg) return sendText(psid, 'Package not found.');
@@ -611,8 +642,10 @@ async function showPackageDetails(psid: string, packageId: number, ctx?: any) {
 
   const slots = await getPackageSlots(packageId);
   const filled = Object.keys(choices).length;
+  const runningTotal = pkg.is_custom ? await runningPackageTotal(packageId, choices) : null;
+  const totalLine = runningTotal != null ? `\n💰 Total: ${money(runningTotal)}` : '';
   const header = pkg.is_custom
-    ? `${pkg.name}\n${money(pkg.base_price)} base\n\nPick any ${pkg.selections} dishes (${filled}/${pkg.selections} chosen):\n\n${await packageLines(packageId, choices)}`
+    ? `${pkg.name}\n${money(pkg.base_price)} base${totalLine}\n\nPick any ${pkg.selections} dishes (${filled}/${pkg.selections} chosen):\n\n${await packageLines(packageId, choices)}`
     : `${pkg.name}\n${money(netPackagePrice(pkg))}${pkg.discount > 0 ? ` — Save ${money(pkg.discount)}` : ''}\n\n${await packageLines(packageId, choices)}`;
   const verb = pkg.is_custom ? 'Pick' : 'Change';
   const replies: { title: string; payload: string }[] = slots.slice(0, 11).map((s: any) => ({
@@ -937,7 +970,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
           payment_method: method,
         });
         await setState(psid, 'ORDER_CONFIRMED', { order_id: order.orderId });
-        const payInfo = PAYMENT_INFO[method as 'cod'] || '';
+        const payInfo = paymentInfo(await getStoreInfo())[method as 'cod'] || '';
         // Get order items for detailed confirmation
         const orderItems = await getOrderItems(order.orderId);
         await sendOrderConfirmation(psid, { ...order, order_number: order.orderNumber }, orderItems);
@@ -1037,17 +1070,19 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       await setState(psid, 'RESERVE_PHONE', (await getState(psid)).ctx);
       return sendText(psid, 'Contact number for the reservation?');
     }
-    case 'MENU_CONTACT':
+    case 'MENU_CONTACT': {
       setState(psid, 'CONTACT_MENU');
+      const ci = contactInfo(await getStoreInfo());
       return sendText(psid,
         '📞 CONTACT US\n' +
         '━━━━━━━━━━━━━━━━━━━\n' +
-        `📱 Phone: ${CONTACT_INFO.phone}\n` +
-        `📧 Email: ${CONTACT_INFO.email}\n` +
-        `📍 Address: ${CONTACT_INFO.address}\n` +
+        `📱 Phone: ${ci.phone}\n` +
+        `📧 Email: ${ci.email}\n` +
+        `📍 Address: ${ci.address}\n` +
         '━━━━━━━━━━━━━━━━━━━\n' +
-        `⏰ Open: ${CONTACT_INFO.hours}`
+        `⏰ Open: ${ci.hours}`
       ).then(() => mainMenu(psid));
+    }
     default:
       return mainMenu(psid);
   }

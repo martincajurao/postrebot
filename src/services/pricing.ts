@@ -74,42 +74,68 @@ export async function computePackageBasePrice(packageId: number): Promise<number
   for (const s of slots || []) {
     const { data: opt } = await supa().from('package_options').select('product_id').eq('slot_id', s.id).order('is_default', { ascending: false }).order('id').limit(1).maybeSingle();
     if (!opt) continue;
-    const { data: v } = await supa().from('product_variants').select('price').eq('product_id', opt.product_id).order('price').limit(1).maybeSingle();
-    sum += Number(v?.price) || 0;
+    // Prefer the M variant (falling back to the cheapest) so base = sum of the
+    // default dishes' M menu prices — matching the client's sum(items) −
+    // discount formula and choiceUpgrade's relative surcharges.
+    const { data: variants } = await supa().from('product_variants').select('size, price').eq('product_id', opt.product_id);
+    const m = variants?.find((v: any) => String(v.size).toUpperCase() === 'M') || (variants && variants[0]);
+    sum += Number(m?.price) || 0;
   }
   return sum;
 }
 
 /** Surcharge for a single package slot choice (upgrade + optional size upgrade). */
+/** M-size menu price of a dish (cheapest variant as fallback) — mirrors the webview's productMenuPriceM. */
+async function menuPriceM(productId: number): Promise<number> {
+  const { data: variants } = await supa().from('product_variants').select('size, price').eq('product_id', productId);
+  const m = variants?.find((v: any) => String(v.size).toUpperCase() === 'M') || (variants && variants[0]);
+  return Number(m?.price) || 0;
+}
+
 export async function choiceUpgrade(packageId: number, slotNumber: number, productId: number, size?: string): Promise<number> {
   const { data: slot } = await supa().from('package_slots').select('id').eq('package_id', packageId).eq('slot_number', slotNumber).single();
   if (!slot) throw new Error(`Invalid slot ${slotNumber}`);
   const { data: opt } = await supa().from('package_options').select('*').eq('slot_id', slot.id).eq('product_id', productId).maybeSingle();
   if (!opt) {
-    // Custom packages allow every active dish; default size upgrade applies unless configured.
+    // Custom packages allow every active dish and have no per-slot default, so
+    // the dish is charged at its full M menu price (plus the Large difference),
+    // mirroring the webview's custom-package pricing.
     const { data: pkg } = await supa().from('packages').select('is_custom').eq('id', packageId).single();
     if (pkg?.is_custom) {
       const { data: prod } = await supa().from('products').select('id').eq('id', productId).eq('active', 1).maybeSingle();
       if (!prod) throw new Error('Product not allowed in this slot');
-      return size === 'L' ? CUSTOM_DEFAULT_SIZE_UPGRADE : 0;
+      return (await menuPriceM(productId)) + (size === 'L' ? await variantDiffL(productId) : 0);
     }
     throw new Error('Product not allowed in this slot');
   }
-  let extra = opt.upgrade_price || 0;
+  // Surcharge = price difference vs the slot's default dish + admin upgrade.
+  // The base price already covers the default dish, so the package total works
+  // out to sum(selected dish menu prices) − package discount.
+  const { data: defOpt } = await supa().from('package_options').select('product_id').eq('slot_id', slot.id)
+    .order('is_default', { ascending: false }).order('id').limit(1).maybeSingle();
+  let extra = Number(opt.upgrade_price) || 0;
+  if (defOpt) {
+    const chosenM = await menuPriceM(productId);
+    const defM = Number(defOpt.product_id) === productId ? chosenM : await menuPriceM(defOpt.product_id);
+    extra += Math.max(0, chosenM - defM);
+  }
   if (size === 'L') {
     // Admin-configured size upgrade wins; fall back to the real menu price
     // difference (L variant − M variant) when none is configured, so Large
     // never prices the same as Medium by accident.
     let sizeExtra = opt.size_upgrade_price || 0;
-    if (!sizeExtra) {
-      const { data: variants } = await supa().from('product_variants').select('size, price').eq('product_id', productId);
-      const l = variants?.find((v: any) => v.size === 'L');
-      const m = variants?.find((v: any) => v.size === 'M');
-      sizeExtra = Math.max(0, Number(l?.price || 0) - Number(m?.price || 0));
-    }
+    if (!sizeExtra) sizeExtra = await variantDiffL(productId);
     extra += sizeExtra;
   }
   return extra;
+}
+
+/** Real menu price difference (L variant − M variant), never negative. */
+async function variantDiffL(productId: number): Promise<number> {
+  const { data: variants } = await supa().from('product_variants').select('size, price').eq('product_id', productId);
+  const l = variants?.find((v: any) => String(v.size).toUpperCase() === 'L');
+  const m = variants?.find((v: any) => String(v.size).toUpperCase() === 'M');
+  return Math.max(0, Number(l?.price || 0) - Number(m?.price || 0));
 }
 
 /** Price a package cart item given slot choices (array or legacy object) and the package size. */
