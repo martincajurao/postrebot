@@ -65,6 +65,8 @@ let currentView = 'categories';
 let currentCategoryId = null;
 let productDetail = { productId: null, size: null, qty: 1 };
 let packageDetail = { pkgId: null, choices: {}, size: 'M', qty: 1 };
+let foodPackDetail = { fpId: null, pieces: 10 };
+const FOOD_PACK_MIN_PIECES = 10;
 
 // ---------- Helpers ----------
 const $id = (id) => document.getElementById(id);
@@ -158,7 +160,7 @@ function showView(id) {
 const NAV_MAP = {
   'categories': 0, 'products': 0, 'product-detail': 0,
   'packages': 1, 'package': 1,
-  'food-packs': 2,
+  'food-packs': 2, 'food-pack-detail': 2,
   'cart': 3, 'checkout': 3,
   'orders': 4, 'order-detail': 4,
 };
@@ -174,6 +176,7 @@ function updateBottomNav() {
 function goBack() {
   if (currentView === 'product-detail') showProducts(currentCategoryId);
   else if (currentView === 'package') showPackages();
+  else if (currentView === 'food-pack-detail') showFoodPacks();
   else showCategories();
 }
 
@@ -385,7 +388,7 @@ function cartItemName(kind, id, size) {
 
 function localItemSignature(kind, id, size, choices) {
   const choiceKey = Array.isArray(choices)
-    ? choices.map((c) => Number(c.slot_number) + ':' + Number(c.product_id)).sort().join('|')
+    ? choices.map((c) => Number(c.slot_number) + ':' + Number(c.product_id) + ':' + (c.size || 'M')).sort().join('|')
     : '';
   return [kind, Number(id), size || '', choiceKey].join('~');
 }
@@ -731,7 +734,8 @@ function showPackages() {
     showView('view-packages');
     return;
   }
-  container.innerHTML = packages.map((pkg) => {
+  const sorted = packages.slice().sort((a, b) => Number(!!a.is_custom) - Number(!!b.is_custom));
+  container.innerHTML = sorted.map((pkg) => {
     const saved = Number(pkg.discount) > 0;
     const selSize = cardSizes["package-" + pkg.id] || "M";
 
@@ -747,7 +751,7 @@ function showPackages() {
       ? `<div class="pkg-dishes">${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` +${names.length - 3} more` : ""}</div>`
       : "";
 
-    return `<div class="product-card">
+    return `<div class="product-card pkg-card-tall">
       ${imageHtml(pkg.photo_url, pkg.name)}
       <div class="info">
         <div class="name">${esc(pkg.name)}</div>
@@ -776,12 +780,18 @@ async function retryPackages() {
 }
 
 /**
- * Options available for a package slot.
- * - Fixed/preset packages: admin-defined option rows (already carry name/photo/upgrade).
- * - Custom ("Build your own") packages: every active dish, matching the bot.
+ * Options available for a package slot, with category attached.
+ * - Fixed/preset packages: admin-defined option rows.
+ * - Custom ("Build your own") packages: every active dish.
  */
 function packageSlotOptions(pkg, slot) {
-  if (!pkg.is_custom) return slot.options || [];
+  if (!pkg.is_custom) {
+    const opts = (slot.options || []).map((o) => {
+      const product = products.find((p) => Number(p.id) === Number(o.product_id));
+      return { ...o, category_id: product ? product.category_id : null };
+    });
+    return opts;
+  }
   return products
     .filter((p) => Number(p.unavailable) !== 1)
     .map((p) => ({
@@ -792,6 +802,7 @@ function packageSlotOptions(pkg, slot) {
       upgrade_price: 0,
       size_upgrade_price: 0,
       is_default: 0,
+      category_id: p.category_id,
     }));
 }
 
@@ -806,7 +817,7 @@ function showPackageDetail(pkgId) {
       if (def) choices[Number(slot.slot_number)] = Number(def.product_id);
     }
   }
-  packageDetail = { pkgId: Number(pkg.id), choices, size: cardSizes['package-' + Number(pkg.id)] || 'M', qty: 1 };
+  packageDetail = { pkgId: Number(pkg.id), choices, slotSizes: {}, size: cardSizes['package-' + Number(pkg.id)] || 'M', qty: 1 };
   renderPackageDetail();
 }
 
@@ -814,8 +825,8 @@ function currentPackage() {
   return packages.find((x) => Number(x.id) === Number(packageDetail.pkgId)) || null;
 }
 
-/** Client-side mirror of server pricing: base + slot upgrades (± size) − package discount. */
-function pricePackageChoices(pkg, choices, size) {
+/** Client-side mirror of server pricing: base + slot upgrades (± per-slot size) − package discount. */
+function pricePackageChoices(pkg, choices, size, slotSizes) {
   const slots = (pkg.slots || []).slice().sort((a, b) => a.slot_number - b.slot_number);
   let total = Number(pkg.base_price) || 0;
   const lines = [{ label: esc(pkg.name) + ' base', amount: total }];
@@ -825,7 +836,8 @@ function pricePackageChoices(pkg, choices, size) {
     const options = packageSlotOptions(pkg, slot);
     const opt = options.find((o) => Number(o.product_id) === Number(choice)) || null;
     let extra = opt ? Number(opt.upgrade_price) || 0 : 0;
-    if (size === 'L') {
+    const slotSize = (slotSizes && slotSizes[Number(slot.slot_number)]) || size;
+    if (slotSize === 'L') {
       let sizeExtra = opt ? Number(opt.size_upgrade_price) || 0 : 0;
       if (!sizeExtra) sizeExtra = variantPriceDiff(choice);
       extra += sizeExtra;
@@ -854,17 +866,58 @@ function variantPriceDiff(productId) {
 }
 
 /**
- * Display name for a package slot based on its position.
- * Slot 1 = Chicken, Slot 2 = Pork/Beef/Seafood, Slot 3 = Noodles,
- * Slot 4 = Desserts, Slot 5+ = Pork/Beef/Seafood (repeat of slot 2).
+ * Category groups used to build a slot's menu from its default dish.
+ * Keywords match database category names (case-insensitive substring).
  */
-function packageSlotDisplayName(slotNumber) {
-  const n = Number(slotNumber);
-  if (n === 1) return 'Chicken';
-  if (n === 2) return 'Pork/Beef/Seafood';
-  if (n === 3) return 'Noodles';
-  if (n === 4) return 'Desserts';
-  return 'Pork/Beef/Seafood';
+const SLOT_CATEGORY_GROUPS = [
+  { name: 'Chicken', keywords: ['chicken'] },
+  { name: 'Pork/Beef/Seafood', keywords: ['pork', 'beef', 'seafood'] },
+  { name: 'Pasta/Vegetables', keywords: ['pasta', 'noodle', 'vegetable', 'veggie'] },
+  { name: 'Desserts', keywords: ['dessert'] },
+];
+
+/** Lowercase category name of a product ('' when unknown). */
+function productCategoryName(productId) {
+  const product = products.find((p) => Number(p.id) === Number(productId));
+  if (!product) return '';
+  const cat = categories.find((c) => Number(c.id) === Number(product.category_id));
+  return cat ? String(cat.name || '').toLowerCase() : '';
+}
+
+/** Group a category name belongs to (null when it matches no group). */
+function categoryGroupFor(catName) {
+  if (!catName) return null;
+  return SLOT_CATEGORY_GROUPS.find((g) => g.keywords.some((kw) => catName.includes(kw))) || null;
+}
+
+/**
+ * The category group a slot's menu is built from, derived from the slot's
+ * default (admin-assigned) dish: chicken default → all chicken, pork/beef/
+ * seafood default → pork/beef/seafood, pasta default → pasta/noodles/
+ * vegetables, dessert default → desserts. Slots without a usable default
+ * (custom packages) fall back to position rules.
+ */
+function slotGroupFor(pkg, slot, totalSlots) {
+  const options = packageSlotOptions(pkg, slot);
+  const def = options.find((o) => Number(o.is_default) === 1) || options[0];
+  if (def) {
+    const group = categoryGroupFor(productCategoryName(def.product_id));
+    if (group) return group;
+  }
+  const n = Number(slot.slot_number);
+  if (n === 1) return SLOT_CATEGORY_GROUPS[0];
+  if (totalSlots > 0 && n === totalSlots) return SLOT_CATEGORY_GROUPS[3];
+  if (totalSlots > 0 && n === totalSlots - 1) return SLOT_CATEGORY_GROUPS[2];
+  return SLOT_CATEGORY_GROUPS[1];
+}
+
+/** Keep only options whose product's category belongs to the group. */
+function filterOptionsByGroup(options, group) {
+  if (!group) return options;
+  const filtered = options.filter(
+    (opt) => categoryGroupFor(productCategoryName(opt.product_id)) === group
+  );
+  return filtered.length > 0 ? filtered : options;
 }
 
 function renderPackageDetail() {
@@ -875,16 +928,33 @@ function renderPackageDetail() {
   const chosen = Object.keys(packageDetail.choices).length;
   const needed = Number(pkg.selections) || slots.length || 0;
   const complete = chosen >= needed;
-  const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size);
+  const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size, packageDetail.slotSizes);
 
   let slotsHtml = '';
   if (slots.length > 0) {
     slotsHtml = slots.map((slot) => {
-      const options = packageSlotOptions(pkg, slot);
+      const allOptions = packageSlotOptions(pkg, slot);
+      const group = slotGroupFor(pkg, slot, slots.length);
+      const options = filterOptionsByGroup(allOptions, group);
       if (options.length === 0) return '';
       const cur = packageDetail.choices[Number(slot.slot_number)];
+      const slotSize = packageDetail.slotSizes[Number(slot.slot_number)] || packageDetail.size;
+      const sizeUpgrade = (() => {
+        if (cur === undefined || cur === null) return 0;
+        const opt = options.find((o) => Number(o.product_id) === Number(cur));
+        let up = opt ? Number(opt.size_upgrade_price) || 0 : 0;
+        if (!up) up = variantPriceDiff(cur);
+        return up;
+      })();
       return `<div class="package-slot">
-        <h4>${packageSlotDisplayName(slot.slot_number)}</h4>
+        <div class="slot-header">
+          <h4>${esc(group.name)}</h4>
+          <div class="slot-size-toggle">
+            <span class="slot-size-label">Size:</span>
+            <button class="slot-size-btn${slotSize === 'M' ? ' selected' : ''}" onclick="selectPackageSlotSize(event, ${slot.slot_number}, 'M')">M</button>
+            <button class="slot-size-btn${slotSize === 'L' ? ' selected' : ''}" onclick="selectPackageSlotSize(event, ${slot.slot_number}, 'L')">L${sizeUpgrade > 0 ? ` <em>+${formatMoney(sizeUpgrade)}</em>` : ''}</button>
+          </div>
+        </div>
         <div class="slot-options">
           ${options.map((opt) => {
             const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
@@ -921,12 +991,19 @@ function renderPackageDetail() {
       <span class="qty-value" id="pkg-qty">${packageDetail.qty}</span>
       <button class="qty-btn" onclick="changePackageQty(1)">+</button>
     </div>
-    <div class="price-total">${formatMoney(pricing.total * packageDetail.qty)}</div>
+    <div class="price-total" id="pkg-price-total">${formatMoney(pricing.total * packageDetail.qty)}</div>
     <button class="btn btn-primary btn-checkout" onclick="addToCartPackage()" ${complete ? '' : 'disabled'}>
       ${complete ? 'Add to Cart' : `Choose ${needed} dishes (${chosen}/${needed})`}
     </button>
   `;
   showView('view-package');
+}
+
+/** Upgrade a single slot to M or L (re-renders the detail view). */
+function selectPackageSlotSize(event, slotNumber, size) {
+  if (event && event.stopPropagation) event.stopPropagation();
+  packageDetail.slotSizes[Number(slotNumber)] = size;
+  renderPackageDetail();
 }
 
 function selectPackageSlot(slotNumber, productId, el) {
@@ -938,9 +1015,14 @@ function selectPackageSlot(slotNumber, productId, el) {
   if (!pkg) return;
   const needed = Number(pkg.selections) || (pkg.slots || []).length || 0;
   const chosen = Object.keys(packageDetail.choices).length;
-  const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size);
+  const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size, packageDetail.slotSizes);
   const totalEl = $id('package-detail').querySelector('.price-total');
-  if (totalEl) totalEl.textContent = formatMoney(pricing.total * packageDetail.qty);
+  if (totalEl) {
+    totalEl.textContent = formatMoney(pricing.total * packageDetail.qty);
+    totalEl.classList.remove('flash');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('flash');
+  }
   const btn = $id('package-detail').querySelector('.btn-checkout');
   if (btn) {
     btn.disabled = chosen < needed;
@@ -948,6 +1030,20 @@ function selectPackageSlot(slotNumber, productId, el) {
   }
   const counter = $id('package-detail').querySelector('.detail-desc strong');
   if (counter && pkg.is_custom) counter.textContent = `${chosen}/${needed}`;
+  // Reactive L-button price for this slot (depends on the chosen dish)
+  const slotEl = el.closest('.package-slot');
+  if (slotEl) {
+    const lBtn = slotEl.querySelector('.slot-size-btn:last-child');
+    if (lBtn) {
+      const realSlot = (pkg.slots || []).find((s) => Number(s.slot_number) === Number(slotNumber)) || { slot_number: slotNumber };
+      const allOptions = packageSlotOptions(pkg, realSlot);
+      const opts = filterOptionsByGroup(allOptions, slotGroupFor(pkg, realSlot, (pkg.slots || []).length));
+      const opt = opts.find((o) => Number(o.product_id) === Number(productId));
+      let up = opt ? Number(opt.size_upgrade_price) || 0 : 0;
+      if (!up) up = variantPriceDiff(productId);
+      lBtn.innerHTML = `L${up > 0 ? ` <em>+${formatMoney(up)}</em>` : ''}`;
+    }
+  }
 }
 
 function selectPackageSize(size) {
@@ -961,9 +1057,14 @@ function changePackageQty(delta) {
   if (qtyEl) qtyEl.textContent = packageDetail.qty;
   const pkg = currentPackage();
   if (!pkg) return;
-  const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size);
+  const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size, packageDetail.slotSizes);
   const totalEl = $id('package-detail').querySelector('.price-total');
-  if (totalEl) totalEl.textContent = formatMoney(pricing.total * packageDetail.qty);
+  if (totalEl) {
+    totalEl.textContent = formatMoney(pricing.total * packageDetail.qty);
+    totalEl.classList.remove('flash');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('flash');
+  }
 }
 
 function addToCartPackage() {
@@ -976,6 +1077,7 @@ function addToCartPackage() {
   const slotChoices = Object.keys(packageDetail.choices).map((slot) => ({
     slot_number: Number(slot),
     product_id: Number(packageDetail.choices[slot]),
+    size: packageDetail.slotSizes[Number(slot)] || packageDetail.size,
   }));
   localAddItem('package', packageDetail.pkgId, packageDetail.qty, packageDetail.size, slotChoices);
   showToast('Added to cart!');
@@ -1016,7 +1118,7 @@ function showFoodPacks() {
     return;
   }
   container.innerHTML = foodPacks.map((fp) => `
-    <div class="product-card" onclick="addToCartFoodPack(${fp.id})">
+    <div class="product-card" onclick="showFoodPackDetail(${fp.id})">
       ${imageHtml(fp.photo_url, fp.name)}
       <div class="info">
         <div class="name">${esc(fp.name)}</div>
@@ -1035,8 +1137,81 @@ async function retryFoodPacks() {
   showFoodPacks();
 }
 
-function addToCartFoodPack(fpId) {
-  localAddItem('food_pack', fpId, 1);
+// ---------- Food Pack detail (pieces input, min 10) ----------
+function currentFoodPack() {
+  return foodPacks.find((x) => Number(x.id) === Number(foodPackDetail.fpId)) || null;
+}
+
+function showFoodPackDetail(fpId) {
+  const fp = foodPacks.find((x) => Number(x.id) === Number(fpId));
+  if (!fp) return;
+  foodPackDetail = { fpId: Number(fp.id), pieces: FOOD_PACK_MIN_PIECES };
+  renderFoodPackDetail();
+}
+
+function renderFoodPackDetail() {
+  const fp = currentFoodPack();
+  if (!fp) return;
+  const container = $id('food-pack-detail');
+  container.innerHTML = `
+    ${imageHtml(fp.photo_url, fp.name, 'detail-image')}
+    <div class="detail-name">${esc(fp.name)}</div>
+    <div class="detail-desc">${esc(fp.description || '')}</div>
+    ${fp.serves ? `<div class="serves">Serves ${esc(fp.serves)}</div>` : ''}
+    <div class="pkg-price-line compact">
+      <span class="price">${formatMoney(fp.price)}</span>
+      <span class="per-piece">per piece</span>
+    </div>
+    <label class="pieces-label">Pieces:</label>
+    <div class="qty-selector">
+      <button class="qty-btn" onclick="changeFoodPackPieces(-1)">−</button>
+      <input type="number" class="pieces-input" id="fp-pieces" min="${FOOD_PACK_MIN_PIECES}" value="${foodPackDetail.pieces}" oninput="setFoodPackPieces(this.value)">
+      <button class="qty-btn" onclick="changeFoodPackPieces(1)">+</button>
+    </div>
+    <div class="min-hint">Minimum of ${FOOD_PACK_MIN_PIECES} pieces</div>
+    <div class="price-total" id="fp-total">${formatMoney(fp.price * foodPackDetail.pieces)}</div>
+    <button class="btn btn-primary btn-checkout" onclick="addToCartFoodPack()">Add to Cart</button>
+  `;
+  showView('view-food-pack-detail');
+}
+
+/** Set pieces from the number input; clamps to the minimum. */
+function setFoodPackPieces(value) {
+  const n = Math.max(FOOD_PACK_MIN_PIECES, Math.floor(Number(value) || 0));
+  foodPackDetail.pieces = n;
+  const input = $id('fp-pieces');
+  if (input && Number(value) !== n) input.value = n;
+  updateFoodPackTotal();
+}
+
+/** ± stepper for the pieces input; clamps to the minimum. */
+function changeFoodPackPieces(delta) {
+  foodPackDetail.pieces = Math.max(FOOD_PACK_MIN_PIECES, foodPackDetail.pieces + delta);
+  const input = $id('fp-pieces');
+  if (input) input.value = foodPackDetail.pieces;
+  updateFoodPackTotal();
+}
+
+/** Reactive total = price per piece × pieces (with flash). */
+function updateFoodPackTotal() {
+  const fp = currentFoodPack();
+  if (!fp) return;
+  const totalEl = $id('fp-total');
+  if (totalEl) {
+    totalEl.textContent = formatMoney(fp.price * foodPackDetail.pieces);
+    totalEl.classList.remove('flash');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('flash');
+  }
+}
+
+function addToCartFoodPack() {
+  const fp = currentFoodPack();
+  if (!fp) return;
+  if (foodPackDetail.pieces < FOOD_PACK_MIN_PIECES) {
+    return showToast(`Minimum of ${FOOD_PACK_MIN_PIECES} pieces required`);
+  }
+  localAddItem('food_pack', foodPackDetail.fpId, foodPackDetail.pieces);
   showToast('Added to cart!');
 }
 
@@ -1072,8 +1247,12 @@ function cartItemUnitPrice(item) {
     const pkg = packages.find((p) => Number(p.id) === Number(item.package_id));
     if (!pkg) return null;
     const choices = {};
-    (item.slot_choices || []).forEach((c) => { choices[Number(c.slot_number)] = Number(c.product_id); });
-    return pricePackageChoices(pkg, choices, item.variant_size).total;
+    const slotSizes = {};
+    (item.slot_choices || []).forEach((c) => {
+      choices[Number(c.slot_number)] = Number(c.product_id);
+      if (c.size) slotSizes[Number(c.slot_number)] = c.size;
+    });
+    return pricePackageChoices(pkg, choices, item.variant_size, slotSizes).total;
   }
   if (item.product_id) {
     const p = products.find((x) => Number(x.id) === Number(item.product_id));
@@ -1084,12 +1263,13 @@ function cartItemUnitPrice(item) {
   return null;
 }
 
-/** Composition text for package cart items, e.g. "Pork Rebozdo, Pancit Bam-i". */
+/** Composition text for package cart items, e.g. "Chicken (L), Pancit Bam-i". */
 function slotChoiceText(item) {
   if (!Array.isArray(item.slot_choices) || item.slot_choices.length === 0) return '';
   return item.slot_choices.map((c) => {
     const p = products.find((x) => Number(x.id) === Number(c.product_id));
-    return p ? p.name : 'Item #' + c.product_id;
+    const name = p ? p.name : 'Item #' + c.product_id;
+    return c.size === 'L' ? `${name} (L)` : name;
   }).join(', ');
 }
 
@@ -1150,7 +1330,13 @@ function updateCartItem(itemId, qty) {
   if (!it) return;
   const next = Number(qty) || 0;
   if (next <= 0) return removeCartItem(itemId);
-  it.quantity = next;
+  // Food packs keep the per-piece minimum even when edited in the cart.
+  if (it.food_pack_id && next < FOOD_PACK_MIN_PIECES) {
+    it.quantity = FOOD_PACK_MIN_PIECES;
+    showToast(`Minimum of ${FOOD_PACK_MIN_PIECES} pieces for food packs`);
+  } else {
+    it.quantity = next;
+  }
   saveCart();
 }
 

@@ -284,6 +284,18 @@ body {
   gap: 12px;
 }
 
+/* === Packages Grid (single column) === */
+.packages-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.packages-grid .product-card img,
+.pkg-card-tall img {
+  height: 280px;
+}
+
 .product-card {
   background: #fff;
   border: 2px solid #f0f0f0;
@@ -428,6 +440,58 @@ body {
   color: #2d3436;
 }
 
+/* === Food Pack pieces input === */
+.pieces-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #636e72;
+  margin: 14px 0 0;
+}
+
+.qty-selector .pieces-input {
+  width: 76px;
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #2d3436;
+  border: 2px solid #ffe3e0;
+  border-radius: 12px;
+  padding: 6px 4px;
+  font-family: inherit;
+  outline: none;
+  background: #fff;
+}
+
+.qty-selector .pieces-input:focus {
+  border-color: #e74c3c;
+}
+
+/* hide native number spinners for a clean look */
+.qty-selector .pieces-input::-webkit-outer-spin-button,
+.qty-selector .pieces-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.qty-selector .pieces-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.min-hint {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #e74c3c;
+  margin: -8px 0 12px;
+}
+
+.per-piece {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #636e72;
+}
+
 /* === Package Customization === */
 .package-slot {
   margin: 16px 0;
@@ -442,6 +506,57 @@ body {
   font-size: 0.9rem;
   font-weight: 700;
   color: #2d3436;
+}
+
+.slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.slot-header h4 {
+  margin-bottom: 0;
+}
+
+.slot-size-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.slot-size-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #636e72;
+  margin-right: 2px;
+}
+
+.slot-size-btn {
+  padding: 4px 10px;
+  border: 1.5px solid #e74c3c;
+  background: #fff;
+  color: #e74c3c;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.slot-size-btn.selected {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.slot-size-btn em {
+  font-style: normal;
+  font-size: 0.62rem;
+  font-weight: 600;
+  margin-left: 2px;
 }
 
 .slot-options {
@@ -953,6 +1068,18 @@ body {
   color: #2d3436;
   margin: 12px 0;
   text-align: center;
+  transition: color 0.2s ease;
+}
+
+.price-total.flash {
+  color: #e74c36;
+  animation: priceFlash 0.4s ease;
+}
+
+@keyframes priceFlash {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
 }
 
 .section-spaced {
