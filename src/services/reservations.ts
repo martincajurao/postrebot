@@ -57,6 +57,11 @@ export async function createReservation(input: {
   return Number(data!.id);
 }
 
+export async function getReservationByOrderId(orderId: number): Promise<any | null> {
+  const { data } = await supa().from('reservations').select('*').eq('order_id', orderId).maybeSingle();
+  return data;
+}
+
 export async function cancelReservation(id: number): Promise<void> {
   await supa().from('reservations').update({ status: 'CANCELLED' }).eq('id', id);
 }

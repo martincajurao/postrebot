@@ -1,5 +1,6 @@
 ﻿﻿import type { Request, Response } from 'express';
 import { supa } from '../db/supabase';
+import { getReservationByOrderId } from '../services/reservations';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
 
@@ -459,11 +460,11 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
 }
 
 // ---------- notification helpers (used by admin actions) ----------
-export function notifyOrderStatus(psid: string, status: string, orderNumber?: string, order?: any): void {
+export async function notifyOrderStatus(psid: string, status: string, orderNumber?: string, order?: any): Promise<void> {
   const orderRef = orderNumber ? ` (${orderNumber})` : '';
   
   // Build reservation form for CONFIRMED orders with fulfillment date/time
-  const buildReservationForm = (): string => {
+  const buildReservationForm = async (): Promise<string> => {
     if (!order || !order.fulfillment_date) return '';
     
     // Handle customer data - could be nested from join or direct property
@@ -473,6 +474,15 @@ export function notifyOrderStatus(psid: string, status: string, orderNumber?: st
     const orderType = order.order_type === 'delivery' ? 'Delivery' : 'Pickup';
     const location = order.address || 'N/A';
     
+    // Fetch reservation reference number
+    let reservationRef = '';
+    if (order.id) {
+      const reservation = await getReservationByOrderId(order.id);
+      if (reservation) {
+        reservationRef = `\n📋 Reservation: RES-${reservation.id}`;
+      }
+    }
+    
     return (
       `\n\n𝙍𝙀𝙎𝙀𝙍𝙑𝘼𝙏𝙄𝙊𝙉 𝙁𝙊𝙍𝙈` +
       `\n━━━━━━━━━━━━━━━━━━━` +
@@ -481,19 +491,24 @@ export function notifyOrderStatus(psid: string, status: string, orderNumber?: st
       `\n𝑵𝒂𝒎𝒆: ${customerName}` +
       `\n𝑪𝒐𝒏𝒕𝒂𝒄𝒕#: ${contactNum}` +
       `\n𝑶𝒓𝒅𝒆𝒓: ${orderType}` +
-      `\n𝑳𝒐𝒄𝒂𝒕𝒊𝒐𝒏,𝒍𝒂𝒏𝒅𝒎𝒂𝒓𝒌: ${location}}`
+      `\n𝑳𝒐𝒄𝒂𝒕𝒊𝒐𝒏,𝒍𝒂𝒏𝒅𝒎𝒂𝒓𝒌: ${location}}` +
+      reservationRef
     );
   };
   
   const messages: Record<string, string> = {
-    CONFIRMED: `Good news! Your order${orderRef} has been confirmed and will be prepared soon.${buildReservationForm()}`,
+    CONFIRMED: `Good news! Your order${orderRef} has been confirmed and will be prepared on scheduled date.`,
     PREPARING: `Your order${orderRef} is now being prepared. We'll let you know when it's ready!`,
     READY: `Your order${orderRef} is ready! Our delivery rider will pick it up shortly.`,
     CANCELLED: `Your order${orderRef} has been cancelled. Contact us if this is unexpected.`,
     COMPLETED: `Your order${orderRef} has been completed. Thank you for ordering from Postre Food Products!`,
   };
-  const msg = messages[status];
-  if (msg) sendText(psid, msg).catch(() => { });
+  
+  let msg = messages[status];
+  if (msg && status === 'CONFIRMED') {
+    msg += await buildReservationForm();
+  }
+  if (msg) await sendText(psid, msg);
 }
 
 /** Rider has picked up the order - customer is informed it's on the way. */
