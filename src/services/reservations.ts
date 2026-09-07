@@ -1,4 +1,16 @@
 ﻿﻿import { supa } from '../db/supabase';
+/**
+ * Reservation status that mirrors each order lifecycle status. Reservations have
+ * no PREPARING/READY — an in-progress order stays CONFIRMED on the schedule board.
+ */
+export const RESV_STATUS_FOR_ORDER: Record<string, string> = {
+  PENDING: 'PENDING',
+  CONFIRMED: 'CONFIRMED',
+  PREPARING: 'CONFIRMED',
+  READY: 'CONFIRMED',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+};
 
 export interface SlotAvailability {
   label: string;
@@ -63,6 +75,49 @@ export async function getReservationByOrderId(orderId: number): Promise<any | nu
 }
 
 /**
+ * Mirror an order's lifecycle onto its linked reservation (idempotent):
+ *  - CONFIRMED / PREPARING / READY → reservation CONFIRMED (in progress)
+ *  - COMPLETED → reservation COMPLETED, CANCELLED → reservation CANCELLED
+ * Creates the reservation if a scheduled order has none yet.
+ * This is the ONE sync path — used by admin status changes AND bot flows.
+ */
+export async function syncReservationFromOrder(orderId: number): Promise<void> {
+  if (!orderId) return;
+  const db = supa();
+  const { data: order } = await db.from('orders').select('*, customers(name, phone)').eq('id', orderId).maybeSingle();
+  if (!order) return;
+  const target = RESV_STATUS_FOR_ORDER[order.status];
+  if (!target) return;
+  const { data: res } = await db.from('reservations').select('id, status').eq('order_id', order.id).maybeSingle();
+  if (res) {
+    if (res.status !== target) await db.from('reservations').update({ status: target }).eq('id', res.id);
+    return;
+  }
+  if (order.fulfillment_date && order.time_slot) await ensureReservationFromOrder(order);
+}
+
+/**
+ * Mirror a reservation status change onto its linked order (escalation only —
+ * a reservation can confirm/complete/cancel the order, never move it backwards).
+ * Writes order_status_history; customer notifications stay in the API layer.
+ */
+export async function syncOrderFromReservation(orderId: number, resStatus: string): Promise<{ changed: boolean; status?: string }> {
+  if (!orderId) return { changed: false };
+  const db = supa();
+  const { data: order } = await db.from('orders').select('id, status').eq('id', orderId).maybeSingle();
+  if (!order) return { changed: false };
+  const target =
+    resStatus === 'CANCELLED' ? 'CANCELLED'
+    : resStatus === 'COMPLETED' ? 'COMPLETED'
+    : resStatus === 'CONFIRMED' ? (order.status === 'PENDING' ? 'CONFIRMED' : order.status)
+    : null;
+  if (!target || target === order.status) return { changed: false, status: order.status };
+  await db.from('orders').update({ status: target }).eq('id', order.id);
+  await db.from('order_status_history').insert({ order_id: order.id, status: target });
+  return { changed: true, status: target };
+}
+
+/**
  * Convert a confirmed order into a reservation (idempotent). Skips the
  * date-open / slot-capacity checks — an existing customer order must not be
  * rejected at confirm time. Returns the reservation id (or null if the order
@@ -89,7 +144,7 @@ export async function ensureReservationFromOrder(order: any): Promise<number | n
     phone: order.phone || null,
     res_date: resDate,
     time_slot: timeSlot,
-    status: 'CONFIRMED',
+    status: RESV_STATUS_FOR_ORDER[order.status] || 'CONFIRMED',
     notes,
   }).select('id').single();
   if (error) throw new Error(error.message);

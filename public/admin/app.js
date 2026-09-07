@@ -899,13 +899,15 @@ views.reservations = async (main) => {
           <td><b>${esc(r.time_slot)}</b></td>
           <td><div>${esc(r.customer_name)}</div>${r.notes ? `<div class="muted" style="font-size:0.75rem">${esc(r.notes)}</div>` : ''}</td>
           <td>${esc(r.phone || '—')}</td>
-          <td>${r.order_id ? `<a href="#" class="order-link" data-order="${r.order_id}" style="color:#e74c3c">#${r.order_id}</a>` : '—'}</td>
+          <td>${r.order_id ? `<a href="#" class="order-link" data-order="${r.order_id}" style="color:#e74c3c">#${r.order_id}</a>${r.order ? `<div class="muted" style="font-size:0.75rem;margin-top:2px">₱${Number(r.order.total || 0).toLocaleString('en-PH')} · <span class="badge b-${esc(r.order.status)}">${esc(r.order.status)}</span>${r.order.payment_status === 'PAID' ? ' · 💰' : ''}</div>` : ''}` : '—'}</td>
           <td><span class="badge b-${esc(r.status)}">${esc(r.status)}</span></td>
           <td><div class="row-actions">
             <button class="btn sm" data-resv-view="${r.id}" title="View details">👁️</button>
             ${r.status === 'PENDING' ? `<button class="btn ok sm" data-resv-ok="${r.id}">Confirm</button>` : ''}
             ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn sm" data-resv-move="${r.id}">Reschedule</button>` : ''}
             ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">Cancel</button>` : ''}
+            ${r.order && NEXT_STATUS[r.order.status] ? `<button class="btn ok sm" data-resv-adv="${r.order_id}" data-resv-next="${NEXT_STATUS[r.order.status]}" title="Advance linked order to ${NEXT_STATUS[r.order.status]}">→ ${NEXT_STATUS[r.order.status]}</button>` : ''}
+            ${r.order && r.order.payment_status !== 'PAID' && r.order.status !== 'CANCELLED' ? `<button class="btn sm" data-resv-paid="${r.order_id}" title="Mark linked order as paid">💰 Paid</button>` : ''}
             ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-resv="${r.id}" title="Permanently delete">🗑</button>` : ''}
           </div></td>
         </tr>`).join('') || '<tr><td colspan="7" class="muted">No reservations for this date.</td></tr>'}
@@ -924,7 +926,15 @@ views.reservations = async (main) => {
       hideLoading();
 
       const row = (label, value) => `<div style="display:flex;justify-content:space-between;padding:10px;background:#f8f9fa;border-radius:8px"><span style="color:#666">${label}</span><span style="font-weight:700">${value}</span></div>`;
-      const orderRow = reservationDetails.order_id ? row('Linked Order', `<span style="color:#e74c3c">#${reservationDetails.order_id}</span>`) : '';
+      const ord = reservationDetails.order || null;
+      const orderRow = reservationDetails.order_id ? row('Linked Order', `<span style="color:#e74c3c">#${reservationDetails.order_id}</span>${ord ? ` · <span class="badge b-${esc(ord.status)}">${esc(ord.status)}</span> · ₱${Number(ord.total || 0).toLocaleString('en-PH')} · ${esc(ord.payment_status || 'UNPAID')}` : ''}`) : '';
+      const orderActions = ord && ord.status !== 'CANCELLED' && ord.status !== 'COMPLETED' ? `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px">
+          ${NEXT_STATUS[ord.status] ? `<button class="btn ok sm" id="m-adv" data-next="${NEXT_STATUS[ord.status]}">→ ${NEXT_STATUS[ord.status]}</button>` : ''}
+          ${ord.payment_status !== 'PAID' ? `<button class="btn sm" id="m-paid">💰 Mark Paid</button>` : ''}
+          ${ord.order_type === 'delivery' ? `<button class="btn sm" id="m-rider">🛵 Rider OTW</button>` : ''}
+          <button class="btn sm" id="m-disc">➖ Discount</button>
+        </div>` : '';
       const notesRow = reservationDetails.notes ? row('Notes', esc(reservationDetails.notes)) : '';
       const itemsRow = renderOrderItems(reservationDetails.order_items);
 
@@ -941,7 +951,32 @@ views.reservations = async (main) => {
           ${notesRow}
           ${row('Created', esc(reservationDetails.created_at || '—'))}
         </div>
+        ${orderActions}
         <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
+      // Modal order actions — same endpoints as the Orders page
+      const ordId = reservationDetails.order_id;
+      const mAdv = document.getElementById('m-adv');
+      if (mAdv) mAdv.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+        await api(`/orders/${ordId}/status`, { method: 'POST', body: { status: mAdv.dataset.next } });
+        closeModal(); toast('Order advanced'); navigate('reservations');
+      }));
+      const mPaid = document.getElementById('m-paid');
+      if (mPaid) mPaid.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+        await api(`/orders/${ordId}/payment-status`, { method: 'POST', body: { payment_status: 'PAID' } });
+        closeModal(); toast('Marked as paid'); navigate('reservations');
+      }));
+      const mRider = document.getElementById('m-rider');
+      if (mRider) mRider.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+        await api(`/orders/${ordId}/status`, { method: 'POST', body: { status: 'READY' } });
+        closeModal(); toast('Rider on-the-way notification sent'); navigate('reservations');
+      }));
+      const mDisc = document.getElementById('m-disc');
+      if (mDisc) mDisc.addEventListener('click', async () => {
+        const val = prompt('Additional discount (₱):');
+        if (val === null) return;
+        await api(`/orders/${ordId}/discount`, { method: 'POST', body: { additional_discount: Number(val) || 0 } });
+        closeModal(); toast('Discount applied'); navigate('reservations');
+      });
     }));
 
     // Order link handler
@@ -954,6 +989,16 @@ views.reservations = async (main) => {
       if (!confirm('Cancel this reservation?')) return;
       await api(`/reservations/${b.dataset.resvCancel}/cancel`, { method: 'POST' });
       toast('Cancelled'); navigate('reservations');
+    })));
+    // Order actions on the linked order — same endpoints as the Orders page,
+    // so notifications / payment / totals behave identically.
+    main.querySelectorAll('[data-resv-adv]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      await api(`/orders/${b.dataset.resvAdv}/status`, { method: 'POST', body: { status: b.dataset.resvNext } });
+      toast('Order advanced'); navigate('reservations');
+    })));
+    main.querySelectorAll('[data-resv-paid]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      await api(`/orders/${b.dataset.resvPaid}/payment-status`, { method: 'POST', body: { payment_status: 'PAID' } });
+      toast('Marked as paid'); navigate('reservations');
     })));
     main.querySelectorAll('[data-resv-move]').forEach((b) => b.addEventListener('click', () => {
       const r = resvs.find((x) => x.id == b.dataset.resvMove);

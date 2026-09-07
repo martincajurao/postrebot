@@ -6,7 +6,8 @@ import { updateOrderStatus, updatePaymentStatus, getOrderItems } from '../servic
 import { getVapidPublicKey, storeSubscription, removeSubscription, sendPushToAdmins, getPushStatus } from '../services/push';
 import {
   createReservation, cancelReservation, updateReservationStatus,
-  rescheduleReservation, slotAvailability, isDateOpen, ensureReservationFromOrder,
+  rescheduleReservation, slotAvailability, isDateOpen,
+  syncReservationFromOrder, syncOrderFromReservation,
 } from '../services/reservations';
 import { computeCartTotals } from '../services/pricing';
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
@@ -331,12 +332,10 @@ r.delete('/food-packs/:id', async (req, res) => {
 // ---- Orders ----
 r.get('/orders', async (_req, res) => {
   const { data } = await supa().from('orders').select('*, customers(name)').order('id', { ascending: false });
-  // Confirmed orders live on the Reservations page now — hide any order that
-  // has been converted into a reservation.
-  const { data: linked } = await supa().from('reservations').select('order_id');
-  const linkedIds = new Set((linked || []).map((r: any) => Number(r.order_id)));
-  const visible = (data || []).filter((o: any) => !linkedIds.has(Number(o.id)));
-  res.json(visible.map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, customers: undefined })));
+  // Order and reservation are ONE entity: every order stays visible here with
+  // the full pipeline (advance / payment / rider / discount); the Reservations
+  // page shows the same entity as its schedule entry.
+  res.json((data || []).map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, customers: undefined })));
 });
 r.get('/orders/:id', async (req, res) => {
   const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
@@ -361,16 +360,9 @@ r.post('/orders/:id/status', async (req, res) => {
   if (!order) return res.status(404).json({ error: 'Order not found' });
   await updateOrderStatus(order.id, status);
 
-  // Sync reservation status when order is confirmed
-  if (status === 'CONFIRMED' && order.fulfillment_date) {
-    const { data: reservation } = await supa().from('reservations').select('id').eq('order_id', order.id).maybeSingle();
-    if (reservation) {
-      await updateReservationStatus(reservation.id, 'CONFIRMED');
-    } else {
-      // Confirmed orders move to the Reservations page with full control:
-      await ensureReservationFromOrder(order);
-    }
-  }
+  // One sync path: mirror the order lifecycle onto its linked reservation
+  // (CONFIRMED/PREPARING/READY → CONFIRMED, COMPLETED → COMPLETED, CANCELLED → CANCELLED).
+  await syncReservationFromOrder(order.id);
 
   if (order.customer_id) {
     const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
@@ -407,16 +399,8 @@ r.post('/orders/:id/confirm', async (req, res) => {
   await supa().from('orders').update({ status: 'CONFIRMED', delivery_fee: fee, total: newTotal }).eq('id', order.id);
   await supa().from('order_status_history').insert({ order_id: order.id, status: 'CONFIRMED' });
 
-  // Sync reservation status when order is confirmed
-  if (order.fulfillment_date) {
-    const { data: reservation } = await supa().from('reservations').select('id').eq('order_id', order.id).maybeSingle();
-    if (reservation) {
-      await updateReservationStatus(reservation.id, 'CONFIRMED');
-    } else {
-      // Confirmed orders move to the Reservations page with full control:
-      await ensureReservationFromOrder(order);
-    }
-  }
+  // One sync path: mirror CONFIRMED onto the linked reservation (creates it if missing).
+  await syncReservationFromOrder(order.id);
 
   if (order.customer_id) {
     const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
@@ -569,7 +553,7 @@ r.get('/reservations', async (req, res) => {
   const search = String(req.query.q || '').trim();
   const withCancelled = String(req.query.include_cancelled || '') === '1';
 
-  let query = supa().from('reservations').select('*');
+  let query = supa().from('reservations').select('*, order:orders(id, status, total, payment_status, order_type)');
   if (!withCancelled) query = query.neq('status', 'CANCELLED');
   if (date) {
     query = query.eq('res_date', date);
@@ -596,9 +580,13 @@ r.get('/reservations/:id', async (req, res) => {
   const { data: reservation } = await supa().from('reservations').select('*').eq('id', req.params.id).maybeSingle();
   if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
 
-  // If linked to an order, fetch order items
+  // If linked to an order, fetch its summary + items
   if (reservation.order_id) {
-    const items = await getOrderItems(reservation.order_id);
+    const [{ data: order }, items] = await Promise.all([
+      supa().from('orders').select('id, status, total, payment_status, order_type').eq('id', reservation.order_id).maybeSingle(),
+      getOrderItems(reservation.order_id),
+    ]);
+    reservation.order = order || null;
     reservation.order_items = items;
   }
 
@@ -613,12 +601,41 @@ r.post('/reservations', async (req, res) => {
   }
 });
 r.post('/reservations/:id/cancel', async (req, res) => {
-  await cancelReservation(Number(req.params.id));
+  const id = Number(req.params.id);
+  await cancelReservation(id);
+  // Mirror the cancellation onto the linked order so it also leaves the
+  // Orders pipeline and frees its time slot everywhere.
+  const { data: resv } = await supa().from('reservations').select('order_id').eq('id', id).maybeSingle();
+  if (resv?.order_id) {
+    const sync = await syncOrderFromReservation(Number(resv.order_id), 'CANCELLED');
+    if (sync.changed && sync.status) {
+      const { data: ord } = await supa().from('orders').select('order_number, customer_id').eq('id', Number(resv.order_id)).maybeSingle();
+      if (ord?.customer_id) {
+        const { data: cust } = await supa().from('customers').select('psid').eq('id', ord.customer_id).maybeSingle();
+        if (cust?.psid) await notifyOrderStatus(cust.psid, sync.status, ord.order_number);
+      }
+    }
+    return res.json({ ok: true, order_status: sync.status ?? null });
+  }
   res.json({ ok: true });
 });
 r.post('/reservations/:id/status', async (req, res) => {
   const { status } = req.body;
-  await updateReservationStatus(Number(req.params.id), status);
+  const id = Number(req.params.id);
+  await updateReservationStatus(id, status);
+  // Mirror onto the linked order (escalation only) so both views stay in step.
+  const { data: resv } = await supa().from('reservations').select('order_id').eq('id', id).maybeSingle();
+  if (resv?.order_id) {
+    const sync = await syncOrderFromReservation(Number(resv.order_id), String(status));
+    if (sync.changed && sync.status) {
+      const { data: ord } = await supa().from('orders').select('order_number, customer_id').eq('id', Number(resv.order_id)).maybeSingle();
+      if (ord?.customer_id) {
+        const { data: cust } = await supa().from('customers').select('psid').eq('id', ord.customer_id).maybeSingle();
+        if (cust?.psid) await notifyOrderStatus(cust.psid, sync.status, ord.order_number);
+      }
+    }
+    return res.json({ ok: true, order_status: sync.status ?? null });
+  }
   res.json({ ok: true });
 });
 r.post('/reservations/:id/reschedule', async (req, res) => {

@@ -1,6 +1,7 @@
 ﻿﻿import type { Request, Response } from 'express';
 import { supa } from '../db/supabase';
 import { getReservationByOrderId } from '../services/reservations';
+import { getOrderItems } from '../services/orders';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
 
@@ -482,7 +483,20 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
         reservationRef = `\n📋 Reservation: RES-${reservation.id}`;
       }
     }
-    
+
+    // Ordered menu items (with package slot choices when present)
+    let itemsBlock = '';
+    if (order.id) {
+      try {
+        const items = await getOrderItems(order.id);
+        const lines = (items || []).map((item: any) => {
+          const pkgItems = item.package_items?.filter(Boolean)?.map((p: any) => `   • Slot ${p.slot_number}: ${p.product_name}${p.upgrade_price > 0 ? ` (+₱${p.upgrade_price})` : ''}`).join('\n');
+          return `• ${item.name} x${item.quantity} - ₱${item.line_total}${pkgItems ? '\n' + pkgItems : ''}`;
+        });
+        if (lines.length) itemsBlock = `\n𝑰𝒕𝒆𝒎𝒔:\n` + lines.join('\n') + `\n`;
+      } catch { /* send the form even if items cannot be loaded */ }
+    }
+
     return (
       `\n\n𝙍𝙀𝙎𝙀𝙍𝙑𝘼𝙏𝙄𝙊𝙉 𝙁𝙊𝙍𝙈` +
       `\n━━━━━━━━━━━━━━━━━━━` +
@@ -491,6 +505,7 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
       `\n𝑵𝒂𝒎𝒆: ${customerName}` +
       `\n𝑪𝒐𝒏𝒕𝒂𝒄𝒕#: ${contactNum}` +
       `\n𝑶𝒓𝒅𝒆𝒓: ${orderType}` +
+      itemsBlock +
       `\n𝑳𝒐𝒄𝒂𝒕𝒊𝒐𝒏,𝒍𝒂𝒏𝒅𝒎𝒂𝒓𝒌: ${location}}` +
       reservationRef
     );
