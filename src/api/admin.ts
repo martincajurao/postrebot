@@ -14,6 +14,10 @@ import { notifyOrderStatus, sendRatingRequest, sendText, sendQuickReplies } from
 
 const r = Router();
 
+// Destructive admin-only operations (permanent delete / reset) — declared here
+// so the DELETE routes below can reference it at registration time.
+const requireAdmin = requireRole('ADMIN');
+
 // ---- Messenger webview "remembered login" (public — HMAC-signed psid guard) ----
 // The bot opens /admin with psid+ts+sig signed with JWT_SECRET. An admin who
 // logged in once from the webview stays remembered for 30 days (sliding), so
@@ -437,6 +441,48 @@ r.post('/orders/:id/payment-status', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Orders: permanent delete / reset (ADMIN only) ----
+// Delete one order and everything attached to it (items, package items, status
+// history, ratings) plus any reservation derived from it.
+r.delete('/orders/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid order ID' });
+    await supa().from('reservations').delete().eq('order_id', id);
+    const { data: items } = await supa().from('order_items').select('id').eq('order_id', id);
+    const itemIds = (items || []).map((i: any) => Number(i.id));
+    if (itemIds.length) {
+      await supa().from('order_package_items').delete().in('order_item_id', itemIds);
+    }
+    await supa().from('order_items').delete().eq('order_id', id);
+    await supa().from('order_status_history').delete().eq('order_id', id);
+    await supa().from('order_ratings').delete().eq('order_id', id);
+    await supa().from('orders').delete().eq('id', id);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Reset orders: permanently clear ALL orders and their child rows + linked reservations.
+r.delete('/orders', requireAdmin, async (_req, res) => {
+  try {
+    const { data: items } = await supa().from('order_items').select('id');
+    const itemIds = (items || []).map((i: any) => Number(i.id));
+    if (itemIds.length) {
+      await supa().from('order_package_items').delete().in('order_item_id', itemIds);
+    }
+    await supa().from('order_items').delete().gte('id', 0);
+    await supa().from('order_status_history').delete().gte('id', 0);
+    await supa().from('order_ratings').delete().gte('id', 0);
+    await supa().from('reservations').delete().gte('id', 0);
+    await supa().from('orders').delete().gte('id', 0);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- Order Ratings & Feedback ----
 r.get('/ratings', async (_req, res) => {
   const { data } = await supa().from('order_ratings')
@@ -585,6 +631,28 @@ r.post('/reservations/:id/reschedule', async (req, res) => {
   }
 });
 
+// ---- Reservations: permanent delete / reset (ADMIN only) ----
+r.delete('/reservations/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid reservation ID' });
+    await supa().from('reservations').delete().eq('id', id);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Reset reservations: permanently clear ALL reservations (linked orders are kept).
+r.delete('/reservations', requireAdmin, async (_req, res) => {
+  try {
+    await supa().from('reservations').delete().gte('id', 0);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- Business Hours ----
 r.get('/business-hours', async (_req, res) => {
   const { data } = await supa().from('business_hours').select('*').order('day_of_week');
@@ -665,7 +733,6 @@ r.post('/pricing/preview', async (req, res) => {
 });
 
 // ---- Admin accounts (only full ADMINs manage these) ----
-const requireAdmin = requireRole('ADMIN');
 
 r.get('/admins', requireAdmin, async (_req, res) => {
   const { data } = await supa().from('admins').select('id, username, role, created_at').order('id');

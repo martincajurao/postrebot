@@ -601,16 +601,44 @@ views.orders = async (main) => {
   const filter = sessionStorage.getItem('orderFilter') || '';
   const orders = await api('/orders' + (filter ? '?status=' + filter : ''));
   const filters = ['', 'PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
+  const selected = new Set();
+  const renderBulkBar = () => {
+    const bar = main.querySelector('#order-bulk');
+    if (!bar) return;
+    bar.style.display = selected.size ? 'flex' : 'none';
+    const count = main.querySelector('#order-bulk-count');
+    if (count) count.textContent = `${selected.size} selected`;
+    const adv = main.querySelector('#order-bulk-advance');
+    if (adv) adv.disabled = !orders.some((o) => selected.has(o.id) && NEXT_STATUS[o.status]);
+    const paid = main.querySelector('#order-bulk-paid');
+    if (paid) paid.disabled = !orders.some((o) => selected.has(o.id) && o.payment_status !== 'PAID');
+    const cancel = main.querySelector('#order-bulk-cancel');
+    if (cancel) cancel.disabled = !orders.some((o) => selected.has(o.id) && o.status !== 'CANCELLED' && o.status !== 'COMPLETED');
+    const del = main.querySelector('#order-bulk-del');
+    if (del) del.disabled = selected.size === 0;
+  };
   main.querySelector('#orders-body').innerHTML = `
     <p style="margin-bottom:10px">
       <select id="order-filter" style="width:auto">
         ${filters.map((f) => `<option value="${f}" ${f === filter ? 'selected' : ''}>${f || 'All statuses'}</option>`).join('')}
       </select></p>
+    <div id="order-bulk" style="display:none;margin-bottom:10px;padding:8px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;align-items:center;gap:8px;flex-wrap:wrap">
+      <b id="order-bulk-count">0 selected</b>
+      <button class="btn ok sm" id="order-bulk-advance">→ Advance</button>
+      <button class="btn ghost sm" id="order-bulk-paid">Mark Paid</button>
+      <button class="btn danger sm" id="order-bulk-cancel">Cancel</button>
+      ${ROLE === 'ADMIN' ? `<button class="btn danger sm" id="order-bulk-del">🗑 Delete</button><button class="btn danger sm" id="order-bulk-reset">🔄 Reset all</button>` : ''}
+      <button class="btn ghost sm" id="order-bulk-clear">✕ Clear</button>
+    </div>
     <table>
-      <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Schedule</th><th>Payment</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr>
+        <th style="width:32px"><input type="checkbox" id="order-check-all" title="Select all"></th>
+        <th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Schedule</th><th>Payment</th><th>Status</th><th>Actions</th>
+      </tr></thead>
       <tbody>
       ${orders.map((o) => `
         <tr>
+          <td><input type="checkbox" class="order-check" value="${o.id}" title="Select order"></td>
           <td><b>${esc(o.order_number)}</b><br><span class="muted">${esc((o.created_at || '').slice(0, 10))}</span></td>
           <td>${esc(o.customer_name || '—')}<br><span class="muted">${esc(o.phone || '')}</span></td>
           <td>${(o.items || []).map((i) => `${esc(i.name)} ×${i.quantity}`).join('<br>')}</td>
@@ -624,8 +652,9 @@ views.orders = async (main) => {
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
             ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
             <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
+            ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-order="${o.id}" title="Permanently delete">🗑</button>` : ''}
           </div></td>
-        </tr>`).join('') || '<tr><td colspan="8" class="muted">No orders.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="9" class="muted">No orders.</td></tr>'}
       </tbody>
     </table>`;
   main.querySelector('#order-filter').addEventListener('change', (e) => {
@@ -662,6 +691,78 @@ views.orders = async (main) => {
       closeModal(); toast(`Deducted ${peso(amount)} from total`); navigate('orders');
     }));
   }));
+
+  // ---- Bulk actions ----
+  const checkAll = main.querySelector('#order-check-all');
+  checkAll.addEventListener('change', () => {
+    main.querySelectorAll('.order-check').forEach((b) => {
+      b.checked = checkAll.checked;
+      if (checkAll.checked) selected.add(Number(b.value)); else selected.delete(Number(b.value));
+    });
+    renderBulkBar();
+  });
+  main.querySelectorAll('.order-check').forEach((b) => b.addEventListener('change', () => {
+    const id = Number(b.value);
+    if (b.checked) selected.add(id); else selected.delete(id);
+    const ca = main.querySelector('#order-check-all');
+    const boxes = main.querySelectorAll('.order-check');
+    if (ca) {
+      ca.checked = boxes.length > 0 && [...boxes].every((x) => x.checked);
+      ca.indeterminate = selected.size > 0 && !ca.checked;
+    }
+    renderBulkBar();
+  }));
+  main.querySelector('#order-bulk-clear').addEventListener('click', () => {
+    selected.clear();
+    main.querySelectorAll('.order-check').forEach((b) => { b.checked = false; });
+    const ca = main.querySelector('#order-check-all');
+    if (ca) { ca.checked = false; ca.indeterminate = false; }
+    renderBulkBar();
+  });
+  main.querySelector('#order-bulk-advance').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const targets = orders.filter((o) => selected.has(o.id) && NEXT_STATUS[o.status]);
+    if (!targets.length) return toast('No selected orders can be advanced', true);
+    if (!confirm(`Advance ${targets.length} order(s) to their next status?`)) return;
+    await Promise.all(targets.map((o) => api(`/orders/${o.id}/status`, { method: 'POST', body: { status: NEXT_STATUS[o.status] } })));
+    toast(`Advanced ${targets.length} order(s)`); navigate('orders');
+  }));
+  main.querySelector('#order-bulk-paid').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const targets = orders.filter((o) => selected.has(o.id) && o.payment_status !== 'PAID');
+    if (!targets.length) return toast('No selected orders to mark paid', true);
+    if (!confirm(`Mark ${targets.length} order(s) as paid?`)) return;
+    await Promise.all(targets.map((o) => api(`/orders/${o.id}/payment-status`, { method: 'POST', body: { payment_status: 'PAID' } })));
+    toast(`Marked ${targets.length} order(s) as paid`); navigate('orders');
+  }));
+  main.querySelector('#order-bulk-cancel').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const targets = orders.filter((o) => selected.has(o.id) && o.status !== 'CANCELLED' && o.status !== 'COMPLETED');
+    if (!targets.length) return toast('No selected orders can be cancelled', true);
+    if (!confirm(`Cancel ${targets.length} order(s)?`)) return;
+    await Promise.all(targets.map((o) => api(`/orders/${o.id}/status`, { method: 'POST', body: { status: 'CANCELLED' } })));
+    toast(`Cancelled ${targets.length} order(s)`); navigate('orders');
+  }));
+
+  // ---- Permanent delete / reset (ADMIN only) ----
+  main.querySelectorAll('[data-del-order]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    if (!confirm(`Permanently delete order #${b.dataset.delOrder}? This cannot be undone.`)) return;
+    await api(`/orders/${b.dataset.delOrder}`, { method: 'DELETE' });
+    toast('Order deleted'); navigate('orders');
+  })));
+  const bulkDel = main.querySelector('#order-bulk-del');
+  if (bulkDel) bulkDel.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const targets = orders.filter((o) => selected.has(o.id));
+    if (!targets.length) return toast('No selected orders to delete', true);
+    if (!confirm(`Permanently delete ${targets.length} order(s)? This cannot be undone.`)) return;
+    await Promise.all(targets.map((o) => api(`/orders/${o.id}`, { method: 'DELETE' })));
+    toast(`Deleted ${targets.length} order(s)`); navigate('orders');
+  }));
+  const bulkReset = main.querySelector('#order-bulk-reset');
+  if (bulkReset) bulkReset.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    if (!orders.length) return toast('No orders to reset', true);
+    if (!confirm('⚠️ This will PERMANENTLY DELETE ALL ORDERS (and their items, ratings, history, and linked reservations). This CANNOT be undone. Continue?')) return;
+    if (!confirm('Are you absolutely sure? There is no undo for this action.')) return;
+    await api('/orders', { method: 'DELETE' });
+    toast('All orders cleared'); navigate('orders');
+  }));
 };
 
 /* ================= RESERVATIONS ================= */
@@ -676,6 +777,22 @@ views.reservations = async (main) => {
     from: sessionStorage.getItem('resvFFrom') || '',
     to: sessionStorage.getItem('resvFTo') || '',
     incCancelled: sessionStorage.getItem('resvFCancel') === '1',
+  };
+  const selected = new Set();
+  const renderResvBulk = (resvs) => {
+    const bar = main.querySelector('#resv-bulk');
+    if (!bar) return;
+    bar.style.display = selected.size ? 'flex' : 'none';
+    const count = main.querySelector('#resv-bulk-count');
+    if (count) count.textContent = `${selected.size} selected`;
+    const ok = main.querySelector('#resv-bulk-confirm');
+    if (ok) ok.disabled = !resvs.some((r) => selected.has(r.id) && r.status === 'PENDING');
+    const done = main.querySelector('#resv-bulk-complete');
+    if (done) done.disabled = !resvs.some((r) => selected.has(r.id) && r.status === 'CONFIRMED');
+    const cancel = main.querySelector('#resv-bulk-cancel');
+    if (cancel) cancel.disabled = !resvs.some((r) => selected.has(r.id) && r.status !== 'CANCELLED' && r.status !== 'COMPLETED');
+    const del = main.querySelector('#resv-bulk-del');
+    if (del) del.disabled = selected.size === 0;
   };
   main.innerHTML = `
     <h2 class="page-title">📅 Reservations</h2>
@@ -761,11 +878,24 @@ views.reservations = async (main) => {
         <div style="font-size:0.75rem;color:#383d41">Total</div>
       </div>`;
 
-    main.querySelector('#resv-body').innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Time</th><th>Customer</th><th>Phone</th><th>Order</th><th>Status</th><th>Actions</th></tr></thead>
+    main.querySelector('#resv-body').innerHTML = `
+      <div id="resv-bulk" style="display:none;margin-bottom:10px;padding:8px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;align-items:center;gap:8px;flex-wrap:wrap">
+        <b id="resv-bulk-count">0 selected</b>
+        <button class="btn ok sm" id="resv-bulk-confirm">Confirm</button>
+        <button class="btn ok sm" id="resv-bulk-complete">Complete</button>
+        <button class="btn danger sm" id="resv-bulk-cancel">Cancel</button>
+        ${ROLE === 'ADMIN' ? `<button class="btn danger sm" id="resv-bulk-del">🗑 Delete</button><button class="btn danger sm" id="resv-bulk-reset">🔄 Reset all</button>` : ''}
+        <button class="btn ghost sm" id="resv-bulk-clear">✕ Clear</button>
+      </div>
+      <div class="table-wrap"><table>
+      <thead><tr>
+        <th style="width:32px"><input type="checkbox" id="resv-check-all" title="Select all"></th>
+        <th>Time</th><th>Customer</th><th>Phone</th><th>Order</th><th>Status</th><th>Actions</th>
+      </tr></thead>
       <tbody>
       ${resvs.map((r) => `
         <tr>
+          <td><input type="checkbox" class="resv-check" value="${r.id}" title="Select reservation"></td>
           <td><b>${esc(r.time_slot)}</b></td>
           <td><div>${esc(r.customer_name)}</div>${r.notes ? `<div class="muted" style="font-size:0.75rem">${esc(r.notes)}</div>` : ''}</td>
           <td>${esc(r.phone || '—')}</td>
@@ -776,8 +906,9 @@ views.reservations = async (main) => {
             ${r.status === 'PENDING' ? `<button class="btn ok sm" data-resv-ok="${r.id}">Confirm</button>` : ''}
             ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn sm" data-resv-move="${r.id}">Reschedule</button>` : ''}
             ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">Cancel</button>` : ''}
+            ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-resv="${r.id}" title="Permanently delete">🗑</button>` : ''}
           </div></td>
-        </tr>`).join('') || '<tr><td colspan="6" class="muted">No reservations for this date.</td></tr>'}
+        </tr>`).join('') || '<tr><td colspan="7" class="muted">No reservations for this date.</td></tr>'}
       </tbody></table></div>`;
 
     // View details handler
@@ -836,6 +967,90 @@ views.reservations = async (main) => {
         closeModal(); toast('Rescheduled'); navigate('reservations');
       }));
     }));
+
+    // Restore selections after re-render
+    main.querySelectorAll('.resv-check').forEach((b) => { b.checked = selected.has(Number(b.value)); });
+    const checkAllBox = main.querySelector('#resv-check-all');
+    if (checkAllBox) {
+      const boxes = main.querySelectorAll('.resv-check');
+      checkAllBox.checked = boxes.length > 0 && [...boxes].every((x) => x.checked);
+      checkAllBox.indeterminate = selected.size > 0 && !checkAllBox.checked;
+    }
+    renderResvBulk(resvs);
+
+    // ---- Bulk actions ----
+    if (checkAllBox) checkAllBox.addEventListener('change', () => {
+      main.querySelectorAll('.resv-check').forEach((b) => {
+        b.checked = checkAllBox.checked;
+        if (checkAllBox.checked) selected.add(Number(b.value)); else selected.delete(Number(b.value));
+      });
+      renderResvBulk(resvs);
+    });
+    main.querySelectorAll('.resv-check').forEach((b) => b.addEventListener('change', () => {
+      const id = Number(b.value);
+      if (b.checked) selected.add(id); else selected.delete(id);
+      const ca = main.querySelector('#resv-check-all');
+      const boxes = main.querySelectorAll('.resv-check');
+      if (ca) {
+        ca.checked = boxes.length > 0 && [...boxes].every((x) => x.checked);
+        ca.indeterminate = selected.size > 0 && !ca.checked;
+      }
+      renderResvBulk(resvs);
+    }));
+    const bulkClear = main.querySelector('#resv-bulk-clear');
+    if (bulkClear) bulkClear.addEventListener('click', () => {
+      selected.clear();
+      main.querySelectorAll('.resv-check').forEach((b) => { b.checked = false; });
+      const ca = main.querySelector('#resv-check-all');
+      if (ca) { ca.checked = false; ca.indeterminate = false; }
+      renderResvBulk(resvs);
+    });
+    const bulkConfirm = main.querySelector('#resv-bulk-confirm');
+    if (bulkConfirm) bulkConfirm.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      const targets = resvs.filter((r) => selected.has(r.id) && r.status === 'PENDING');
+      if (!targets.length) return toast('No selected reservations can be confirmed', true);
+      if (!confirm(`Confirm ${targets.length} reservation(s)?`)) return;
+      await Promise.all(targets.map((r) => api(`/reservations/${r.id}/status`, { method: 'POST', body: { status: 'CONFIRMED' } })));
+      toast(`Confirmed ${targets.length} reservation(s)`); navigate('reservations');
+    }));
+    const bulkComplete = main.querySelector('#resv-bulk-complete');
+    if (bulkComplete) bulkComplete.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      const targets = resvs.filter((r) => selected.has(r.id) && r.status === 'CONFIRMED');
+      if (!targets.length) return toast('No selected reservations can be completed', true);
+      if (!confirm(`Complete ${targets.length} reservation(s)?`)) return;
+      await Promise.all(targets.map((r) => api(`/reservations/${r.id}/status`, { method: 'POST', body: { status: 'COMPLETED' } })));
+      toast(`Completed ${targets.length} reservation(s)`); navigate('reservations');
+    }));
+    const bulkCancel = main.querySelector('#resv-bulk-cancel');
+    if (bulkCancel) bulkCancel.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      const targets = resvs.filter((r) => selected.has(r.id) && r.status !== 'CANCELLED' && r.status !== 'COMPLETED');
+      if (!targets.length) return toast('No selected reservations can be cancelled', true);
+      if (!confirm(`Cancel ${targets.length} reservation(s)?`)) return;
+      await Promise.all(targets.map((r) => api(`/reservations/${r.id}/cancel`, { method: 'POST' })));
+      toast(`Cancelled ${targets.length} reservation(s)`); navigate('reservations');
+    }));
+    const bulkDelResv = main.querySelector('#resv-bulk-del');
+    if (bulkDelResv) bulkDelResv.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      const targets = resvs.filter((r) => selected.has(r.id));
+      if (!targets.length) return toast('No selected reservations to delete', true);
+      if (!confirm(`Permanently delete ${targets.length} reservation(s)? This cannot be undone.`)) return;
+      await Promise.all(targets.map((r) => api(`/reservations/${r.id}`, { method: 'DELETE' })));
+      toast(`Deleted ${targets.length} reservation(s)`); navigate('reservations');
+    }));
+    const bulkResetResv = main.querySelector('#resv-bulk-reset');
+    if (bulkResetResv) bulkResetResv.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      if (!resvs.length) return toast('No reservations to reset', true);
+      if (!confirm('⚠️ This will PERMANENTLY DELETE ALL RESERVATIONS. This CANNOT be undone. Continue?')) return;
+      if (!confirm('Are you absolutely sure? There is no undo for this action.')) return;
+      await api('/reservations', { method: 'DELETE' });
+      toast('All reservations cleared'); navigate('reservations');
+    }));
+    // Per-row permanent delete
+    main.querySelectorAll('[data-del-resv]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+      if (!confirm('Permanently delete this reservation? This cannot be undone.')) return;
+      await api(`/reservations/${b.dataset.delResv}`, { method: 'DELETE' });
+      toast('Reservation deleted'); navigate('reservations');
+    })));
   };
   main.querySelector('#resv-date').addEventListener('change', (e) => { sessionStorage.setItem('resvDate', e.target.value); navigate('reservations'); });
   // ---- Filter controls ----
