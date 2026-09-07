@@ -477,8 +477,13 @@ r.delete('/delivery-areas/:id', async (req, res) => {
 });
 
 // ---- Reservations ----
-r.get('/reservations', async (_req, res) => {
-  const { data } = await supa().from('reservations').select('*').neq('status', 'CANCELLED').order('res_date, time_slot');
+r.get('/reservations', async (req, res) => {
+  const date = String(req.query.date || '');
+  let query = supa().from('reservations').select('*').neq('status', 'CANCELLED');
+  if (date) {
+    query = query.eq('res_date', date);
+  }
+  const { data } = await query.order('res_date, time_slot');
   res.json(data || []);
 });
 r.post('/reservations', async (req, res) => {
