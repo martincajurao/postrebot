@@ -459,10 +459,34 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
 }
 
 // ---------- notification helpers (used by admin actions) ----------
-export function notifyOrderStatus(psid: string, status: string, orderNumber?: string): void {
+export function notifyOrderStatus(psid: string, status: string, orderNumber?: string, order?: any): void {
   const orderRef = orderNumber ? ` (${orderNumber})` : '';
+  
+  // Build reservation form for CONFIRMED orders with fulfillment date/time
+  const buildReservationForm = (): string => {
+    if (!order || !order.fulfillment_date) return '';
+    
+    // Handle customer data - could be nested from join or direct property
+    const customer = order.customers || order;
+    const customerName = customer.name || order.customer_name || 'N/A';
+    const contactNum = customer.phone || order.phone || 'N/A';
+    const orderType = order.order_type === 'delivery' ? 'Delivery' : 'Pickup';
+    const location = order.address || 'N/A';
+    
+    return (
+      `\n\n𝙍𝙀𝙎𝙀𝙍𝙑𝘼𝙏𝙄𝙊𝙉 𝙁𝙊𝙍𝙈` +
+      `\n━━━━━━━━━━━━━━━━━━━` +
+      `\n{𝑷𝒐𝒔𝒕𝒓𝒆 𝑪𝒓𝒆𝒑𝒆 𝒅𝒆 𝑴𝒂𝒏𝒈𝒐'𝒔:` +
+      `\n𝑫𝒂𝒕𝒆&𝑻𝒊𝒎𝒆: ${order.fulfillment_date || 'N/A'} ${order.time_slot || ''}` +
+      `\n𝑵𝒂𝒎𝒆: ${customerName}` +
+      `\n𝑪𝒐𝒏𝒕𝒂𝒄𝒕#: ${contactNum}` +
+      `\n𝑶𝒓𝒅𝒆𝒓: ${orderType}` +
+      `\n𝑳𝒐𝒄𝒂𝒕𝒊𝒐𝒏,𝒍𝒂𝒏𝒅𝒎𝒂𝒓𝒌: ${location}}`
+    );
+  };
+  
   const messages: Record<string, string> = {
-    CONFIRMED: `Good news! Your order${orderRef} has been confirmed and will be prepared soon.`,
+    CONFIRMED: `Good news! Your order${orderRef} has been confirmed and will be prepared soon.${buildReservationForm()}`,
     PREPARING: `Your order${orderRef} is now being prepared. We'll let you know when it's ready!`,
     READY: `Your order${orderRef} is ready! Our delivery rider will pick it up shortly.`,
     CANCELLED: `Your order${orderRef} has been cancelled. Contact us if this is unexpected.`,

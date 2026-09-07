@@ -348,7 +348,7 @@ r.get('/orders/:id', async (req, res) => {
 });
 r.post('/orders/:id/status', async (req, res) => {
   const { status } = req.body;
-  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
+  const { data: order } = await supa().from('orders').select('*, customers(name, phone)').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   await updateOrderStatus(order.id, status);
   if (order.customer_id) {
@@ -362,7 +362,7 @@ r.post('/orders/:id/status', async (req, res) => {
           { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
         ]);
       }
-      else await notifyOrderStatus(customer.data.psid, status, order.order_number);
+      else await notifyOrderStatus(customer.data.psid, status, order.order_number, order);
       // Send rating request when order is completed
       if (status === 'COMPLETED') {
         await sendRatingRequest(customer.data.psid, order.order_number, order.id);
@@ -377,7 +377,7 @@ r.post('/orders/:id/status', async (req, res) => {
 // The fee is provided BY the admin — it is not auto-charged from the area estimates.
 r.post('/orders/:id/confirm', async (req, res) => {
   const fee = Math.max(0, Math.round(Number(req.body?.delivery_fee) ||  0));
-  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
+  const { data: order } = await supa().from('orders').select('*, customers(name, phone)').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   if (order.status !== 'PENDING') return res.status(400).json({ error: 'Only pending orders can be confirmed' });
   // The stored total already has the package discounts deducted at order time
@@ -389,7 +389,7 @@ r.post('/orders/:id/confirm', async (req, res) => {
   if (order.customer_id) {
     const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
     if (customer?.data?.psid) {
-      await notifyOrderStatus(customer.data.psid, 'CONFIRMED', order.order_number);
+      await notifyOrderStatus(customer.data.psid, 'CONFIRMED', order.order_number, order);
       await sendText(customer.data.psid, '🚚 Delivery fee: ₱' + fee.toLocaleString('en-PH') + '\n💰 New total: ₱' + newTotal.toLocaleString('en-PH'));
     }
   }
