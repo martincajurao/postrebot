@@ -668,6 +668,15 @@ views.orders = async (main) => {
 views.reservations = async (main) => {
   const today = new Date().toISOString().slice(0, 10);
   const date = sessionStorage.getItem('resvDate') || today;
+  const f = {
+    status: sessionStorage.getItem('resvFStatus') || '',
+    slot: sessionStorage.getItem('resvFSlot') || '',
+    q: sessionStorage.getItem('resvFQ') || '',
+    range: sessionStorage.getItem('resvFRange') || 'all',
+    from: sessionStorage.getItem('resvFFrom') || '',
+    to: sessionStorage.getItem('resvFTo') || '',
+    incCancelled: sessionStorage.getItem('resvFCancel') === '1',
+  };
   main.innerHTML = `
     <h2 class="page-title">📅 Reservations</h2>
     <div class="card">
@@ -676,16 +685,63 @@ views.reservations = async (main) => {
         <button class="btn sm" id="resv-new">＋ New Reservation</button>
         <span class="muted" id="resv-open"></span>
       </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px;background:#fafbfc;border-radius:8px">
+        <span class="muted" style="font-size:0.8rem">Filters:</span>
+        <select id="resv-f-status" style="width:auto">
+          <option value="">All statuses</option>
+          <option value="PENDING"${f.status === 'PENDING' ? ' selected' : ''}>Pending</option>
+          <option value="CONFIRMED"${f.status === 'CONFIRMED' ? ' selected' : ''}>Confirmed</option>
+          <option value="COMPLETED"${f.status === 'COMPLETED' ? ' selected' : ''}>Completed</option>
+          <option value="CANCELLED"${f.status === 'CANCELLED' ? ' selected' : ''}>Cancelled</option>
+          <option value="PENDING,CONFIRMED"${f.status === 'PENDING,CONFIRMED' ? ' selected' : ''}>Active (P+C)</option>
+        </select>
+        <select id="resv-f-slot" style="width:auto"><option value="">All time slots</option></select>
+        <input type="text" id="resv-f-q" placeholder="Search name or phone…" value="${esc(f.q)}" style="width:170px">
+        <select id="resv-f-range" style="width:auto">
+          <option value=""${!f.range ? ' selected' : ''}>Selected date</option>
+          <option value="range"${f.range === 'range' ? ' selected' : ''}>Date range</option>
+          <option value="all"${f.range === 'all' ? ' selected' : ''}>All dates</option>
+        </select>
+        <span id="resv-f-range-inputs" style="display:${f.range === 'range' ? 'inline-flex' : 'none'};gap:8px;align-items:center">
+          <input type="date" id="resv-f-from" value="${f.from}" style="width:auto">
+          <span class="muted">→</span>
+          <input type="date" id="resv-f-to" value="${f.to}" style="width:auto">
+        </span>
+        <label style="font-size:0.8rem;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="resv-f-cancel"${f.incCancelled ? ' checked' : ''}> Show cancelled
+        </label>
+        <button class="btn ghost sm" id="resv-f-clear">✕ Clear</button>
+      </div>
       <div id="resv-stats" style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap"></div>
       <div id="resv-body"><p class="muted">Loading…</p></div>
     </div>`;
   const reload = async () => {
+    const params = new URLSearchParams();
+    if (f.range === 'all') {
+      // no date restriction
+    } else if (f.range === 'range') {
+      if (f.from) params.set('from', f.from);
+      if (f.to) params.set('to', f.to);
+    } else {
+      params.set('date', date);
+    }
+    if (f.status) params.set('status', f.status);
+    if (f.slot) params.set('slot', f.slot);
+    if (f.q) params.set('q', f.q);
+    if (f.incCancelled) params.set('include_cancelled', '1');
     const [resvs, avail] = await Promise.all([
-      api('/reservations?date=' + date), api('/reservations/availability?date=' + date),
+      api('/reservations?' + params.toString()), api('/reservations/availability?date=' + date),
     ]);
     main.querySelector('#resv-open').textContent = avail.open.open
       ? `🟢 Open — ${avail.slots.filter((s) => !s.full).length}/${avail.slots.length} slots available`
       : '🔴 CLOSED: ' + (avail.open.reason || '');
+    // Populate the time-slot filter from active slots (preserve selection)
+    const slotSel = main.querySelector('#resv-f-slot');
+    if (slotSel) {
+      const prev = slotSel.value;
+      slotSel.innerHTML = '<option value="">All time slots</option>' +
+        (avail.slots || []).map((s) => `<option value="${esc(s.label)}"${s.label === prev ? ' selected' : ''}>${esc(s.label)}</option>`).join('');
+    }
     // Calculate stats
     const pending = resvs.filter(r => r.status === 'PENDING').length;
     const confirmed = resvs.filter(r => r.status === 'CONFIRMED').length;
@@ -782,6 +838,40 @@ views.reservations = async (main) => {
     }));
   };
   main.querySelector('#resv-date').addEventListener('change', (e) => { sessionStorage.setItem('resvDate', e.target.value); navigate('reservations'); });
+  // ---- Filter controls ----
+  const saveF = () => {
+    f.status = main.querySelector('#resv-f-status').value;
+    f.slot = main.querySelector('#resv-f-slot').value;
+    f.q = main.querySelector('#resv-f-q').value.trim();
+    f.range = main.querySelector('#resv-f-range').value;
+    f.from = main.querySelector('#resv-f-from') ? main.querySelector('#resv-f-from').value : '';
+    f.to = main.querySelector('#resv-f-to') ? main.querySelector('#resv-f-to').value : '';
+    f.incCancelled = main.querySelector('#resv-f-cancel').checked;
+    sessionStorage.setItem('resvFStatus', f.status);
+    sessionStorage.setItem('resvFSlot', f.slot);
+    sessionStorage.setItem('resvFQ', f.q);
+    sessionStorage.setItem('resvFRange', f.range);
+    sessionStorage.setItem('resvFFrom', f.from);
+    sessionStorage.setItem('resvFTo', f.to);
+    sessionStorage.setItem('resvFCancel', f.incCancelled ? '1' : '0');
+  };
+  let debounceTimer = null;
+  const applyFilters = () => { saveF(); reload().catch((err) => toast(err.message, true)); };
+  const debouncedFilters = () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(applyFilters, 300); };
+  main.querySelector('#resv-f-status').addEventListener('change', applyFilters);
+  main.querySelector('#resv-f-slot').addEventListener('change', applyFilters);
+  main.querySelector('#resv-f-q').addEventListener('input', debouncedFilters);
+  main.querySelector('#resv-f-range').addEventListener('change', () => {
+    main.querySelector('#resv-f-range-inputs').style.display = main.querySelector('#resv-f-range').value === 'range' ? 'inline-flex' : 'none';
+    applyFilters();
+  });
+  main.querySelector('#resv-f-from').addEventListener('change', applyFilters);
+  main.querySelector('#resv-f-to').addEventListener('change', applyFilters);
+  main.querySelector('#resv-f-cancel').addEventListener('change', applyFilters);
+  main.querySelector('#resv-f-clear').addEventListener('click', () => {
+    ['resvFStatus', 'resvFSlot', 'resvFQ', 'resvFRange', 'resvFFrom', 'resvFTo', 'resvFCancel'].forEach((k) => sessionStorage.removeItem(k));
+    navigate('reservations');
+  });
   main.querySelector('#resv-new').addEventListener('click', () => {
     modal(`<h3>New Manual Reservation</h3>
       <div class="field"><label>Customer name</label><input id="nr-name"></div>

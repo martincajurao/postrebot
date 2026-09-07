@@ -6,11 +6,11 @@ import { updateOrderStatus, updatePaymentStatus, getOrderItems } from '../servic
 import { getVapidPublicKey, storeSubscription, removeSubscription, sendPushToAdmins, getPushStatus } from '../services/push';
 import {
   createReservation, cancelReservation, updateReservationStatus,
-  rescheduleReservation, slotAvailability, isDateOpen,
+  rescheduleReservation, slotAvailability, isDateOpen, ensureReservationFromOrder,
 } from '../services/reservations';
 import { computeCartTotals } from '../services/pricing';
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
-import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
+import { notifyOrderStatus, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
 const r = Router();
 
@@ -327,7 +327,12 @@ r.delete('/food-packs/:id', async (req, res) => {
 // ---- Orders ----
 r.get('/orders', async (_req, res) => {
   const { data } = await supa().from('orders').select('*, customers(name)').order('id', { ascending: false });
-  res.json((data || []).map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, customers: undefined })));
+  // Confirmed orders live on the Reservations page now — hide any order that
+  // has been converted into a reservation.
+  const { data: linked } = await supa().from('reservations').select('order_id');
+  const linkedIds = new Set((linked || []).map((r: any) => Number(r.order_id)));
+  const visible = (data || []).filter((o: any) => !linkedIds.has(Number(o.id)));
+  res.json(visible.map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, customers: undefined })));
 });
 r.get('/orders/:id', async (req, res) => {
   const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
@@ -357,16 +362,18 @@ r.post('/orders/:id/status', async (req, res) => {
     const { data: reservation } = await supa().from('reservations').select('id').eq('order_id', order.id).maybeSingle();
     if (reservation) {
       await updateReservationStatus(reservation.id, 'CONFIRMED');
+    } else {
+      // Confirmed orders move to the Reservations page with full control:
+      await ensureReservationFromOrder(order);
     }
   }
 
   if (order.customer_id) {
     const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
     if (customer?.data?.psid) {
-      if (status === 'READY') {
-        await notifyOrderOnTheWay(customer.data.psid, order.order_number);
-        // Give the customer a one-tap way to complete the order themselves.
-        await sendQuickReplies(customer.data.psid, 'Once you receive your order, tap below:', [
+            if (status === 'READY') {
+        // Combine on-the-way message with quick replies for order completion (single message)
+        await sendQuickReplies(customer.data.psid, `Your order${order.order_number ? ` (${order.order_number})` : ''} has been picked up by our delivery rider and is now on its way! Tap below when you receive it:`, [
           { title: '✅ Order Received', payload: `COMPLETE:${order.id}` },
           { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
         ]);
@@ -401,6 +408,9 @@ r.post('/orders/:id/confirm', async (req, res) => {
     const { data: reservation } = await supa().from('reservations').select('id').eq('order_id', order.id).maybeSingle();
     if (reservation) {
       await updateReservationStatus(reservation.id, 'CONFIRMED');
+    } else {
+      // Confirmed orders move to the Reservations page with full control:
+      await ensureReservationFromOrder(order);
     }
   }
 
@@ -506,11 +516,34 @@ r.get('/reservations/availability', async (req, res) => {
 });
 r.get('/reservations', async (req, res) => {
   const date = String(req.query.date || '');
-  let query = supa().from('reservations').select('*').neq('status', 'CANCELLED');
+  const from = String(req.query.from || '');
+  const to = String(req.query.to || '');
+  const status = String(req.query.status || '');
+  const slot = String(req.query.slot || '');
+  const search = String(req.query.q || '').trim();
+  const withCancelled = String(req.query.include_cancelled || '') === '1';
+
+  let query = supa().from('reservations').select('*');
+  if (!withCancelled) query = query.neq('status', 'CANCELLED');
   if (date) {
     query = query.eq('res_date', date);
+  } else {
+    if (from) query = query.gte('res_date', from);
+    if (to) query = query.lte('res_date', to);
   }
-  const { data } = await query.order('time_slot');
+  if (status) {
+    // support comma-separated statuses, e.g. ?status=PENDING,CONFIRMED
+    const statuses = status.split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 1) query = query.eq('status', statuses[0]);
+    else if (statuses.length > 1) query = query.in('status', statuses);
+  }
+  if (slot) query = query.eq('time_slot', slot);
+  if (search) query = query.or(`customer_name.ilike.%${search}%,phone.ilike.%${search}%`);
+
+  const { data, error } = await query
+    .order('res_date', { ascending: !!from || !!to ? true : false })
+    .order('time_slot');
+  if (error) return res.status(400).json({ error: error.message });
   res.json(data || []);
 });
 r.get('/reservations/:id', async (req, res) => {

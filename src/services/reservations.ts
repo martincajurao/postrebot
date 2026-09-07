@@ -1,4 +1,4 @@
-﻿import { supa } from '../db/supabase';
+﻿﻿import { supa } from '../db/supabase';
 
 export interface SlotAvailability {
   label: string;
@@ -60,6 +60,40 @@ export async function createReservation(input: {
 export async function getReservationByOrderId(orderId: number): Promise<any | null> {
   const { data } = await supa().from('reservations').select('*').eq('order_id', orderId).maybeSingle();
   return data;
+}
+
+/**
+ * Convert a confirmed order into a reservation (idempotent). Skips the
+ * date-open / slot-capacity checks — an existing customer order must not be
+ * rejected at confirm time. Returns the reservation id (or null if the order
+ * has no fulfillment date/slot to reserve).
+ */
+export async function ensureReservationFromOrder(order: any): Promise<number | null> {
+  if (!order?.id) return null;
+  const db = supa();
+  const { data: existing } = await db.from('reservations').select('id').eq('order_id', order.id).maybeSingle();
+  if (existing) return Number(existing.id); // already converted
+
+  const resDate = order.fulfillment_date || null;
+  const timeSlot = order.time_slot || null;
+  if (!resDate || !timeSlot) return null; // nothing to schedule
+
+  const customerName = order.customer_name || order.customers?.name || 'Customer';
+  const notes = order.order_type === 'delivery'
+    ? `Delivery — ${order.address || ''}`
+    : 'Pickup';
+
+  const { data, error } = await db.from('reservations').insert({
+    order_id: order.id,
+    customer_name: customerName,
+    phone: order.phone || null,
+    res_date: resDate,
+    time_slot: timeSlot,
+    status: 'CONFIRMED',
+    notes,
+  }).select('id').single();
+  if (error) throw new Error(error.message);
+  return Number(data!.id);
 }
 
 export async function cancelReservation(id: number): Promise<void> {

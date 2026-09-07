@@ -514,7 +514,7 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
 /** Rider has picked up the order - customer is informed it's on the way. */
 export function notifyOrderOnTheWay(psid: string, orderNumber?: string): void {
   const orderRef = orderNumber ? ` (${orderNumber})` : '';
-  sendText(psid, `Your order${orderRef} has been picked up by our delivery rider and is now on its way!`).catch(() => { });
+  sendText(psid, `🚚 Your order${orderRef} has been picked up by our delivery rider and is now on its way!`).catch(() => { });
 }
 
 /** Enhanced order confirmation with full details */
