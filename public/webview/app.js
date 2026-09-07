@@ -264,7 +264,7 @@ function categoryIcon(name) {
 /** Fetch a /api/webview endpoint. Throws on any failure so callers can fall back. */
 async function api(path, opts = {}) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), 15000) : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 30000) : null;
   let res;
   try {
     res = await fetch('/api/webview' + path, {
@@ -1648,6 +1648,34 @@ async function placeOrder() {
     });
   } catch (e) {
     hideLoading();
+    // If timeout, check if order was actually created
+    if (e && e.message === 'Request timed out') {
+      if (btn) { btn.textContent = 'Checking order status…'; }
+      try {
+        const orders = await api('/orders?limit=1');
+        if (orders && orders.length > 0) {
+          const latestOrder = orders[0];
+          // Check if order was created in the last 60 seconds
+          const orderTime = new Date(latestOrder.created_at).getTime();
+          const now = Date.now();
+          if (now - orderTime < 60000) {
+            // Order was created successfully
+            saveCustomerData(name, phone, address);
+            clearLocalCart();
+            const successLine = $id('success-order-number');
+            if (successLine) {
+              successLine.textContent = 'Order #' + latestOrder.order_number +
+                (latestOrder.total !== undefined && latestOrder.total !== null ? ' · ' + formatMoney(latestOrder.total) : '');
+            }
+            showView('view-success');
+            if (isInsideMessenger) setTimeout(() => closeWebview(), 4000);
+            return;
+          }
+        }
+      } catch {
+        // Fall through to error message
+      }
+    }
     if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); btn.textContent = 'Place Order'; }
     showToast((e && e.message) || 'Failed to place order');
     return;

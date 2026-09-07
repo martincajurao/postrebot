@@ -36,6 +36,37 @@ function toast(msg, err = false) {
 }
 function modal(html) { document.getElementById('modal').innerHTML = html; document.getElementById('modal-overlay').classList.add('show'); }
 function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+function showLoading(msg = 'Loading…') {
+  modal(`<div style="text-align:center;padding:24px"><div class="spinner" style="border:4px solid #eee;border-top-color:#e74c3c;border-radius:50%;width:36px;height:36px;margin:0 auto 12px;animation:spin .8s linear infinite"></div><p class="muted">${esc(msg)}</p></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>`);
+}
+function hideLoading() { closeModal(); }
+/**
+ * Renders the full menu list a customer ordered (for the reservation details
+ * modal). Shows item name, quantity, variant, line total, and any package
+ * slot contents. Returns an empty string when there are no items.
+ */
+function renderOrderItems(orderItems) {
+  if (!orderItems || !orderItems.length) return '';
+  const lines = orderItems.map((item) => {
+    let line = `<div style="padding:8px 0;border-bottom:1px solid #eee"><b>${esc(item.name)}</b> × ${item.quantity}
+      ${item.variant_size ? `<span class="muted">(${esc(item.variant_size)})</span>` : ''}
+      <span style="float:right;font-weight:700">₱${Number(item.line_total || 0).toLocaleString()}</span>`;
+    if (item.package_items && item.package_items.length > 0) {
+      line += '<div style="padding-left:16px;font-size:0.85rem;color:#666;margin-top:4px">';
+      item.package_items.forEach((pkg) => {
+        line += `<div>• Slot ${pkg.slot_number}: ${esc(pkg.product_name)}${pkg.upgrade_price > 0 ? ` (+₱${pkg.upgrade_price})` : ''}</div>`;
+      });
+      line += '</div>';
+    }
+    return line + '</div>';
+  }).join('');
+  const total = orderItems.reduce((sum, it) => sum + Number(it.line_total || 0), 0);
+  return `<div style="padding:10px;background:#f8f9fa;border-radius:8px">
+    <div style="color:#666;margin-bottom:8px"><b>📝 Menu Ordered (${orderItems.length} item${orderItems.length > 1 ? 's' : ''})</b></div>
+    ${lines}
+    <div style="padding-top:8px;text-align:right"><b>Total: ₱${total.toLocaleString()}</b></div>
+  </div>`;
+}
 
 /**
  * Button loader: disables the button, shows a spinner while `fn` runs,
@@ -638,13 +669,14 @@ views.reservations = async (main) => {
   const today = new Date().toISOString().slice(0, 10);
   const date = sessionStorage.getItem('resvDate') || today;
   main.innerHTML = `
-    <h2 class="page-title">Reservations</h2>
+    <h2 class="page-title">📅 Reservations</h2>
     <div class="card">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
         <input type="date" id="resv-date" value="${date}" style="width:auto">
         <button class="btn sm" id="resv-new">＋ New Reservation</button>
         <span class="muted" id="resv-open"></span>
       </div>
+      <div id="resv-stats" style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap"></div>
       <div id="resv-body"><p class="muted">Loading…</p></div>
     </div>`;
   const reload = async () => {
@@ -652,32 +684,88 @@ views.reservations = async (main) => {
       api('/reservations?date=' + date), api('/reservations/availability?date=' + date),
     ]);
     main.querySelector('#resv-open').textContent = avail.open.open
-      ? `Open — ${avail.slots.filter((s) => !s.full).length}/${avail.slots.length} slots available`
-      : 'CLOSED: ' + (avail.open.reason || '');
+      ? `🟢 Open — ${avail.slots.filter((s) => !s.full).length}/${avail.slots.length} slots available`
+      : '🔴 CLOSED: ' + (avail.open.reason || '');
+    // Calculate stats
+    const pending = resvs.filter(r => r.status === 'PENDING').length;
+    const confirmed = resvs.filter(r => r.status === 'CONFIRMED').length;
+    const total = resvs.length;
+
+    main.querySelector('#resv-stats').innerHTML = `
+      <div style="background:#fff3cd;padding:8px 14px;border-radius:8px;text-align:center">
+        <div style="font-size:1.4rem;font-weight:700">${pending}</div>
+        <div style="font-size:0.75rem;color:#856404">Pending</div>
+      </div>
+      <div style="background:#d4edda;padding:8px 14px;border-radius:8px;text-align:center">
+        <div style="font-size:1.4rem;font-weight:700">${confirmed}</div>
+        <div style="font-size:0.75rem;color:#155724">Confirmed</div>
+      </div>
+      <div style="background:#e2e3e5;padding:8px 14px;border-radius:8px;text-align:center">
+        <div style="font-size:1.4rem;font-weight:700">${total}</div>
+        <div style="font-size:0.75rem;color:#383d41">Total</div>
+      </div>`;
+
     main.querySelector('#resv-body').innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Time</th><th>Customer</th><th>Phone</th><th>Order</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>
       ${resvs.map((r) => `
         <tr>
           <td><b>${esc(r.time_slot)}</b></td>
-          <td>${esc(r.customer_name)}</td>
+          <td><div>${esc(r.customer_name)}</div>${r.notes ? `<div class="muted" style="font-size:0.75rem">${esc(r.notes)}</div>` : ''}</td>
           <td>${esc(r.phone || '—')}</td>
-          <td>${r.order_id ? '#' + r.order_id : '—'}</td>
+          <td>${r.order_id ? `<a href="#" class="order-link" data-order="${r.order_id}" style="color:#e74c3c">#${r.order_id}</a>` : '—'}</td>
           <td><span class="badge b-${esc(r.status)}">${esc(r.status)}</span></td>
           <td><div class="row-actions">
+            <button class="btn sm" data-resv-view="${r.id}" title="View details">👁️</button>
             ${r.status === 'PENDING' ? `<button class="btn ok sm" data-resv-ok="${r.id}">Confirm</button>` : ''}
             ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn sm" data-resv-move="${r.id}">Reschedule</button>` : ''}
             ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">Cancel</button>` : ''}
           </div></td>
         </tr>`).join('') || '<tr><td colspan="6" class="muted">No reservations for this date.</td></tr>'}
       </tbody></table></div>`;
+
+    // View details handler
+    main.querySelectorAll('[data-resv-view]').forEach((b) => b.addEventListener('click', async () => {
+      const r = resvs.find((x) => x.id == b.dataset.resvView);
+      showLoading('Loading details…');
+      let reservationDetails = r;
+      try {
+        reservationDetails = await api(`/reservations/${r.id}`);
+      } catch {
+        // Fall back to basic info from list
+      }
+      hideLoading();
+
+      const row = (label, value) => `<div style="display:flex;justify-content:space-between;padding:10px;background:#f8f9fa;border-radius:8px"><span style="color:#666">${label}</span><span style="font-weight:700">${value}</span></div>`;
+      const orderRow = reservationDetails.order_id ? row('Linked Order', `<span style="color:#e74c3c">#${reservationDetails.order_id}</span>`) : '';
+      const notesRow = reservationDetails.notes ? row('Notes', esc(reservationDetails.notes)) : '';
+      const itemsRow = renderOrderItems(reservationDetails.order_items);
+
+      modal(`<h3>📋 Reservation Details</h3>
+        <div style="display:grid;gap:10px;margin:16px 0;max-height:60vh;overflow-y:auto">
+          ${row('Reference', `RES-${reservationDetails.id}`)}
+          ${row('Date', esc(reservationDetails.res_date))}
+          ${row('Time Slot', esc(reservationDetails.time_slot))}
+          ${row('Customer', esc(reservationDetails.customer_name))}
+          ${row('Phone', esc(reservationDetails.phone || '—'))}
+          ${row('Status', `<span class="badge b-${esc(reservationDetails.status)}">${esc(reservationDetails.status)}</span>`)}
+          ${orderRow}
+          ${itemsRow}
+          ${notesRow}
+          ${row('Created', esc(reservationDetails.created_at || '—'))}
+        </div>
+        <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
+    }));
+
+    // Order link handler
+    main.querySelectorAll('.order-link').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); navigate('orders'); }));
     main.querySelectorAll('[data-resv-ok]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-      await api(`/reservations/${b.dataset.resvOk}/status`, { method: 'PUT', body: { status: 'CONFIRMED' } });
+      await api(`/reservations/${b.dataset.resvOk}/status`, { method: 'POST', body: { status: 'CONFIRMED' } });
       toast('Reservation confirmed'); navigate('reservations');
     })));
     main.querySelectorAll('[data-resv-cancel]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
       if (!confirm('Cancel this reservation?')) return;
-      await api(`/reservations/${b.dataset.resvCancel}/cancel`, { method: 'PUT' });
+      await api(`/reservations/${b.dataset.resvCancel}/cancel`, { method: 'POST' });
       toast('Cancelled'); navigate('reservations');
     })));
     main.querySelectorAll('[data-resv-move]').forEach((b) => b.addEventListener('click', () => {
@@ -688,7 +776,7 @@ views.reservations = async (main) => {
         <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
         <button class="btn" id="mv-save">Save</button></div>`);
       document.getElementById('mv-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-        await api(`/reservations/${r.id}/reschedule`, { method: 'PUT', body: { res_date: document.getElementById('mv-date').value, time_slot: document.getElementById('mv-time').value } });
+        await api(`/reservations/${r.id}/reschedule`, { method: 'POST', body: { res_date: document.getElementById('mv-date').value, time_slot: document.getElementById('mv-time').value } });
         closeModal(); toast('Rescheduled'); navigate('reservations');
       }));
     }));

@@ -1,8 +1,8 @@
-﻿import { Router } from 'express';
+﻿﻿import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { supa } from '../db/supabase';
 import { authMiddleware, requireRole, verifyWebviewPsid, rememberAdminForPsid, getRememberedAdmin, forgetRememberedAdmin, issueAdminToken } from './auth';
-import { updateOrderStatus, updatePaymentStatus } from '../services/orders';
+import { updateOrderStatus, updatePaymentStatus, getOrderItems } from '../services/orders';
 import { getVapidPublicKey, storeSubscription, removeSubscription, sendPushToAdmins, getPushStatus } from '../services/push';
 import {
   createReservation, cancelReservation, updateReservationStatus,
@@ -351,6 +351,15 @@ r.post('/orders/:id/status', async (req, res) => {
   const { data: order } = await supa().from('orders').select('*, customers(name, phone)').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   await updateOrderStatus(order.id, status);
+
+  // Sync reservation status when order is confirmed
+  if (status === 'CONFIRMED' && order.fulfillment_date) {
+    const { data: reservation } = await supa().from('reservations').select('id').eq('order_id', order.id).maybeSingle();
+    if (reservation) {
+      await updateReservationStatus(reservation.id, 'CONFIRMED');
+    }
+  }
+
   if (order.customer_id) {
     const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
     if (customer?.data?.psid) {
@@ -386,6 +395,15 @@ r.post('/orders/:id/confirm', async (req, res) => {
   const newTotal = Math.max(0, (Number(order.total) || 0) + fee - (Number(order.additional_discount) || 0));
   await supa().from('orders').update({ status: 'CONFIRMED', delivery_fee: fee, total: newTotal }).eq('id', order.id);
   await supa().from('order_status_history').insert({ order_id: order.id, status: 'CONFIRMED' });
+
+  // Sync reservation status when order is confirmed
+  if (order.fulfillment_date) {
+    const { data: reservation } = await supa().from('reservations').select('id').eq('order_id', order.id).maybeSingle();
+    if (reservation) {
+      await updateReservationStatus(reservation.id, 'CONFIRMED');
+    }
+  }
+
   if (order.customer_id) {
     const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
     if (customer?.data?.psid) {
@@ -477,14 +495,35 @@ r.delete('/delivery-areas/:id', async (req, res) => {
 });
 
 // ---- Reservations ----
+// NOTE: must be registered BEFORE '/reservations/:id' so 'availability'
+// isn't captured as an :id parameter.
+r.get('/reservations/availability', async (req, res) => {
+  const date = String(req.query.date || '');
+  if (!date) return res.status(400).json({ error: 'date is required' });
+  const open = await isDateOpen(date);
+  if (!open.open) return res.json({ open: false, reason: open.reason, slots: [] });
+  res.json({ open: true, slots: await slotAvailability(date) });
+});
 r.get('/reservations', async (req, res) => {
   const date = String(req.query.date || '');
   let query = supa().from('reservations').select('*').neq('status', 'CANCELLED');
   if (date) {
     query = query.eq('res_date', date);
   }
-  const { data } = await query.order('res_date, time_slot');
+  const { data } = await query.order('time_slot');
   res.json(data || []);
+});
+r.get('/reservations/:id', async (req, res) => {
+  const { data: reservation } = await supa().from('reservations').select('*').eq('id', req.params.id).maybeSingle();
+  if (!reservation) return res.status(404).json({ error: 'Reservation not found' });
+
+  // If linked to an order, fetch order items
+  if (reservation.order_id) {
+    const items = await getOrderItems(reservation.order_id);
+    reservation.order_items = items;
+  }
+
+  res.json(reservation);
 });
 r.post('/reservations', async (req, res) => {
   try {
@@ -511,15 +550,6 @@ r.post('/reservations/:id/reschedule', async (req, res) => {
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
-});
-
-// ---- Availability ----
-r.get('/availability', async (req, res) => {
-  const date = String(req.query.date || '');
-  if (!date) return res.status(400).json({ error: 'date is required' });
-  const open = await isDateOpen(date);
-  if (!open.open) return res.json({ open: false, reason: open.reason, slots: [] });
-  res.json({ open: true, slots: await slotAvailability(date) });
 });
 
 // ---- Business Hours ----

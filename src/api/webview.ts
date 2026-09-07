@@ -384,14 +384,8 @@ r.post('/checkout', async (req, res) => {
 
   try {
     const custId = await getOrCreateCustomer(sessionId, name, phone, address);
-    if (phone || address || name) {
-      const updates: Record<string, any> = {};
-      if (phone) updates.phone = phone;
-      if (address) updates.address = address;
-      if (name) updates.name = name;
-      await supa().from('customers').update(updates).eq('id', custId);
-    }
-
+    
+    // Create order first (most critical)
     const order = await createOrderFromCart(sessionId, {
       customer_id: custId,
       order_type: order_type || 'delivery',
@@ -403,18 +397,24 @@ r.post('/checkout', async (req, res) => {
       notes,
     }, Array.isArray(items) ? items : undefined);
 
-    // Notify admins via web push
-    try {
-      sendPushToAdmins({
-        title: `🆕 New Order ${order.orderNumber}`,
-        body: `${name || 'Web customer'} placed an order (₱${Number(order.total || 0).toLocaleString()}).`,
-        data: { url: '/admin#orders' },
-      }).catch(() => {});
-    } catch {
-      // Non-fatal if push fails
+    // Respond to client immediately
+    res.json({ ok: true, order_id: order.orderId, order_number: order.orderNumber, total: order.total });
+
+    // Update customer info and send notification after response (non-blocking)
+    if (phone || address || name) {
+      const updates: Record<string, any> = {};
+      if (phone) updates.phone = phone;
+      if (address) updates.address = address;
+      if (name) updates.name = name;
+      new Promise((resolve) => { resolve(supa().from('customers').update(updates).eq('id', custId)); }).catch(() => {});
     }
 
-    res.json({ ok: true, order_id: order.orderId, order_number: order.orderNumber, total: order.total });
+    // Notify admins via web push (non-blocking)
+    sendPushToAdmins({
+      title: `🆕 New Order ${order.orderNumber}`,
+      body: `${name || 'Web customer'} placed an order (₱${Number(order.total || 0).toLocaleString()}).`,
+      data: { url: '/admin#orders' },
+    }).catch(() => {});
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
