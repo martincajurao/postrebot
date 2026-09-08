@@ -437,23 +437,63 @@ function orderEditBlocked(order: any): string | null {
   return null;
 }
 
+/** M-size menu price of a dish (cheapest variant as fallback). */
+async function menuPriceM(productId: number): Promise<number> {
+  const { data: variants } = await supa().from('product_variants').select('size, price').eq('product_id', productId);
+  const m = variants?.find((v: any) => String(v.size).toUpperCase() === 'M') || (variants && variants[0]);
+  return Number(m?.price) || 0;
+}
+
+/**
+ * Auto-discount for "Build Your Own" custom packages, based on the sum of the
+ * selected dishes' M-size menu prices: sum >= 5000 → 1100, >= 4300 → 1000,
+ * >= 3000 → 700, else 0. Mirrors pricing.ts:autoDiscount().
+ */
+function autoDiscount(itemsSum: number): number {
+  if (itemsSum >= 5000) return 1100;
+  if (itemsSum >= 4300) return 1000;
+  if (itemsSum >= 3000) return 700;
+  return 0;
+}
+
 /** Recompute subtotal/total after an item quantity change or removal.
- *  Stored pipeline: total = subtotal − packageSavings + delivery_fee − additional_discount
- *  (creation: total = subtotal − savings; confirm adds the fee; the discount
- *  endpoint moves additional_discount). Package savings are NOT stored per line,
- *  so their current rate is preserved: savings = round(newSubtotal × oldSavings / oldSubtotal). */
+ *  Stored pipeline: total = subtotal − packageDiscounts + delivery_fee − additional_discount.
+ *  Package discounts are recalculated from the actual items (not scaled proportionally)
+ * because custom "Build Your Own" packages use a tiered volume discount that is a
+ * step function of the dish sum, not a flat rate — scaling it gives the wrong answer
+ * when a non-package item is added/removed or the quantity changes. */
 async function recalcOrderTotalsAfterItemEdit(orderId: number): Promise<{ subtotal: number; total: number; savings: number }> {
   const db = supa();
   const { data: order } = await db.from('orders').select('subtotal, total, delivery_fee, additional_discount').eq('id', orderId).maybeSingle();
   if (!order) throw new Error('Order not found');
-  const { data: items } = await db.from('order_items').select('unit_price, quantity').eq('order_id', orderId);
+  const { data: items } = await db.from('order_items').select('*').eq('order_id', orderId);
+
+  // Subtotal = sum of GROSS line totals (unit_price is stored gross).
   const newSubtotal = (items || []).reduce((s: number, it: any) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 0), 0);
-  const oldSubtotal = Number(order.subtotal) || 0;
-  const oldSavings = Math.max(0, oldSubtotal - (Number(order.total) || 0) + (Number(order.delivery_fee) || 0) - (Number(order.additional_discount) || 0));
-  const savings = oldSubtotal > 0 ? Math.round((oldSavings * newSubtotal) / oldSubtotal) : 0;
-  const newTotal = Math.max(0, newSubtotal - savings + (Number(order.delivery_fee) || 0) - (Number(order.additional_discount) || 0));
+
+  // Recalculate every package discount from the actual dishes so the tiered
+  // auto-discount for custom packages is always correct.
+  let packageDiscounts = 0;
+  for (const it of items || []) {
+    if (!it.package_id) continue;
+    const { data: pkg } = await db.from('packages').select('is_custom, discount').eq('id', it.package_id).maybeSingle();
+    if (pkg?.is_custom) {
+      // Custom package: sum the M-menu prices of the chosen dishes.
+      const { data: pkgItems } = await db.from('order_package_items').select('product_id').eq('order_item_id', it.id);
+      let itemsSum = 0;
+      for (const pi of pkgItems || []) {
+        itemsSum += await menuPriceM(Number(pi.product_id));
+      }
+      packageDiscounts += autoDiscount(itemsSum) * Number(it.quantity);
+    } else {
+      // Fixed package: admin-set discount per unit.
+      packageDiscounts += Number(pkg?.discount || 0) * Number(it.quantity);
+    }
+  }
+
+  const newTotal = Math.max(0, newSubtotal - packageDiscounts + (Number(order.delivery_fee) || 0) - (Number(order.additional_discount) || 0));
   await db.from('orders').update({ subtotal: newSubtotal, total: newTotal }).eq('id', orderId);
-  return { subtotal: newSubtotal, total: newTotal, savings };
+  return { subtotal: newSubtotal, total: newTotal, savings: packageDiscounts };
 }
 
 /** Best-effort Messenger summary of what the admin changed for the customer. */
@@ -484,9 +524,12 @@ r.put('/orders/:id', async (req, res) => {
 
   let newDate: string | null = null;
   let newSlot: string | null = null;
-  if (fulfillment_date != null || time_slot != null) {
-    newDate = fulfillment_date != null ? fulfillment_date : order.fulfillment_date;
-    newSlot = time_slot != null ? time_slot : order.time_slot;
+  // Treat empty strings as "not provided" — only validate when both are meaningfully set.
+  const hasDate = fulfillment_date != null && String(fulfillment_date).trim() !== '';
+  const hasSlot = time_slot != null && String(time_slot).trim() !== '';
+  if (hasDate || hasSlot) {
+    newDate = hasDate ? String(fulfillment_date).trim() : order.fulfillment_date;
+    newSlot = hasSlot ? String(time_slot).trim() : order.time_slot;
     if (!newDate || !newSlot) return res.status(400).json({ error: 'Both a date and a time slot are required' });
     const { data: slotData } = await supa().from('time_slots').select('*').eq('label', newSlot).eq('active', 1).maybeSingle();
     if (!slotData) return res.status(400).json({ error: 'Invalid time slot' });

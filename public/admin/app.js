@@ -55,6 +55,66 @@ function hideLoading() { closeModal(); }
  * modal). Shows item name, quantity, variant, line total, and any package
  * slot contents. Returns an empty string when there are no items.
  */
+/** Format a date like "Sept 8, 2026" from a DB date string. */
+function fmtDate(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr + (dateStr.length === 10 ? 'T00:00:00' : ''));
+  if (isNaN(d.getTime())) return dateStr;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sept','Oct','Nov','Dec'];
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+/** Format a time slot like "9:00AM" from "10:00" or "10:00:00", rolled back 1 hour for the rider dispatch time. */
+function fmtTimeSlot(slot) {
+  if (!slot) return '';
+  const parts = String(slot).split(':');
+  let h = parseInt(parts[0], 10) - 1; // -1h: dispatch/rider ETA is 1h before the customer's slot
+  if (h < 0) h = 23; // wrap midnight back to 11 PM
+  const m = parts[1] || '00';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${m}${ampm}`;
+}
+
+/** Generate formatted booking details for copy-paste to riders/delivery. */
+async function generateBookingDetails(orderId) {
+  const order = await api(`/orders/${orderId}`);
+  const items = order.items || [];
+  const customerName = order.customer_name || 'Customer';
+  const customerPhone = order.phone || order.customer_phone || '';
+
+  // Build order lines: package name + slot dishes; plain items just the name.
+  const orderLines = [];
+  for (const it of items) {
+    if (it.package_items && it.package_items.length > 0) {
+      orderLines.push(it.name);
+      it.package_items
+        .sort((a, b) => a.slot_number - b.slot_number)
+        .forEach((pkg) => orderLines.push(`-${pkg.product_name}`));
+    } else {
+      orderLines.push(it.name + (it.quantity > 1 ? ` x${it.quantity}` : ''));
+    }
+  }
+
+  const df = Number(order.delivery_fee) > 0 ? `₱${Number(order.delivery_fee).toLocaleString()}` : '?';
+  const totalStr = `₱${Number(order.total).toLocaleString()}`;
+  const dateStr = fmtDate(order.fulfillment_date) + (order.time_slot ? ` (${fmtTimeSlot(order.time_slot)})` : '');
+
+  const pickup = `POSTRE\nZone 5 San Francisco Magarao sa may padjakan pa right side daretso lang pagkababa ng tulay unang kanto katabi ng cream house papasok`;
+
+  const dropoff = `📍Date&Time: ${dateStr}
+Name: ${customerName}
+Contact#: ${customerPhone}
+Order:
+${orderLines.join('\n')}
+Df ${df}
+Total:${totalStr}`;
+
+  const deliveryTo = order.order_type === 'delivery' ? `Delivery to;\n${order.address || 'Pickup'}` : 'Pickup order';
+
+  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo}`;
+}
+
 function renderOrderItems(orderItems) {
   if (!orderItems || !orderItems.length) return '';
   const lines = orderItems.map((item) => {
@@ -891,7 +951,6 @@ async function openOrderEditor(orderId) {
         const qty = Math.max(0, Math.min(99, Number(row.querySelector('.oe-qty').value) || 0));
         const isNew = !itemId;
         if (isNew) {
-          // New items are added via the picker; if qty is 0, just skip (don't save).
           if (qty === 0) continue;
           const it = items.find((x) => x.key === row.dataset.key);
           if (!it) continue;
@@ -904,14 +963,21 @@ async function openOrderEditor(orderId) {
         if (qty === 0) await api(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
         else await api(`/orders/${orderId}/items/${itemId}`, { method: 'PUT', body: { quantity: qty } });
       }
-      await api('/orders/' + orderId, { method: 'PUT', body: {
+      // Only include schedule fields if the date is filled — sending empty date
+      // without a slot (or vice versa) would trip the backend's validation.
+      const dateVal = document.getElementById('oe-date').value;
+      const slotVal = document.getElementById('oe-slot').value;
+      const putBody = {
         order_type: document.getElementById('oe-type').value,
         phone: document.getElementById('oe-phone').value.trim(),
         address: document.getElementById('oe-address').value.trim(),
-        fulfillment_date: document.getElementById('oe-date').value,
-        time_slot: document.getElementById('oe-slot').value,
         notes: document.getElementById('oe-notes').value.trim(),
-      } });
+      };
+      if (dateVal && slotVal) {
+        putBody.fulfillment_date = dateVal;
+        putBody.time_slot = slotVal;
+      }
+      await api('/orders/' + orderId, { method: 'PUT', body: putBody });
       closeModal();
       toast('Order updated — the customer was notified of the changes');
       navigate('orders');
@@ -1002,6 +1068,7 @@ views.orders = async (main) => {
             ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
             ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn sm" data-edit-order="${o.id}" title="Edit order (change of mind)">✏️ Edit</button>` : ''}
+            <button class="btn ghost sm" data-booking="${o.id}" title="Generate booking details">📋 Booking</button>
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
             ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
             <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
@@ -1046,6 +1113,19 @@ views.orders = async (main) => {
   }));
 
   main.querySelectorAll('[data-edit-order]').forEach((b) => b.addEventListener('click', () => openOrderEditor(Number(b.dataset.editOrder))));
+  main.querySelectorAll('[data-booking]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const text = await generateBookingDetails(Number(b.dataset.booking));
+    modal(`<h3>📋 Booking Details</h3>
+      <p class="muted">Copy and send to your rider or delivery driver.</p>
+      <textarea id="booking-text" style="width:100%;height:300px;font-family:monospace;font-size:13px" readonly>${esc(text)}</textarea>
+      <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button>
+      <button class="btn" id="booking-copy">📋 Copy to Clipboard</button></div>`);
+    document.getElementById('booking-copy').addEventListener('click', () => {
+      const ta = document.getElementById('booking-text');
+      ta.select();
+      navigator.clipboard.writeText(ta.value).then(() => toast('Booking details copied!')).catch(() => toast('Select and copy manually', true));
+    });
+  })));
 
   // ---- Bulk actions ----
   const checkAll = main.querySelector('#order-check-all');

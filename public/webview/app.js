@@ -904,17 +904,32 @@ function currentPackage() {
   return packages.find((x) => Number(x.id) === Number(packageDetail.pkgId)) || null;
 }
 
+/**
+ * Auto-discount for "Build Your Own" custom packages, based on the sum of the
+ * selected dishes' M-size menu prices (size upgrades excluded):
+ *   sum >= 5000 → 1100, sum >= 4300 → 1000, sum >= 3000 → 700, else 0.
+ * Mirrors the server's autoDiscount() so the displayed price equals checkout.
+ */
+function autoDiscount(itemsSum) {
+  if (itemsSum >= 5000) return 1100;
+  if (itemsSum >= 4300) return 1000;
+  if (itemsSum >= 3000) return 700;
+  return 0;
+}
+
 /** Client-side mirror of server pricing: base + slot upgrades (± per-slot size) − package discount. */
 function pricePackageChoices(pkg, choices, size, slotSizes) {
   const slots = (pkg.slots || []).slice().sort((a, b) => a.slot_number - b.slot_number);
   let total = Number(pkg.base_price) || 0;
   const lines = [{ label: esc(pkg.name) + ' base', amount: total }];
+  let itemsSum = 0; // sum of selected dish M-prices (for custom auto-discount)
   for (const slot of slots) {
     const choice = choices[Number(slot.slot_number)];
     if (choice === undefined || choice === null) continue;
     const options = packageSlotOptions(pkg, slot);
     const opt = options.find((o) => Number(o.product_id) === Number(choice)) || null;
-    let extra = opt ? Number(opt.upgrade_price) || 0 : 0;
+    const dishPrice = opt ? Number(opt.upgrade_price) || 0 : 0;
+    let extra = dishPrice;
     const slotSize = (slotSizes && slotSizes[Number(slot.slot_number)]) || size;
     if (slotSize === 'L') {
       let sizeExtra = opt ? Number(opt.size_upgrade_price) || 0 : 0;
@@ -925,11 +940,16 @@ function pricePackageChoices(pkg, choices, size, slotSizes) {
       lines.push({ label: (opt && opt.name) + ' upgrade', amount: extra });
       total += extra;
     }
+    // For custom packages, track the dish's base price (excluding L upgrade)
+    // so the volume discount reflects the total value of dishes chosen.
+    if (pkg.is_custom && dishPrice > 0) itemsSum += dishPrice;
   }
-  const discount = Number(pkg.discount) || 0;
+  // Custom ("Build Your Own") packages use a volume-based auto-discount;
+  // fixed packages use the admin-set pkg.discount.
+  const discount = pkg.is_custom ? autoDiscount(itemsSum) : Number(pkg.discount) || 0;
   if (discount > 0) {
     const applied = Math.min(discount, Math.max(0, total));
-    lines.push({ label: 'Package discount', amount: -applied });
+    lines.push({ label: pkg.is_custom ? 'Volume discount' : 'Package discount', amount: -applied });
     total = Math.max(0, total - applied);
   }
   return { total, lines };
@@ -1343,7 +1363,10 @@ function cartItemNetUnitPrice(item) {
 function cartItemGrossUnitPrice(item) {
   if (item.package_id) {
     const pkg = packages.find((p) => Number(p.id) === Number(item.package_id));
-    if (!pkg || !(Number(pkg.discount) > 0)) return null;
+    if (!pkg) return null;
+    // Fixed packages: only show "was" when an admin-set discount exists.
+    // Custom packages: the auto-discount may apply (checked below via breakdown).
+    if (!pkg.is_custom && !(Number(pkg.discount) > 0)) return null;
     const choices = {};
     const slotSizes = {};
     (item.slot_choices || []).forEach((c) => {

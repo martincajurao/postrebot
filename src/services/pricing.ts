@@ -20,6 +20,19 @@ export function netPackagePrice(pkg: { base_price: number; discount?: number | n
 }
 
 /**
+ * Volume-based auto-discount for "Build Your Own" custom packages, based on
+ * the sum of the selected dishes' M-size menu prices (size upgrades excluded):
+ *   sum >= 5000 → 1100, sum >= 4300 → 1000, sum >= 3000 → 700, else 0.
+ * Mirrors the webview's autoDiscount() so checkout matches the displayed price.
+ */
+function autoDiscount(itemsSum: number): number {
+  if (itemsSum >= 5000) return 1100;
+  if (itemsSum >= 4300) return 1000;
+  if (itemsSum >= 3000) return 700;
+  return 0;
+}
+
+/**
  * Server-side authoritative pricing. Never trusts client prices.
  * Prices stored as integer pesos (or centavos — consistent usage).
  */
@@ -177,11 +190,20 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
     if (extra > 0) breakdown.push({ label: `${prod?.name ?? 'Dish'}${size ? ' ' + size : ''} upgrade`, amount: extra });
     total += extra;
   }
-  // Admin-set additional discount applies on top of the FULL package price
-  // (base + upgrades), never dropping below zero.
-  if ((pkg.discount || 0) > 0) {
-    const applied = Math.min(pkg.discount, Math.max(0, total));
-    breakdown.push({ label: `${pkg.name} additional discount`, amount: -applied });
+  // Custom ("Build Your Own") packages use a volume-based auto-discount
+  // derived from the sum of the selected dishes' M-size menu prices;
+  // fixed packages use the admin-set pkg.discount.
+  let discount = pkg.discount || 0;
+  if (pkg.is_custom) {
+    let itemsSum = 0;
+    for (const choice of choices) {
+      itemsSum += await menuPriceM(choice.product_id);
+    }
+    discount = autoDiscount(itemsSum);
+  }
+  if (discount > 0) {
+    const applied = Math.min(discount, Math.max(0, total));
+    breakdown.push({ label: pkg.is_custom ? `${pkg.name} volume discount` : `${pkg.name} additional discount`, amount: -applied });
     total = Math.max(0, total - applied);
   }
   return { total, breakdown };
