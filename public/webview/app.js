@@ -1054,6 +1054,27 @@ function renderPackageDetail() {
     slotsHtml = '<div class="empty-state"><div class="icon">🥡</div><p>This package has no dish slots defined.</p></div>';
   }
 
+  // For custom packages, calculate discount to show dashed original total
+  let discountLine = '';
+  if (pkg.is_custom) {
+    const slots = (pkg.slots || []).slice().sort((a, b) => a.slot_number - b.slot_number);
+    let itemsSum = 0;
+    for (const slot of slots) {
+      const choice = packageDetail.choices[Number(slot.slot_number)];
+      if (choice !== undefined && choice !== null) {
+        itemsSum += productMenuPriceM(Number(choice));
+      }
+    }
+    const discount = autoDiscount(itemsSum);
+    if (discount > 0) {
+      const grossTotal = pricing.total + discount;
+      discountLine = `<div class="pkg-discount-line">
+        <span class="was">${formatMoney(grossTotal * packageDetail.qty)}</span>
+        <span class="discount-amt">−${formatMoney(discount * packageDetail.qty)}</span>
+      </div>`;
+    }
+  }
+
   container.innerHTML = `
     ${imageHtml(pkg.photo_url, pkg.name, 'detail-image')}
     <div class="detail-name">${esc(pkg.name)}</div>
@@ -1074,6 +1095,7 @@ function renderPackageDetail() {
       <span class="qty-value" id="pkg-qty">${packageDetail.qty}</span>
       <button class="qty-btn" onclick="changePackageQty(1)">+</button>
     </div>
+    ${discountLine}
     <div class="price-total" id="pkg-price-total">${formatMoney(pricing.total * packageDetail.qty)}</div>
     <button class="btn btn-primary btn-checkout" onclick="addToCartPackage()" ${complete ? '' : 'disabled'}>
       ${complete ? 'Add to Cart' : `Choose ${needed} dishes (${chosen}/${needed})`}
@@ -1111,13 +1133,6 @@ function renderByopCustom(pkg, slots, needed, complete) {
       </div>`
     : '';
 
-  // Calculate discount for display
-  const itemsSum = selectedSlots.reduce((sum, s) => sum + productMenuPriceM(s.productId), 0);
-  const discount = autoDiscount(itemsSum);
-  const discountHtml = discount > 0
-    ? `<div class="byop-discount">🎉 Volume discount: <strong>−${formatMoney(discount)}</strong> (save on orders ₱3,000+)</div>`
-    : (selectedSlots.length > 0 ? `<div class="byop-discount muted">Add ₱${formatMoney(Math.max(0, 3000 - itemsSum))} more for ₱700 off</div>` : '');
-
   const menuItems = products.filter((p) => Number(p.unavailable) !== 1);
   const itemsByCategory = {};
   for (const p of menuItems) {
@@ -1145,7 +1160,7 @@ function renderByopCustom(pkg, slots, needed, complete) {
     </div>`;
   }).join('');
 
-  return `${selectedHtml}${discountHtml}<div class="byop-menu"><h4>Add dishes (min ${needed})</h4>${menuHtml}</div>`;
+  return `${selectedHtml}<div class="byop-menu"><h4>Add dishes (min ${needed})</h4>${menuHtml}</div>`;
 }
 
 /** Render fixed-package slot options (unchanged behavior). */
