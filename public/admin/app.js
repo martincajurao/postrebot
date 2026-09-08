@@ -1460,14 +1460,22 @@ views.menu = async (main) => {
     if (el) el.addEventListener('change', renderProducts);
   });
   // ---- Product modals & actions (event delegation for tabbed tables) ----
-  const productForm = (p) => modal(`<h3>${p ? 'Edit' : 'New'} Product</h3>
+  const productForm = (p) => {
+    const m = (p?.variants || []).find((v) => v.size === 'M');
+    const l = (p?.variants || []).find((v) => v.size === 'L');
+    return modal(`<h3>${p ? 'Edit' : 'New'} Product</h3>
     <div class="field"><label>Name</label><input id="pf-name" value="${esc(p?.name || '')}"></div>
     <div class="field"><label>Category</label><select id="pf-cat">${cats.map((c) => `<option value="${c.id}" ${p?.category_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Description</label><input id="pf-desc" value="${esc(p?.description || '')}"></div>
+    <div class="row2">
+      <div class="field"><label>M price (₱)</label><input type="number" id="pf-m" min="0" value="${m?.price ?? ''}"></div>
+      <div class="field"><label>L price (₱)</label><input type="number" id="pf-l" min="0" value="${l?.price ?? ''}"></div>
+    </div>
     ${photoField('pf-photo', p?.photo_url)}
     <div class="field"><label>Mark unavailable?</label><select id="pf-un"><option value="0">No</option><option value="1" ${p?.unavailable ? 'selected' : ''}>Yes</option></select></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
     <button class="btn" id="pf-save">Save</button></div>`);
+  };
   const bindProductSave = (p) => {
     document.getElementById('pf-save').addEventListener('click', (e) => withBtn(e.currentTarget, () => saveProduct(p)));
   };
@@ -1484,6 +1492,14 @@ views.menu = async (main) => {
     try {
       // Upload the cropped photo (if any) first — Save is the single upload step.
       const photo_url = await flushPendingPhoto('pf-photo');
+      // A product needs at least one variant price — unpriced items cannot be
+      // ordered (server pricing throws "Invalid product or size").
+      const mPrice = Number(document.getElementById('pf-m').value);
+      const lPrice = Number(document.getElementById('pf-l').value);
+      const variants = [];
+      if (mPrice > 0) variants.push({ size: 'M', price: Math.round(mPrice) });
+      if (lPrice > 0) variants.push({ size: 'L', price: Math.round(lPrice) });
+      if (variants.length === 0) { toast('Set at least one price (M or L) so customers can order this item.', true); return; }
       const body = {
         name: document.getElementById('pf-name').value,
         category_id: Number(document.getElementById('pf-cat').value),
@@ -1491,8 +1507,12 @@ views.menu = async (main) => {
         photo_url: photo_url || null,
         unavailable: Number(document.getElementById('pf-un').value),
       };
-      if (p) await api(`/products/${p.id}`, { method: 'PUT', body });
-      else await api('/products', { method: 'POST', body: { ...body, variants: [] } });
+      if (p) {
+        await api(`/products/${p.id}`, { method: 'PUT', body });
+        await api(`/products/${p.id}/variants`, { method: 'PUT', body: { variants } });
+      } else {
+        await api('/products', { method: 'POST', body: { ...body, variants } });
+      }
       closeModal(); toast('Saved'); navigate('menu');
     } catch (err) { toast(err.message, true); }
   };
@@ -1514,14 +1534,14 @@ views.menu = async (main) => {
         <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
         <button class="btn" id="vp-save">Save</button></div>`);
       document.getElementById('vp-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
-        await api(`/products/${p.id}/variants`, {
-          method: 'PUT', body: {
-            variants: [
-              { size: 'M', price: Number(document.getElementById('vp-m').value) },
-              { size: 'L', price: Number(document.getElementById('vp-l').value) },
-            ]
-          }
-        });
+        // Blank fields are skipped — saving them as ₱0 would make the item free.
+        const mPrice = Number(document.getElementById('vp-m').value);
+        const lPrice = Number(document.getElementById('vp-l').value);
+        const variants = [];
+        if (mPrice > 0) variants.push({ size: 'M', price: Math.round(mPrice) });
+        if (lPrice > 0) variants.push({ size: 'L', price: Math.round(lPrice) });
+        if (variants.length === 0) { toast('Set at least one price (M or L).', true); return; }
+        await api(`/products/${p.id}/variants`, { method: 'PUT', body: { variants } });
         closeModal(); toast('Prices updated'); navigate('menu');
       }));
     }
