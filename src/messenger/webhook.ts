@@ -333,7 +333,8 @@ async function mainMenu(psid: string) {
   }
   // Quick replies for actions NOT available in the webview
   return sendQuickReplies(psid, 'Or choose an option below:', [
-    { title: '📅 Reservation', payload: 'MENU_RESERVE' },
+    { title: '🛍️ Open Store Now!', payload: 'WELCOME' },
+    { title: '🛒 Order Now', payload: 'MENU_ORDER' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
@@ -347,7 +348,6 @@ function showMenuOptions(psid: string) {
   return sendQuickReplies(psid, '🍽️ What would you like to do?', [
     { title: '🛍️ Open Store Now!', payload: 'WELCOME' },
     { title: '🛒 Order Now', payload: 'MENU_ORDER' },
-    { title: '📅 Reservation', payload: 'MENU_RESERVE' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
