@@ -2460,6 +2460,7 @@ if ('serviceWorker' in navigator) {
     if (d.type === 'push-order') {
       playChime();
       speakOrder((d.title || '') + '. ' + (d.body || ''));
+      navigate(currentView); // auto-refresh current view so new orders appear instantly
     }
   });
 }
