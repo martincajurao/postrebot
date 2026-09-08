@@ -1046,44 +1046,10 @@ function renderPackageDetail() {
   const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size, packageDetail.slotSizes);
 
   let slotsHtml = '';
-  if (slots.length > 0) {
-    slotsHtml = slots.map((slot) => {
-      const allOptions = packageSlotOptions(pkg, slot);
-      const group = slotGroupFor(pkg, slot, slots.length);
-      const options = filterOptionsByGroup(allOptions, group);
-      if (options.length === 0) return '';
-      const cur = packageDetail.choices[Number(slot.slot_number)];
-      const slotSize = packageDetail.slotSizes[Number(slot.slot_number)] || packageDetail.size;
-      const sizeUpgrade = (() => {
-        if (cur === undefined || cur === null) return 0;
-        const opt = options.find((o) => Number(o.product_id) === Number(cur));
-        let up = opt ? Number(opt.size_upgrade_price) || 0 : 0;
-        if (!up) up = variantPriceDiff(cur);
-        return up;
-      })();
-      return `<div class="package-slot">
-        <div class="slot-header">
-          <h4>${esc(group.name)}</h4>
-          <div class="slot-size-toggle">
-            <span class="slot-size-label">Size:</span>
-            <button class="slot-size-btn${slotSize === 'M' ? ' selected' : ''}" onclick="selectPackageSlotSize(event, ${slot.slot_number}, 'M')">M</button>
-            <button class="slot-size-btn${slotSize === 'L' ? ' selected' : ''}" onclick="selectPackageSlotSize(event, ${slot.slot_number}, 'L')">L${sizeUpgrade > 0 ? ` <em>+${formatMoney(sizeUpgrade)}</em>` : ''}</button>
-          </div>
-        </div>
-        <div class="slot-options">
-          ${options.map((opt) => {
-            const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
-            const upgrade = Number(opt.upgrade_price) || 0;
-            const thumb = opt.photo_url
-              ? `<img class="opt-thumb img-skel" src="${esc(absUrl(opt.photo_url))}" alt="" title="View photo" loading="lazy" onload="this.classList.remove('img-skel')" onclick="openImageLightbox(event, '${esc(absUrl(opt.photo_url))}', '${esc(opt.name)}')" onerror="this.remove()">`
-              : '';
-            return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id})">
-              ${thumb}${esc(opt.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
-            </span>`;
-          }).join('')}
-        </div>
-      </div>`;
-    }).join('');
+  if (pkg.is_custom) {
+    slotsHtml = renderByopCustom(pkg, slots, needed, complete);
+  } else if (slots.length > 0) {
+    slotsHtml = renderFixedSlots(pkg, slots);
   } else {
     slotsHtml = '<div class="empty-state"><div class="icon">🥡</div><p>This package has no dish slots defined.</p></div>';
   }
@@ -1098,7 +1064,6 @@ function renderPackageDetail() {
       ${Number(pkg.discount) > 0 ? `<span class="save">Save ${formatMoney(pkg.discount)}</span>` : ''}
     </div>
     ${slotsHtml}
-    ${pkg.is_custom ? `<div class="detail-desc"><strong>${chosen}/${needed}</strong> dishes chosen — pick one dish per slot.</div>` : ''}
     <div class="variant-options">
       <label>Size:</label>
       <button class="variant-btn${packageDetail.size === 'M' ? ' selected' : ''}" onclick="selectPackageSize('M', this)">M</button>
@@ -1115,6 +1080,136 @@ function renderPackageDetail() {
     </button>
   `;
   showView('view-package');
+}
+
+/** Render the "Build Your Own" custom package: selected items + full menu grid. */
+function renderByopCustom(pkg, slots, needed, complete) {
+  const selectedSlots = slots.map((slot) => {
+    const pid = packageDetail.choices[Number(slot.slot_number)];
+    if (pid === undefined || pid === null) return null;
+    const product = products.find((p) => Number(p.id) === Number(pid));
+    if (!product) return null;
+    const cat = categories.find((c) => Number(c.id) === Number(product.category_id));
+    return { slotNumber: slot.slot_number, productId: pid, name: product.name, photo: product.photo_url, category: cat ? cat.name : '' };
+  }).filter(Boolean);
+
+  const selectedHtml = selectedSlots.length > 0
+    ? `<div class="byop-selected">
+        <h4>Your Selection (${selectedSlots.length}/${needed})</h4>
+        <div class="byop-selected-list">
+          ${selectedSlots.map((s) => `
+            <div class="byop-selected-item">
+              ${s.photo ? `<img class="byop-sel-thumb img-skel" src="${esc(absUrl(s.photo))}" loading="lazy" onload="this.classList.remove('img-skel')" onerror="this.remove()">` : ''}
+              <div class="byop-sel-info">
+                <span class="byop-sel-cat">${esc(s.category)}</span>
+                <span class="byop-sel-name">${esc(s.name)}</span>
+              </div>
+              <button class="byop-sel-remove" onclick="removeFromSlot(${s.slotNumber})" title="Remove">✕</button>
+            </div>`).join('')}
+        </div>
+      </div>`
+    : '';
+
+  const menuItems = products.filter((p) => Number(p.unavailable) !== 1);
+  const itemsByCategory = {};
+  for (const p of menuItems) {
+    const cat = categories.find((c) => Number(c.id) === Number(p.category_id));
+    const catName = cat ? cat.name : 'Other';
+    if (!itemsByCategory[catName]) itemsByCategory[catName] = [];
+    itemsByCategory[catName].push(p);
+  }
+
+  const selectedPids = selectedSlots.map((s) => s.productId);
+  const menuHtml = Object.keys(itemsByCategory).sort().map((catName) => {
+    const items = itemsByCategory[catName];
+    return `<div class="byop-category">
+      <div class="byop-cat-header">${esc(catName)}</div>
+      <div class="byop-grid">
+        ${items.map((p) => {
+          const pid = Number(p.id);
+          const isSelected = selectedPids.includes(pid);
+          const upgrade = productMenuPriceM(pid);
+          const thumb = p.photo_url
+            ? `<img class="byop-thumb img-skel" src="${esc(absUrl(p.photo_url))}" loading="lazy" onload="this.classList.remove('img-skel')" onerror="this.remove()">`
+            : '';
+          return `<div class="byop-item${isSelected ? ' selected' : ''}${complete ? ' disabled' : ''}" onclick="addToSlot(${pid})">
+            ${thumb}
+            <span class="byop-item-name">${esc(p.name)}</span>
+            <span class="byop-item-price">${upgrade > 0 ? `+${formatMoney(upgrade)}` : ''}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `${selectedHtml}<div class="byop-menu"><h4>Choose ${needed} dishes</h4>${menuHtml}</div>`;
+}
+
+/** Render fixed-package slot options (unchanged behavior). */
+function renderFixedSlots(pkg, slots) {
+  return slots.map((slot) => {
+    const allOptions = packageSlotOptions(pkg, slot);
+    const group = slotGroupFor(pkg, slot, slots.length);
+    const options = filterOptionsByGroup(allOptions, group);
+    if (options.length === 0) return '';
+    const cur = packageDetail.choices[Number(slot.slot_number)];
+    const slotSize = packageDetail.slotSizes[Number(slot.slot_number)] || packageDetail.size;
+    const sizeUpgrade = (() => {
+      if (cur === undefined || cur === null) return 0;
+      const opt = options.find((o) => Number(o.product_id) === Number(cur));
+      let up = opt ? Number(opt.size_upgrade_price) || 0 : 0;
+      if (!up) up = variantPriceDiff(cur);
+      return up;
+    })();
+    return `<div class="package-slot">
+      <div class="slot-header">
+        <h4>${esc(group.name)}</h4>
+        <div class="slot-size-toggle">
+          <span class="slot-size-label">Size:</span>
+          <button class="slot-size-btn${slotSize === 'M' ? ' selected' : ''}" onclick="selectPackageSlotSize(event, ${slot.slot_number}, 'M')">M</button>
+          <button class="slot-size-btn${slotSize === 'L' ? ' selected' : ''}" onclick="selectPackageSlotSize(event, ${slot.slot_number}, 'L')">L${sizeUpgrade > 0 ? ` <em>+${formatMoney(sizeUpgrade)}</em>` : ''}</button>
+        </div>
+      </div>
+      <div class="slot-options">
+        ${options.map((opt) => {
+          const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
+          const upgrade = Number(opt.upgrade_price) || 0;
+          const thumb = opt.photo_url
+            ? `<img class="opt-thumb img-skel" src="${esc(absUrl(opt.photo_url))}" alt="" title="View photo" loading="lazy" onload="this.classList.remove('img-skel')" onclick="openImageLightbox(event, '${esc(absUrl(opt.photo_url))}', '${esc(opt.name)}')" onerror="this.remove()">`
+            : '';
+          return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id})">
+            ${thumb}${esc(opt.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
+          </span>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/** Add a dish to the next available slot (custom package). */
+function addToSlot(productId) {
+  const pkg = currentPackage();
+  if (!pkg || !pkg.is_custom) return;
+  const slots = (pkg.slots || []).slice().sort((a, b) => a.slot_number - b.slot_number);
+  const needed = Number(pkg.selections) || slots.length || 0;
+  const chosen = Object.keys(packageDetail.choices).length;
+  if (chosen >= needed) return;
+  for (const slot of slots) {
+    const sn = Number(slot.slot_number);
+    if (packageDetail.choices[sn] === undefined || packageDetail.choices[sn] === null) {
+      packageDetail.choices[sn] = productId;
+      break;
+    }
+  }
+  renderPackageDetail();
+}
+
+/** Remove a dish from its slot (custom package). */
+function removeFromSlot(slotNumber) {
+  const pkg = currentPackage();
+  if (!pkg || !pkg.is_custom) return;
+  delete packageDetail.choices[Number(slotNumber)];
+  renderPackageDetail();
 }
 
 /** Upgrade a single slot to M or L (re-renders the detail view). */
