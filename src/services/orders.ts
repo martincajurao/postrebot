@@ -1,6 +1,7 @@
 ﻿﻿import { supa } from '../db/supabase';
 import { computeCartTotals, choiceUpgrade, normalizeChoices, priceFoodPack, pricePackage, priceProduct } from './pricing';
 import { clearCart, getCart } from './cart';
+import { syncReservationFromOrder } from './reservations';
 
 /**
  * Resolve a webview client-side cart into priced order items.
@@ -295,6 +296,10 @@ export async function completeOrderByCustomer(orderId: number, customerId: numbe
     return { ok: false, message: `The order can be marked as received once it is READY (current status: ${status})` };
   }
   await updateOrderStatus(orderId, 'COMPLETED');
+  // Same chain the admin dashboard "→ COMPLETED" button triggers
+  // (POST /orders/:id/status): mirror the new status onto the linked
+  // reservation so the schedule board is marked COMPLETED as well.
+  await syncReservationFromOrder(orderId);
   return { ok: true, message: 'Order completed' };
 }
 

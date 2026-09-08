@@ -975,6 +975,9 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
         const orderItems = await getOrderItems(order.orderId);
         await sendOrderConfirmation(psid, { ...order, order_number: order.orderNumber }, orderItems);
         await sendText(psid, payInfo);
+        // Explicit pending-status chat right after checkout: the order sits in
+        // PENDING until an admin confirms it.
+        await sendText(psid, `⏳ Your order (${order.orderNumber}) is pending and waiting for admin confirmation. We'll notify you as soon as it's confirmed!`);
         // Notify the owner about the new order (optional ADMIN_PSID in .env).
         if (ADMIN_PSID) {
           safeSend(sendText(ADMIN_PSID,

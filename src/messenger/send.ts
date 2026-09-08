@@ -532,7 +532,7 @@ export function notifyOrderOnTheWay(psid: string, orderNumber?: string): void {
   sendText(psid, `🚚 Your order${orderRef} has been picked up by our delivery rider and is now on its way!`).catch(() => { });
 }
 
-/** Enhanced order confirmation with full details */
+/** Order-placed receipt: sent right after checkout while the order is still PENDING for admin confirmation. */
 export async function sendOrderConfirmation(psid: string, order: any, items: any[]): Promise<void> {
   const itemLines = items.map((item: any) => {
     const pkgItems = item.package_items?.filter(Boolean)?.map((p: any) => `   • Slot ${p.slot_number}: ${p.product_name}${p.upgrade_price > 0 ? ` (+₱${p.upgrade_price})` : ''}`).join('\n');
@@ -540,7 +540,8 @@ export async function sendOrderConfirmation(psid: string, order: any, items: any
   }).join('\n');
 
   const message =
-    `✅ ORDER CONFIRMED\n` +
+    `🧾 ORDER PLACED\n` +
+    `⏳ Status: PENDING FOR CONFIRMATION\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
     `📋 Order #: ${order.order_number}\n` +
     `${Number(order.discount) > 0 ? `🏷️ Discount: -₱${Number(order.discount).toLocaleString('en-PH')}\n` : ''}` +

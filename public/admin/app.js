@@ -35,7 +35,13 @@ function toast(msg, err = false) {
   setTimeout(() => t.remove(), 3200);
 }
 function modal(html) { document.getElementById('modal').innerHTML = html; document.getElementById('modal-overlay').classList.add('show'); }
-function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+function closeModal() {
+  // Drop any unsaved cropped photos — a pending crop is only valid while its
+  // form (modal) is open. Without this a crop from a cancelled form would
+  // leak into the next form that reuses the same field id.
+  Object.keys(pendingPhotos).forEach(clearPendingPhoto);
+  document.getElementById('modal-overlay').classList.remove('show');
+}
 function showLoading(msg = 'Loading…') {
   modal(`<div style="text-align:center;padding:24px"><div class="spinner" style="border:4px solid #eee;border-top-color:#e74c3c;border-radius:50%;width:36px;height:36px;margin:0 auto 12px;animation:spin .8s linear infinite"></div><p class="muted">${esc(msg)}</p></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>`);
 }
@@ -417,6 +423,7 @@ function openImageLibrary(selectedId) {
         el.addEventListener('click', () => {
           const url = el.dataset.url;
           restoreModal();
+          clearPendingPhoto(selectedId); // a pending crop must not override the library pick
           document.getElementById(selectedId).value = url;
           document.getElementById(selectedId + '-url').textContent = url;
           const prev = document.getElementById(selectedId + '-prev');
@@ -431,22 +438,71 @@ function openImageLibrary(selectedId) {
   }
   loadImages();
 }
+/* ---------- pending photos: crop locally, upload on Save ----------
+ * Picking a photo only opens the cropper and keeps the 800x800 JPEG blob in
+ * memory (keyed by the photo-field id). Nothing hits the network until the
+ * form's Save button runs flushPendingPhoto(), so Save is the single step
+ * that uploads the image and then saves the record. */
+const pendingPhotos = {}; // id -> { blob, name, objUrl }
+
+function clearPendingPhoto(id) {
+  const p = pendingPhotos[id];
+  if (!p) return;
+  URL.revokeObjectURL(p.objUrl);
+  delete pendingPhotos[id];
+}
+
+/** Sync the preview thumbnail + URL label with either the pending crop or the saved URL. */
+function refreshPhotoPreview(id) {
+  const hidden = document.getElementById(id);
+  const prev = document.getElementById(id + '-prev');
+  const label = document.getElementById(id + '-url');
+  if (!hidden || !prev || !label) return;
+  const pending = pendingPhotos[id];
+  if (pending) {
+    prev.src = pending.objUrl;
+    prev.style.display = 'block';
+    label.textContent = `New photo ready (${formatFileSize(pending.blob.size)}) — will upload on Save`;
+  } else {
+    prev.src = bustImg(hidden.value);
+    prev.style.display = hidden.value ? 'block' : 'none';
+    label.textContent = hidden.value || 'No photo';
+  }
+}
+
+/**
+ * The single upload step used by every Save handler: if the field has a
+ * pending cropped photo, upload it, write the URL into the hidden input and
+ * clear the pending state. Returns the final photo URL (or null).
+ */
+async function flushPendingPhoto(id) {
+  const pending = pendingPhotos[id];
+  if (!pending) return document.getElementById(id)?.value || null;
+  toast(`Uploading photo (${formatFileSize(pending.blob.size)})...`);
+  const file = new File([pending.blob], pending.name, { type: 'image/jpeg' });
+  const url = await uploadImage(file);
+  clearPendingPhoto(id);
+  const hidden = document.getElementById(id);
+  if (hidden) hidden.value = url;
+  refreshPhotoPreview(id);
+  return url;
+}
+
 function bindPhotoField(id) {
   const input = document.getElementById(id + '-file');
   input.addEventListener('change', () => {
     const file = input.files[0];
     if (!file) return;
-    openCropper(file, async (croppedBlob) => {
-      try {
-        const croppedFile = new File([croppedBlob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
-        toast(`Compressing ${formatFileSize(croppedFile.size)}...`);
-        const url = await uploadImage(croppedFile);
-        document.getElementById(id).value = url;
-        document.getElementById(id + '-url').textContent = url;
-        const prev = document.getElementById(id + '-prev');
-        prev.src = url; prev.style.display = 'block';
-        toast('Image uploaded');
-      } catch (err) { toast(err.message, true); }
+    openCropper(file, (croppedBlob) => {
+      // No upload here anymore — keep the cropped blob for the Save button.
+      clearPendingPhoto(id);
+      pendingPhotos[id] = {
+        blob: croppedBlob,
+        name: file.name.replace(/\.[^.]+$/, '') + '.jpg',
+        objUrl: URL.createObjectURL(croppedBlob),
+      };
+      refreshPhotoPreview(id);
+      toast('Crop ready — press Save to upload it');
     });
     input.value = ''; // allow picking the same file again
   });
@@ -455,11 +511,14 @@ function bindPhotoField(id) {
   if (libraryBtn) {
     libraryBtn.addEventListener('click', () => openImageLibrary(id));
   }
+  refreshPhotoPreview(id); // re-sync preview after a modal restore (image library)
 }
 
 /* ================= IMAGE CROPPER =================
- * Square crop: drag to pan, slider to zoom. Exports a 800x800 JPEG blob.
- * Images are always output square (Messenger carousels crop 1:1 anyway). */
+ * Square crop: drag to pan, slider to zoom. Exports a 800x800 JPEG blob that
+ * is handed to the caller — the actual upload happens on the form's Save
+ * button (see flushPendingPhoto). Images are always output square (Messenger
+ * carousels crop 1:1 anyway). */
 let cropCtx = null;
 function openCropper(file, onDone) {
   const overlay = document.getElementById('crop-overlay');
@@ -476,8 +535,12 @@ function openCropper(file, onDone) {
     zoomInput.value = '1';
     cropCtx.zoom = 1;
     cropCtx.x = 0; cropCtx.y = 0;
-    applyCropTransform();
+    // Show the overlay FIRST: the stage has zero size while the overlay is
+    // display:none, so measuring it before .show computed scale = 0 — leaving
+    // a blank preview and a blank crop output until the user happened to drag
+    // or zoom (which re-measured). This was the intermittent "cropper fails".
     overlay.classList.add('show');
+    applyCropTransform();
   };
   img.onload = onImgReady;
   img.onerror = () => { toast('Could not load image', true); closeCropper(); };
@@ -489,6 +552,12 @@ function openCropper(file, onDone) {
     // base scale: smallest side fills the stage (cover)
     const s0 = Math.max(stage.clientWidth / cropCtx.natW, stage.clientHeight / cropCtx.natH);
     cropCtx.scale = s0 * cropCtx.zoom;
+    // Clamp the pan so the image always covers the square — dragging it out of
+    // the frame used to export transparent (=> black) areas in the JPEG.
+    const maxX = Math.max(0, (cropCtx.natW * cropCtx.scale - stage.clientWidth) / 2);
+    const maxY = Math.max(0, (cropCtx.natH * cropCtx.scale - stage.clientHeight) / 2);
+    cropCtx.x = Math.min(maxX, Math.max(-maxX, cropCtx.x || 0));
+    cropCtx.y = Math.min(maxY, Math.max(-maxY, cropCtx.y || 0));
     img.style.width = cropCtx.natW + 'px';
     img.style.height = cropCtx.natH + 'px';
     img.style.transform = `translate(calc(-50% + ${cropCtx.x}px), calc(-50% + ${cropCtx.y}px)) scale(${cropCtx.scale})`;
@@ -529,6 +598,9 @@ function closeCropper() {
   if (cropCtx?.objUrl) URL.revokeObjectURL(cropCtx.objUrl);
   cropCtx = null;
 }
+// Keep the crop geometry in sync while the cropper is open (phone rotation,
+// window resize). Harmless no-op when the cropper is closed.
+window.addEventListener('resize', () => { if (cropCtx && cropCtx.apply) cropCtx.apply(); });
 
 document.getElementById('crop-cancel').addEventListener('click', closeCropper);
 document.getElementById('crop-overlay').addEventListener('click', (e) => {
@@ -539,6 +611,15 @@ document.getElementById('crop-apply').addEventListener('click', () => {
   const OUT = 800; // output resolution (square)
   const img = document.getElementById('crop-img');
   const stage = document.getElementById('crop-stage');
+  // Re-run the live transform so the math below matches exactly what the user
+  // sees right now (self-heals stale scale from resizes), then validate the
+  // geometry — drawing with a zero/NaN scale silently exported a blank image.
+  if (typeof cropCtx.apply === 'function') cropCtx.apply();
+  const scaleOk = cropCtx.scale > 0 && isFinite(cropCtx.scale);
+  if (!scaleOk || !img.naturalWidth || !stage.clientWidth) {
+    toast('Crop failed — image not ready, try again', true);
+    return;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = OUT; canvas.height = OUT;
   const ctx = canvas.getContext('2d');
@@ -1278,14 +1359,16 @@ views.menu = async (main) => {
     };
   };
   const saveProduct = async (p) => {
-    const body = {
-      name: document.getElementById('pf-name').value,
-      category_id: Number(document.getElementById('pf-cat').value),
-      description: document.getElementById('pf-desc').value,
-      photo_url: document.getElementById('pf-photo').value,
-      unavailable: Number(document.getElementById('pf-un').value),
-    };
     try {
+      // Upload the cropped photo (if any) first — Save is the single upload step.
+      const photo_url = await flushPendingPhoto('pf-photo');
+      const body = {
+        name: document.getElementById('pf-name').value,
+        category_id: Number(document.getElementById('pf-cat').value),
+        description: document.getElementById('pf-desc').value,
+        photo_url: photo_url || null,
+        unavailable: Number(document.getElementById('pf-un').value),
+      };
       if (p) await api(`/products/${p.id}`, { method: 'PUT', body });
       else await api('/products', { method: 'POST', body: { ...body, variants: [] } });
       closeModal(); toast('Saved'); navigate('menu');
@@ -1420,9 +1503,10 @@ views.foodpacks = async (main) => {
       price: Number(document.getElementById('fp-price').value),
       serves: document.getElementById('fp-serves').value.trim() || null,
       description: document.getElementById('fp-desc').value.trim() || null,
-      photo_url: document.getElementById('fp-photo').value || null,
     };
     if (!body.name || !(body.price > 0)) { toast('Name and a price above ₱0 are required.', true); return; }
+    // Upload the cropped photo (if any) first — Save is the single upload step.
+    body.photo_url = (await flushPendingPhoto('fp-photo')) || null;
     if (fp) await api(`/food-packs/${fp.id}`, { method: 'PUT', body });
     else await api('/food-packs', { method: 'POST', body });
     closeModal(); toast('Food pack saved'); navigate('foodpacks');
@@ -1452,7 +1536,7 @@ views.foodpacks = async (main) => {
 
 /* ================= PACKAGES ================= */
 views.packages = async (main) => {
-  const [packages, products] = await Promise.all([api('/packages'), api('/products')]);
+  const [packages, products, cats] = await Promise.all([api('/packages'), api('/products'), api('/categories')]);
   main.innerHTML = `
     <h2 class="page-title">Packages</h2>
     <div class="card"><button class="btn sm" id="pkg-new">＋ Add Package</button></div>
@@ -1483,10 +1567,11 @@ views.packages = async (main) => {
     const def = (s?.options || []).find((o) => o.is_default);
     return { n, default_product_id: def ? def.product_id : null, options: (s?.options || []).map((o) => ({ product_id: o.product_id, upgrade_price: o.upgrade_price || 0, size_upgrade_price: o.size_upgrade_price || 0 })) };
   });
-  const optRowHtml = (o) => `<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
-      <select style="flex:2" class="opt-prod">${products.map((x) => `<option value="${x.id}" ${x.id === o.product_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
-      <input type="number" style="flex:1" placeholder="upgrade ₱" class="opt-up" value="${o.upgrade_price}">
-      <input type="number" style="flex:1" placeholder="L +₱" class="opt-lup" value="${o.size_upgrade_price}">
+  // Manual "upgrade ₱" / "L +₱" inputs were removed — 0 means the server
+  // auto-prices: dish premium = menu-price diff vs the slot's default dish,
+  // Large = L−M variant diff. Any pre-set values are preserved in data attrs.
+  const optRowHtml = (o) => `<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center" data-up="${Number(o.upgrade_price) || 0}" data-lup="${Number(o.size_upgrade_price) || 0}">
+      <select style="flex:1" class="opt-prod">${products.map((x) => `<option value="${x.id}" ${x.id === o.product_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
       <button class="btn danger sm" onclick="this.closest('div').remove()">✕</button>
     </div>`;
   /** Full package editor: profile + photo + fixed flag + all slots, saved together. */
@@ -1508,15 +1593,16 @@ views.packages = async (main) => {
         ${p.is_custom
         ? '<div class="field"><label>Base price (₱) — custom package</label><input type="number" id="pn-price" value="' + info.base_price + '"></div>'
         : '<div class="field"><label>Base price (auto: sum of dishes)</label><input id="pn-price" readonly style="background:#f0f1f3" value="' + computeBase(slots) + '" title="Derived from the pre-selected dish in each slot — not editable"></div>'}
-        <div class="field"><label>Additional discount (₱) — applied on top of base + upgrades</label><input type="number" id="pn-disc" value="${info.discount || 0}" min="0"></div>
+        <div class="field"><label>Additional discount (₱) — applied on top of the base price</label><input type="number" id="pn-disc" value="${info.discount || 0}" min="0"></div>
         <div class="field"><label>Selections (slots)</label><input type="number" id="pn-sel" value="${info.selections}" min="1" max="10"></div>
       </div>
       ${p.is_custom ? '' : '<p class="muted" id="pn-disc-note">Discounts only apply to packages worth ₱3,000 or more (sum of dishes).</p>'}
       ${photoField('pn-photo', info.photo_url)}
       <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
         <input type="checkbox" id="pn-fixed" style="width:auto" ${info.is_fixed ? 'checked' : ''}> Fixed package (dishes pre-set — customers cannot change them)</label></div>
-      ${p.is_custom ? '<p class="muted">Custom package: every slot accepts <b>all menu dishes</b> automatically. Options below only set upgrade prices / defaults.</p>' : ''}
-      <h3 style="margin:6px 0 10px">Slots &amp; dish options</h3>
+      ${p.is_custom ? '<p class="muted">Custom package: every slot accepts <b>all menu dishes</b> automatically. Pick the dishes customers can choose (★ pre-selects the default).</p>' : ''}
+      <h3 style="margin:6px 0 4px">Slots &amp; dish options</h3>
+      <p class="muted" style="margin:0 0 10px">Pricing is automatic: a dish pricier than the slot's default adds the menu-price difference, and size L adds the L−M variant difference.</p>
       ${slots.map((s) => `
         <div class="card" style="box-shadow:none;border:1px solid #eee;padding:12px;margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1526,20 +1612,57 @@ views.packages = async (main) => {
               ${products.map((x) => `<option value="${x.id}" ${x.id === s.default_product_id ? 'selected' : ''}>★ ${esc(x.name)}</option>`).join('')}
             </select>
           </div>
-          <div id="slot-opts-${s.n}" style="margin-top:8px">${s.options.map((o) => optRowHtml(o)).join('')}</div>
+          <div style="display:flex;gap:6px;margin:8px 0;align-items:center;flex-wrap:wrap">
+            <select class="slot-cat" data-n="${s.n}" style="flex:1;min-width:150px" title="Bulk-add every dish from a category">
+              <option value="">Add whole category…</option>
+              ${cats.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn ghost sm" onclick="addCategoryToSlot(${s.n})">＋ Add all</button>
+          </div>
+          <div id="slot-opts-${s.n}" style="margin-top:0">${s.options.map((o) => optRowHtml(o)).join('')}</div>
           <button type="button" class="btn ghost sm" onclick="addOptRow(${s.n})">＋ Add dish option</button>
         </div>`).join('')}
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pn-save">Save Package</button></div>`);
     render();
     bindPhotoField('pn-photo');
-    window.addOptRow = (n) => {
+    // Swapping a dish in a slot resets any hidden manual surcharges so the new
+    // dish is auto-priced from the menu instead of inheriting the old values.
+    document.getElementById('modal').addEventListener('change', (e) => {
+      const t = e.target;
+      if (t.classList && t.classList.contains('opt-prod')) {
+        const row = t.closest('div');
+        if (row) { row.dataset.up = '0'; row.dataset.lup = '0'; }
+      }
+    });
+    const optRowElement = (pid) => {
       const div = document.createElement('div');
       div.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
-      div.innerHTML = `<select style="flex:2" class="opt-prod">${products.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
-        <input type="number" style="flex:1" placeholder="upgrade ₱" class="opt-up" value="0">
-        <input type="number" style="flex:1" placeholder="L +₱" class="opt-lup" value="0">
+      div.setAttribute('data-up', '0');
+      div.setAttribute('data-lup', '0');
+      div.innerHTML = `<select style="flex:1" class="opt-prod">${products.map((x) => `<option value="${x.id}" ${x.id === pid ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
         <button class="btn danger sm" onclick="this.closest('div').remove()">✕</button>`;
-      document.getElementById('slot-opts-' + n).appendChild(div);
+      return div;
+    };
+    window.addOptRow = (n) => {
+      document.getElementById('slot-opts-' + n).appendChild(optRowElement());
+    };
+    // Fast editing: append every active dish of a category to a slot in one click.
+    // Dishes already in the slot (and inactive ones) are skipped.
+    window.addCategoryToSlot = (n) => {
+      const sel = document.querySelector(`#modal .slot-cat[data-n="${n}"]`);
+      const catId = sel ? Number(sel.value) : 0;
+      if (!catId) { toast('Choose a category first.', true); return; }
+      const container = document.getElementById('slot-opts-' + n);
+      const existing = new Set(Array.from(container.querySelectorAll('.opt-prod')).map((s) => Number(s.value)));
+      let added = 0, skipped = 0;
+      for (const prod of products) {
+        if (Number(prod.category_id) !== catId) continue;
+        if (!prod.active || existing.has(Number(prod.id))) { skipped++; continue; }
+        container.appendChild(optRowElement(Number(prod.id)));
+        added++;
+      }
+      if (added) toast(`Added ${added} dish(es) to Slot ${n}${skipped ? ` — ${skipped} skipped (already in slot or inactive)` : ''}`);
+      else toast('Nothing to add — every dish in that category is already in the slot (or inactive).', true);
     };
     const readInfo = () => ({
       name: document.getElementById('pn-name').value,
@@ -1556,8 +1679,8 @@ views.packages = async (main) => {
         const n = i + 1;
         const opts = Array.from(modalEl.querySelectorAll(`#slot-opts-${n} > div`)).map((row) => ({
           product_id: Number(row.querySelector('.opt-prod').value),
-          upgrade_price: Number(row.querySelector('.opt-up').value) || 0,
-          size_upgrade_price: Number(row.querySelector('.opt-lup').value) || 0,
+          upgrade_price: Number(row.dataset.up) || 0,
+          size_upgrade_price: Number(row.dataset.lup) || 0,
         }));
         const defSel = modalEl.querySelector(`.slot-def[data-n="${n}"]`);
         return { n, default_product_id: defSel && defSel.value ? Number(defSel.value) : null, options: opts };
@@ -1591,6 +1714,8 @@ views.packages = async (main) => {
       refreshBase();
     }
     const onPnSave = (e) => withBtn(e.currentTarget, async () => {
+      // Upload the cropped photo (if any) first so readInfo() picks up its URL.
+      await flushPendingPhoto('pn-photo');
       const infoBody = readInfo();
       // Recompute base price from the current slots right before saving.
       if (!p.is_custom) infoBody.base_price = computeBase(readSlots(infoBody.selections));
@@ -1635,6 +1760,8 @@ views.packages = async (main) => {
       document.getElementById('np-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
         const name = document.getElementById('np-name').value.trim();
         if (!name) throw new Error('Package name is required.');
+        // Upload the cropped photo (if any) first — Save is the single upload step.
+        const photo_url = await flushPendingPhoto('np-photo');
         const created = await api('/packages', {
           method: 'POST', body: {
             name,
@@ -1642,7 +1769,7 @@ views.packages = async (main) => {
             base_price: 0, // set automatically from the slot dishes
             discount: Math.max(0, Number(document.getElementById('np-disc').value) || 0),
             selections: Number(document.getElementById('np-sel').value),
-            photo_url: document.getElementById('np-photo').value,
+            photo_url: photo_url || null,
             is_fixed: document.getElementById('np-fixed').checked ? 1 : 0,
           }
         });

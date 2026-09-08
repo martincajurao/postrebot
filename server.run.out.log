@@ -14,3 +14,11 @@ Web ordering URL: https://postrebot.onrender.com/webview
 [setPersistentMenu] POST persistent menu with messenger_extensions=true for https://postrebot.onrender.com/webview
 [messenger] persistent menu set (webview: https://postrebot.onrender.com/webview, extensions: true)
 [boot] setPersistentMenu resolved: true
+[messenger:sendApi] POST https://graph.facebook.com/v22.0/me/messages
+[messenger:sendApi] PAYLOAD: {"recipient":{"id":"9174545712670170"},"message":{"text":"Your order (PP-1001) is now being prepared. We'll let you know when it's ready!"}}
+[messenger:sendApi] RESPONSE STATUS: 200
+[messenger:sendApi] RESPONSE BODY: {"recipient_id":"9174545712670170","message_id":"m_LVogFiLIb7m-gEI7ArgrQgtBq7YA5uDSn9FnO4TJfqHEAbrmIyUgQfX30d9VoYLcDONIa2dVvLJ-CNQxwpt9UA"}
+[messenger:sendApi] POST https://graph.facebook.com/v22.0/me/messages
+[messenger:sendApi] PAYLOAD: {"recipient":{"id":"9174545712670170"},"message":{"text":"Your order (PP-1001) has been picked up by our delivery rider and is now on its way! Tap below when you receive it:","quick_replies":[{"content_type":"text","title":"✅ Order Received","payload":"COMPLETE:35"},{"content_type":"text","title":"🏠 Main Menu","payload":"MAIN_MENU"}]}}
+[messenger:sendApi] RESPONSE STATUS: 200
+[messenger:sendApi] RESPONSE BODY: {"recipient_id":"9174545712670170","message_id":"m_NksJ0uPa73pXLwmEuhvU-QtBq7YA5uDSn9FnO4TJfqHlTuPTymSeJH0WUd2xmTHXpGLkFmwS16W8UMgMEduAQA"}

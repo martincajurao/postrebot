@@ -11,6 +11,7 @@ import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart } f
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, cancelOrder, updateOrderStatus } from '../services/orders';
 import { slotAvailability, isDateOpen } from '../services/reservations';
 import { sendPushToAdmins } from '../services/push';
+import { sendText } from '../messenger/send';
 import { packageDefaults } from '../services/pricing';
 import { getStoreInfo } from '../services/store-info';
 
@@ -415,6 +416,14 @@ r.post('/checkout', async (req, res) => {
       body: `${name || 'Web customer'} placed an order (₱${Number(order.total || 0).toLocaleString()}).`,
       data: { url: '/admin#orders' },
     }).catch(() => {});
+
+    // Chat the customer in their Messenger thread that the order was placed and
+    // is now pending admin confirmation. Only Messenger-originated sessions
+    // carry a real psid as the session id (pure-web sessions generate 'wv_'
+    // ids) — skip those since they have no chat to message.
+    if (/^\d+$/.test(sessionId)) {
+      sendText(sessionId, `⏳ Your order (${order.orderNumber}) is pending and waiting for admin confirmation. We'll notify you as soon as it's confirmed!`).catch(() => { });
+    }
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
