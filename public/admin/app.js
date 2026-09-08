@@ -878,7 +878,7 @@ async function openOrderEditor(orderId) {
     const itemsTotal = lineSum();
     const estimatedTotal = Math.max(0, itemsTotal - currentDiscount + currentDeliveryFee);
     totalsEl.innerHTML = hasItems
-      ? `Items total: <b>${peso(itemsTotal)}</b>${currentDiscount > 0 ? ` − <span style="color:#27ae60">Discount: ${peso(currentDiscount)}</span>` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''} = <b>${peso(estimatedTotal)}</b>`
+      ? `<div style="font-size:1.1rem;font-weight:700">Total: ${peso(estimatedTotal)}</div><div style="font-size:0.85rem;color:#666">Items: ${peso(itemsTotal)}${currentDiscount > 0 ? ` − Discount: ${peso(currentDiscount)}` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''}</div>`
       : '';
   };
   // helpful hint shown below the items list
@@ -918,7 +918,7 @@ async function openOrderEditor(orderId) {
     const itemsTotal = lineSum();
     const estimatedTotal = Math.max(0, itemsTotal - currentDiscount + currentDeliveryFee);
     totalsEl.innerHTML = items.filter((x) => !x.remove).length > 0
-      ? `Items total: <b>${peso(itemsTotal)}</b>${currentDiscount > 0 ? ` − <span style="color:#27ae60">Discount: ${peso(currentDiscount)}</span>` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''} = <b>${peso(estimatedTotal)}</b>`
+      ? `<div style="font-size:1.1rem;font-weight:700">Total: ${peso(estimatedTotal)}</div><div style="font-size:0.85rem;color:#666">Items: ${peso(itemsTotal)}${currentDiscount > 0 ? ` − Discount: ${peso(currentDiscount)}` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''}</div>`
       : '';
   });
   renderItems();
