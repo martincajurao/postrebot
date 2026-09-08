@@ -14,13 +14,19 @@ const WV = (() => {
 })();
 
 // ---------- helpers ----------
+let loggedOut = false; // Flag to prevent session recovery after explicit logout
+
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     ...opts,
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN, ...(opts.headers || {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (res.status === 401) { recoverSession().catch(() => {}); throw new Error('Session expired'); }
+  if (res.status === 401) {
+    // Don't try to recover session if user explicitly logged out
+    if (!loggedOut) { recoverSession().catch(() => {}); throw new Error('Session expired'); }
+    return;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -187,6 +193,7 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => { if (
 
 // ---------- auth --assad--------
 function logout() {
+  loggedOut = true; // Prevent session recovery after explicit logout
   TOKEN = ''; ME = ''; ME_ID = 0; ROLE = '';
   localStorage.clear();
   location.hash = '';
@@ -221,6 +228,7 @@ async function tryRememberedLogin() {
 async function recoverSession() {
   TOKEN = '';
   if (await tryRememberedLogin()) {
+    loggedOut = false; // Reset flag on successful recovery
     showApp();
     navigate(currentView);
     autoSubscribePush();
@@ -443,7 +451,7 @@ async function uploadImage(file) {
   const fd = new FormData();
   fd.append('image', file);
   const res = await fetch(API + '/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: fd });
-  if (res.status === 401) { recoverSession().catch(() => {}); throw new Error('Session expired'); }
+  if (res.status === 401) { if (!loggedOut) { recoverSession().catch(() => {}); throw new Error('Session expired'); } return ''; }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Upload failed');
   return data.url;
@@ -797,6 +805,8 @@ async function openOrderEditor(orderId) {
     package_items: it.package_items || [],
   }));
   const lineSum = () => items.filter((x) => !x.remove).reduce((s, x) => s + x.unit_price * x.quantity, 0);
+  const currentDiscount = Number(order.additional_discount) || 0;
+  const currentDeliveryFee = Number(order.delivery_fee) || 0;
   modal(`<h3>✏️ Edit Order ${esc(order.order_number)}</h3>
     <p class="muted" style="margin-bottom:12px">Customer changed their mind? Add or remove items, change sizes or the schedule — the linked reservation stays in sync and the customer is notified.</p>
     <div class="oe-add-section">
@@ -831,7 +841,7 @@ async function openOrderEditor(orderId) {
       </div>
       <div class="field"><label>Notes</label><textarea id="oe-notes" rows="2">${esc(order.notes || '')}</textarea></div>
     </div>
-    <div id="oe-totals" class="muted" style="margin-bottom:10px"></div>
+    <div id="oe-summary" class="oe-totals-bar" style="margin-bottom:10px"></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="oe-save">Save changes</button></div>`);
   // ---- item row renderer + live events (list re-renders on any change) ----
   const itemsEl = document.getElementById('oe-items');
@@ -863,10 +873,12 @@ async function openOrderEditor(orderId) {
     </div>`;
   };
   const renderItems = () => {
-    const hasItems = items.length > 0;
+    const hasItems = items.filter((x) => !x.remove).length > 0;
     itemsEl.innerHTML = items.map(itemRow).join('') || '<p class="muted">No items.</p>';
+    const itemsTotal = lineSum();
+    const estimatedTotal = Math.max(0, itemsTotal - currentDiscount + currentDeliveryFee);
     totalsEl.innerHTML = hasItems
-      ? `Items total: <b>${peso(lineSum())}</b> — delivery fee &amp; discounts stay unchanged; the total is recalculated on save.`
+      ? `Items total: <b>${peso(itemsTotal)}</b>${currentDiscount > 0 ? ` − <span style="color:#27ae60">Discount: ${peso(currentDiscount)}</span>` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''} = <b>${peso(estimatedTotal)}</b>`
       : '';
   };
   // helpful hint shown below the items list
@@ -903,8 +915,10 @@ async function openOrderEditor(orderId) {
       if (v) it.unit_price = Number(v.price);
     }
     row.querySelector('.oe-line-total').textContent = peso(it.unit_price * it.quantity);
-    totalsEl.innerHTML = items.length
-      ? `Items total: <b>${peso(lineSum())}</b> — delivery fee &amp; discounts stay unchanged; the total is recalculated on save.`
+    const itemsTotal = lineSum();
+    const estimatedTotal = Math.max(0, itemsTotal - currentDiscount + currentDeliveryFee);
+    totalsEl.innerHTML = items.filter((x) => !x.remove).length > 0
+      ? `Items total: <b>${peso(itemsTotal)}</b>${currentDiscount > 0 ? ` − <span style="color:#27ae60">Discount: ${peso(currentDiscount)}</span>` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''} = <b>${peso(estimatedTotal)}</b>`
       : '';
   });
   renderItems();
