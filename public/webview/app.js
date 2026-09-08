@@ -1042,12 +1042,12 @@ function renderPackageDetail() {
   const slots = (pkg.slots || []).slice().sort((a, b) => a.slot_number - b.slot_number);
   const chosen = Object.keys(packageDetail.choices).length;
   const needed = Number(pkg.selections) || slots.length || 0;
-  const complete = chosen >= needed;
+  const complete = pkg.is_custom ? chosen >= Math.max(4, needed) : chosen >= needed;
   const pricing = pricePackageChoices(pkg, packageDetail.choices, packageDetail.size, packageDetail.slotSizes);
 
   let slotsHtml = '';
   if (pkg.is_custom) {
-    slotsHtml = renderByopCustom(pkg, slots, needed, complete);
+    slotsHtml = renderByopCustom(pkg, slots, Math.max(4, needed), complete);
   } else if (slots.length > 0) {
     slotsHtml = renderFixedSlots(pkg, slots);
   } else {
@@ -1082,7 +1082,8 @@ function renderPackageDetail() {
   showView('view-package');
 }
 
-/** Render the "Build Your Own" custom package: selected items + full menu grid. */
+/** Render the "Build Your Own" custom package: selected items + full menu grid.
+ *  No maximum slot limit — customer can add as many dishes as they want (minimum 4). */
 function renderByopCustom(pkg, slots, needed, complete) {
   const selectedSlots = slots.map((slot) => {
     const pid = packageDetail.choices[Number(slot.slot_number)];
@@ -1095,7 +1096,7 @@ function renderByopCustom(pkg, slots, needed, complete) {
 
   const selectedHtml = selectedSlots.length > 0
     ? `<div class="byop-selected">
-        <h4>Your Selection (${selectedSlots.length}/${needed})</h4>
+        <h4>Your Selection (${selectedSlots.length} dishes${needed > 0 ? ` — min ${needed}` : ''})</h4>
         <div class="byop-selected-list">
           ${selectedSlots.map((s) => `
             <div class="byop-selected-item">
@@ -1109,6 +1110,13 @@ function renderByopCustom(pkg, slots, needed, complete) {
         </div>
       </div>`
     : '';
+
+  // Calculate discount for display
+  const itemsSum = selectedSlots.reduce((sum, s) => sum + productMenuPriceM(s.productId), 0);
+  const discount = autoDiscount(itemsSum);
+  const discountHtml = discount > 0
+    ? `<div class="byop-discount">🎉 Volume discount: <strong>−${formatMoney(discount)}</strong> (save on orders ₱3,000+)</div>`
+    : (selectedSlots.length > 0 ? `<div class="byop-discount muted">Add ₱${formatMoney(Math.max(0, 3000 - itemsSum))} more for ₱700 off</div>` : '');
 
   const menuItems = products.filter((p) => Number(p.unavailable) !== 1);
   const itemsByCategory = {};
@@ -1124,25 +1132,20 @@ function renderByopCustom(pkg, slots, needed, complete) {
     const items = itemsByCategory[catName];
     return `<div class="byop-category">
       <div class="byop-cat-header">${esc(catName)}</div>
-      <div class="byop-grid">
+      <div class="byop-btn-grid">
         ${items.map((p) => {
           const pid = Number(p.id);
           const isSelected = selectedPids.includes(pid);
           const upgrade = productMenuPriceM(pid);
-          const thumb = p.photo_url
-            ? `<img class="byop-thumb img-skel" src="${esc(absUrl(p.photo_url))}" loading="lazy" onload="this.classList.remove('img-skel')" onerror="this.remove()">`
-            : '';
-          return `<div class="byop-item${isSelected ? ' selected' : ''}${complete ? ' disabled' : ''}" onclick="addToSlot(${pid})">
-            ${thumb}
-            <span class="byop-item-name">${esc(p.name)}</span>
-            <span class="byop-item-price">${upgrade > 0 ? `+${formatMoney(upgrade)}` : ''}</span>
-          </div>`;
+          return `<button class="byop-btn${isSelected ? ' selected' : ''}" onclick="addToSlot(${pid})">
+            ${esc(p.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
+          </button>`;
         }).join('')}
       </div>
     </div>`;
   }).join('');
 
-  return `${selectedHtml}<div class="byop-menu"><h4>Choose ${needed} dishes</h4>${menuHtml}</div>`;
+  return `${selectedHtml}${discountHtml}<div class="byop-menu"><h4>Add dishes (min ${needed})</h4>${menuHtml}</div>`;
 }
 
 /** Render fixed-package slot options (unchanged behavior). */
@@ -1186,14 +1189,12 @@ function renderFixedSlots(pkg, slots) {
   }).join('');
 }
 
-/** Add a dish to the next available slot (custom package). */
+/** Add a dish to the next available slot (custom package). No max limit. */
 function addToSlot(productId) {
   const pkg = currentPackage();
   if (!pkg || !pkg.is_custom) return;
   const slots = (pkg.slots || []).slice().sort((a, b) => a.slot_number - b.slot_number);
-  const needed = Number(pkg.selections) || slots.length || 0;
-  const chosen = Object.keys(packageDetail.choices).length;
-  if (chosen >= needed) return;
+  // Find the first empty slot
   for (const slot of slots) {
     const sn = Number(slot.slot_number);
     if (packageDetail.choices[sn] === undefined || packageDetail.choices[sn] === null) {
