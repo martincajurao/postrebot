@@ -1213,16 +1213,8 @@ async function handleText(psid: string, text: string) {
       if (/^(hi|hello|hey|good\s*(morning|afternoon|evening)|greetings|sup|yo)\b/i.test(text)) {
         return mainMenu(psid);
       }
-      // Handle thanks/gratitude - just respond naturally, no menu
-      if (/\b(thanks|thank\s*you|thx|ty|salamat)\b/i.test(text)) {
-        return sendText(psid, '😊 You\'re welcome!');
-      }
-      // Handle "menu" request - show menu options
-      if (text.toLowerCase().includes('menu')) {
-        return showMenuOptions(psid);
-      }
-      // For any other text, just acknowledge without showing menu
-      return sendText(psid, '👍');
+      // For any other text, show quick reply menu (always visible buttons)
+      return showMenuOptions(psid);
   }
 }
 
