@@ -32,7 +32,11 @@ function toast(msg, err = false) {
   t.className = 'toast' + (err ? ' err' : '');
   t.textContent = msg;
   document.getElementById('toast').appendChild(t);
-  setTimeout(() => t.remove(), 3200);
+  // Auto-dismiss with smooth exit animation
+  setTimeout(() => {
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 200);
+  }, 3200);
 }
 function modal(html) { document.getElementById('modal').innerHTML = html; document.getElementById('modal-overlay').classList.add('show'); }
 function closeModal() {
@@ -686,62 +690,216 @@ function slotSelectHtml(id, current, slots) {
   const labels = [...new Set([...slots, current].filter(Boolean))];
   return `<select id="${id}">${labels.map((l) => `<option${l === current ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
 }
-/** Full order editor: items (quantity / remove), type, contact, schedule, notes.
- *  Saving syncs the linked reservation and notifies the customer of the changes. */
+/** Full order editor: add items from the menu/packages/food packs, change
+ *  quantities & sizes, remove items, and update details & schedule. Saving
+ *  syncs the linked reservation and notifies the customer of the changes. */
 async function openOrderEditor(orderId) {
   let order;
   try { order = await api('/orders/' + orderId); } catch { return toast('Could not load the order', true); }
-  const slots = await activeSlotLabels();
-  const itemsRows = (order.items || []).map((it) => `
-    <div class="oe-item" data-item-id="${it.id}" data-qty="${it.quantity}" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <div style="flex:1;min-width:0">
-        <b>${esc(it.name)}</b>${it.variant_size ? ` <span class="muted">${esc(it.variant_size)}</span>` : ''}
-        ${(it.package_items || []).length ? `<div class="muted" style="font-size:11px">${it.package_items.filter(Boolean).map((p) => 'S' + p.slot_number + ': ' + esc(p.product_name)).join(' · ')}</div>` : ''}
-        <div class="muted" style="font-size:11px">${peso(Number(it.unit_price) || 0)} each</div>
-      </div>
-      <input type="number" class="oe-qty" min="0" max="99" value="${it.quantity}" style="width:64px" title="0 removes the item">
-      <span class="oe-line muted" style="width:86px;text-align:right">${peso(Number(it.line_total) || 0)}</span>
-      <button class="btn danger sm" type="button" data-oe-del="${it.id}" title="Remove item">✕</button>
-    </div>`).join('');
-  modal(`<h3>✏️ Edit Order ${esc(order.order_number)}</h3>
-    <p class="muted" style="margin-bottom:10px">Customer changed their mind? Update anything below — the linked reservation stays in sync and the customer is notified.</p>
-    <div class="field"><label>Items</label><div id="oe-items">${itemsRows || '<p class="muted">No items.</p>'}</div>
-      <div class="muted" style="font-size:11px">Set the quantity to 0 (or press ✕) to remove an item. Totals are recalculated on save.</div></div>
-    <div class="row2">
-      <div class="field"><label>Order type</label>
-        <select id="oe-type"><option value="delivery"${order.order_type === 'delivery' ? ' selected' : ''}>🚚 Delivery</option><option value="pickup"${order.order_type === 'pickup' ? ' selected' : ''}>🏬 Pickup</option></select></div>
-      <div class="field"><label>Contact number</label><input id="oe-phone" value="${esc(order.customer_phone || '')}"></div>
-    </div>
-    <div class="field"><label>Delivery address</label><input id="oe-address" value="${esc(order.address || '')}"></div>
-    <div class="row2">
-      <div class="field"><label>Date</label><input type="date" id="oe-date" value="${esc(order.fulfillment_date || '')}"></div>
-      <div class="field"><label>Time slot</label>${slotSelectHtml('oe-slot', order.time_slot, slots)}</div>
-    </div>
-    <div class="field"><label>Notes</label><textarea id="oe-notes" rows="2">${esc(order.notes || '')}</textarea></div>
-    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="oe-save">Save changes</button></div>`);
-  // Live per-line totals while quantities change.
-  document.querySelectorAll('#oe-items .oe-item').forEach((row) => {
-    const it = (order.items || []).find((x) => x.id == row.dataset.itemId);
-    const unit = Number(it && it.unit_price) || 0;
-    row.querySelector('.oe-qty').addEventListener('input', () => {
-      const q = Math.max(0, Number(row.querySelector('.oe-qty').value) || 0);
-      row.querySelector('.oe-line').textContent = peso(unit * q);
-    });
-  });
-  document.querySelectorAll('[data-oe-del]').forEach((btn) => btn.addEventListener('click', () => {
-    const row = btn.closest('.oe-item');
-    if (!row) return;
-    row.querySelector('.oe-qty').value = 0;
-    row.querySelector('.oe-qty').dispatchEvent(new Event('input'));
-    row.style.opacity = '.45';
+  const [slots, allProducts, allPackages, allFoodPacks] = await Promise.all([
+    activeSlotLabels(), api('/products'), api('/packages'), api('/food-packs').catch(() => []),
+  ]);
+  const catalogs = {
+    products: allProducts.filter((p) => p.active && !p.unavailable),
+    packages: allPackages.filter((p) => p.active),
+    foodPacks: (allFoodPacks || []).filter((f) => f.active),
+  };
+  // Editable line state: existing lines keep their DB id; pending lines
+  // (isNew) are created on save. The server re-prices every line.
+  let seq = 0;
+  const items = (order.items || []).map((it) => ({
+    key: 'x' + it.id, id: it.id, isNew: false, remove: false,
+    kind: it.package_id ? 'package' : (it.food_pack_id ? 'foodpack' : 'product'),
+    product_id: it.product_id || null, package_id: it.package_id || null, food_pack_id: it.food_pack_id || null,
+    name: it.name, variant_size: it.variant_size || '', unit_price: Number(it.unit_price) || 0,
+    quantity: it.quantity, origQty: it.quantity, origSize: it.variant_size || '',
+    package_items: it.package_items || [],
   }));
+  const lineSum = () => items.filter((x) => !x.remove).reduce((s, x) => s + x.unit_price * x.quantity, 0);
+  modal(`<h3>✏️ Edit Order ${esc(order.order_number)}</h3>
+    <p class="muted" style="margin-bottom:12px">Customer changed their mind? Add or remove items, change sizes or the schedule — the linked reservation stays in sync and the customer is notified.</p>
+    <div class="oe-add-section">
+      <div class="oe-section-title">➕ Add items</div>
+      <div class="row">
+        <select id="oe-kind" style="width:auto"><option value="product">🍽️ Menu item</option><option value="package">🔥 Package</option><option value="foodpack">🍱 Food pack</option></select>
+        <select id="oe-add-item" style="flex:1;min-width:150px"></select>
+        <select id="oe-add-size" style="width:auto"></select>
+        <input type="number" id="oe-add-qty" min="1" max="99" value="1" style="width:58px">
+        <button class="btn sm" type="button" id="oe-add">＋ Add</button>
+      </div>
+    </div>
+    <div class="card" style="box-shadow:none;border:1px solid #eee;padding:12px;margin-bottom:10px">
+      <b>🧾 Items</b>
+      <div id="oe-items" style="margin-top:6px"></div>
+      <div id="oe-totals" class="oe-totals-bar" style="margin-top:10px"></div>
+    </div>
+    <div class="card" style="box-shadow:none;border:1px solid #eee;padding:12px;margin-bottom:10px">
+      <b>📋 Details</b>
+      <div class="row2" style="margin-top:6px">
+        <div class="field"><label>Order type</label>
+          <select id="oe-type"><option value="delivery"${order.order_type === 'delivery' ? ' selected' : ''}>🚚 Delivery</option><option value="pickup"${order.order_type === 'pickup' ? ' selected' : ''}>🏬 Pickup</option></select></div>
+        <div class="field"><label>Contact number</label><input id="oe-phone" value="${esc(order.customer_phone || '')}"></div>
+      </div>
+      <div class="field"><label>Delivery address</label><input id="oe-address" value="${esc(order.address || '')}"></div>
+    </div>
+    <div class="card" style="box-shadow:none;border:1px solid #eee;padding:12px;margin-bottom:10px">
+      <b>📅 Schedule</b>
+      <div class="row2" style="margin-top:6px">
+        <div class="field"><label>Date</label><input type="date" id="oe-date" value="${esc(order.fulfillment_date || '')}"></div>
+        <div class="field"><label>Time slot</label>${slotSelectHtml('oe-slot', order.time_slot, slots)}</div>
+      </div>
+      <div class="field"><label>Notes</label><textarea id="oe-notes" rows="2">${esc(order.notes || '')}</textarea></div>
+    </div>
+    <div id="oe-totals" class="muted" style="margin-bottom:10px"></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="oe-save">Save changes</button></div>`);
+  // ---- item row renderer + live events (list re-renders on any change) ----
+  const itemsEl = document.getElementById('oe-items');
+  const totalsEl = document.getElementById('oe-totals');
+  const itemRow = (it) => {
+    const meta = it.kind === 'product' ? catalogs.products.find((x) => x.id == it.product_id)
+      : it.kind === 'package' ? catalogs.packages.find((x) => x.id == it.package_id)
+      : catalogs.foodPacks.find((x) => x.id == it.food_pack_id);
+    const thumb = meta && meta.photo_url ? imgTag(meta.photo_url, it.name) : '<span class="thumb noimg" title="No photo">🖼️</span>';
+    const sizes = it.kind === 'product' ? (meta?.variants || []).map((v) => v.size)
+      : it.kind === 'package' ? ['M', 'L'] : [];
+    const sizeSel = sizes.length ? `<select class="oe-size" title="Size" style="width:auto">${[...new Set([...sizes, it.variant_size].filter(Boolean))].map((s) => `<option${s === it.variant_size ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select>` : '';
+    const slots = (it.package_items || []).length ? `<div class="muted" style="font-size:11px">${it.package_items.filter(Boolean).map((p) => 'S' + p.slot_number + ': ' + esc(p.product_name)).join(' · ')}</div>` : '';
+    return `<div class="oe-item-row${it.remove ? ' oe-removed' : ''}" data-key="${it.key}" data-item-id="${it.id || ''}" data-qty="${it.quantity}" style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #f0f1f3">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div><b>${esc(it.name)}</b>${it.isNew ? ' <span class="badge b-CONFIRMED">NEW</span>' : ''}</div>
+        ${slots}
+        <div class="muted" style="font-size:11px">${peso(it.unit_price)} each</div>
+      </div>
+      ${sizeSel}
+      <div style="display:flex;align-items:center;gap:3px">
+        <button class="btn ghost sm" type="button" data-oe-step="-1" style="padding:2px 7px">−</button>
+        <input type="number" class="oe-qty oe-qty-input" min="0" max="99" value="${it.quantity}">
+        <button class="btn ghost sm" type="button" data-oe-step="1" style="padding:2px 7px">＋</button>
+      </div>
+      <span class="oe-line-total">${peso(it.unit_price * it.quantity)}</span>
+      <button class="btn danger sm" type="button" data-oe-del title="${it.isNew ? 'Remove row' : 'Remove item'}">✕</button>
+    </div>`;
+  };
+  const renderItems = () => {
+    const hasItems = items.length > 0;
+    itemsEl.innerHTML = items.map(itemRow).join('') || '<p class="muted">No items.</p>';
+    totalsEl.innerHTML = hasItems
+      ? `Items total: <b>${peso(lineSum())}</b> — delivery fee &amp; discounts stay unchanged; the total is recalculated on save.`
+      : '';
+  };
+  // helpful hint shown below the items list
+  const hintEl = document.createElement('div');
+  hintEl.className = 'muted';
+  hintEl.style.fontSize = '11px';
+  hintEl.style.marginTop = '6px';
+  hintEl.textContent = 'Set quantity to 0 or press ✕ to remove a line.';
+  itemsEl.parentNode.insertBefore(hintEl, itemsEl.nextSibling);
+  itemsEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.oe-item-row');
+    if (!row) return;
+    const it = items.find((x) => x.key === row.dataset.key);
+    if (!it) return;
+    const step = e.target.closest('[data-oe-step]');
+    if (step) { it.quantity = Math.max(0, Math.min(99, it.quantity + Number(step.dataset.oeStep))); renderItems(); return; }
+    if (e.target.closest('[data-oe-del]')) {
+      if (it.isNew) items.splice(items.indexOf(it), 1);
+      else it.remove = !it.remove;
+      renderItems();
+    }
+  });
+  itemsEl.addEventListener('input', (e) => {
+    const row = e.target.closest('.oe-item-row');
+    if (!row) return;
+    const it = items.find((x) => x.key === row.dataset.key);
+    if (!it) return;
+    if (e.target.classList.contains('oe-qty')) {
+      it.quantity = Math.max(0, Math.min(99, Number(e.target.value) || 0));
+    } else if (e.target.classList.contains('oe-size')) {
+      it.variant_size = e.target.value;
+      const meta = catalogs.products.find((x) => x.id == it.product_id);
+      const v = (meta?.variants || []).find((x) => x.size === it.variant_size);
+      if (v) it.unit_price = Number(v.price);
+    }
+    row.querySelector('.oe-line-total').textContent = peso(it.unit_price * it.quantity);
+    totalsEl.innerHTML = items.length
+      ? `Items total: <b>${peso(lineSum())}</b> — delivery fee &amp; discounts stay unchanged; the total is recalculated on save.`
+      : '';
+  });
+  renderItems();
+  // ---- add-item picker (menu items / packages / food packs) ----
+  const kindSel = document.getElementById('oe-kind');
+  const itemSel = document.getElementById('oe-add-item');
+  const addSizeSel = document.getElementById('oe-add-size');
+  const fillSizeOptions = () => {
+    const id = Number(itemSel.value);
+    if (kindSel.value === 'product') {
+      const p = catalogs.products.find((x) => x.id === id);
+      const sizes = (p?.variants || []).map((v) => v.size);
+      addSizeSel.innerHTML = sizes.length ? sizes.map((s) => `<option>${esc(s)}</option>`).join('') : '<option value="">—</option>';
+      addSizeSel.disabled = sizes.length === 0;
+    } else if (kindSel.value === 'package') {
+      addSizeSel.innerHTML = '<option>M</option><option>L</option>';
+      addSizeSel.disabled = false;
+    } else {
+      addSizeSel.innerHTML = '<option value="">—</option>';
+      addSizeSel.disabled = true;
+    }
+  };
+  const fillItemOptions = () => {
+    if (kindSel.value === 'product') {
+      itemSel.innerHTML = catalogs.products.map((p) => {
+        const vs = (p.variants || []).map((v) => `${v.size} ${peso(v.price)}`).join(' / ');
+        return `<option value="${p.id}">${esc(p.name)}${vs ? ' — ' + esc(vs) : ' — no price set'}</option>`;
+      }).join('') || '<option value="">No menu items yet</option>';
+    } else if (kindSel.value === 'package') {
+      itemSel.innerHTML = catalogs.packages.map((p) => `<option value="${p.id}">${esc(p.name)} — ${peso(Math.max(0, (p.base_price || 0) - (p.discount || 0)))}</option>`).join('') || '<option value="">No packages yet</option>';
+    } else {
+      itemSel.innerHTML = catalogs.foodPacks.map((f) => `<option value="${f.id}">${esc(f.name)} — ${peso(f.price)}</option>`).join('') || '<option value="">No food packs yet</option>';
+    }
+    fillSizeOptions();
+  };
+  kindSel.addEventListener('change', fillItemOptions);
+  itemSel.addEventListener('change', fillSizeOptions);
+  fillItemOptions();
+  document.getElementById('oe-add').addEventListener('click', () => {
+    const id = Number(itemSel.value);
+    if (!id) { toast('Nothing to add — create it in Menu / Packages first.', true); return; }
+    const qty = Math.max(1, Math.min(99, Number(document.getElementById('oe-add-qty').value) || 1));
+    const size = addSizeSel.disabled ? '' : addSizeSel.value;
+    let it;
+    if (kindSel.value === 'product') {
+      const p = catalogs.products.find((x) => x.id === id);
+      const v = (p?.variants || []).find((x) => x.size === size) || (p?.variants || [])[0];
+      it = { key: 'n' + (++seq), isNew: true, remove: false, kind: 'product', product_id: id, package_id: null, food_pack_id: null, name: p.name + (size ? ` (${size})` : ''), variant_size: size || '', unit_price: v ? Number(v.price) : 0, quantity: qty, origQty: 0, origSize: '', package_items: [] };
+    } else if (kindSel.value === 'package') {
+      const p = catalogs.packages.find((x) => x.id === id);
+      it = { key: 'n' + (++seq), isNew: true, remove: false, kind: 'package', product_id: null, package_id: id, food_pack_id: null, name: p.name + (size ? ` (${size})` : ''), variant_size: size || '', unit_price: Math.max(0, (p.base_price || 0) - (p.discount || 0)), quantity: qty, origQty: 0, origSize: '', package_items: [] };
+    } else {
+      const f = catalogs.foodPacks.find((x) => x.id === id);
+      it = { key: 'n' + (++seq), isNew: true, remove: false, kind: 'foodpack', product_id: null, package_id: null, food_pack_id: id, name: f.name + ' (food pack)', variant_size: '', unit_price: Number(f.price) || 0, quantity: qty, origQty: 0, origSize: '', package_items: [] };
+    }
+    items.push(it);
+    renderItems();
+  });
   document.getElementById('oe-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     try {
-      // Items first (quantity changes / removals), then the details.
-      for (const row of document.querySelectorAll('#oe-items .oe-item')) {
-        const itemId = Number(row.dataset.itemId);
+      // Process each row: new items are created, existing items are updated or removed.
+      for (const row of document.querySelectorAll('#oe-items .oe-item-row')) {
+        const itemId = row.dataset.itemId ? Number(row.dataset.itemId) : null;
         const origQty = Number(row.dataset.qty) || 0;
         const qty = Math.max(0, Math.min(99, Number(row.querySelector('.oe-qty').value) || 0));
+        const isNew = !itemId;
+        if (isNew) {
+          // New items are added via the picker; if qty is 0, just skip (don't save).
+          if (qty === 0) continue;
+          const it = items.find((x) => x.key === row.dataset.key);
+          if (!it) continue;
+          if (it.kind === 'product') await api(`/orders/${orderId}/items`, { method: 'POST', body: { product_id: it.product_id, variant_size: it.variant_size || undefined, quantity: qty } });
+          else if (it.kind === 'package') await api(`/orders/${orderId}/items`, { method: 'POST', body: { package_id: it.package_id, variant_size: it.variant_size || undefined, quantity: qty } });
+          else if (it.kind === 'foodpack') await api(`/orders/${orderId}/items`, { method: 'POST', body: { food_pack_id: it.food_pack_id, quantity: qty } });
+          continue;
+        }
         if (qty === origQty) continue;
         if (qty === 0) await api(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
         else await api(`/orders/${orderId}/items/${itemId}`, { method: 'PUT', body: { quantity: qty } });

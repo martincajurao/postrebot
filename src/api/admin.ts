@@ -9,7 +9,7 @@ import {
   rescheduleReservation, slotAvailability, isDateOpen,
   syncReservationFromOrder, syncOrderFromReservation, ensureReservationFromOrder,
 } from '../services/reservations';
-import { computeCartTotals } from '../services/pricing';
+import { choiceUpgrade, computeCartTotals, packageDefaults, priceProduct } from '../services/pricing';
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
 import { notifyOrderStatus, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
@@ -538,20 +538,123 @@ r.put('/orders/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Change an item's quantity (customer wants more/fewer of something).
-r.put('/orders/:id/items/:itemId', async (req, res) => {
+// Add an item to the order (customer changed their mind — "add one more").
+// Priced server-side from the DB — same pricing path as checkout: products by
+// variant, packages by their default (★) slot dishes, food packs by price.
+r.post('/orders/:id/items', async (req, res) => {
   const orderId = Number(req.params.id);
-  const itemId = Number(req.params.itemId);
-  const quantity = Math.floor(Number(req.body?.quantity));
-  if (!quantity || quantity < 1 || quantity > 99) return res.status(400).json({ error: 'Quantity must be between 1 and 99' });
+  const { product_id, package_id, food_pack_id, variant_size, quantity } = req.body || {};
+  const qty = Math.floor(Number(quantity));
+  if (!qty || qty < 1 || qty > 99) return res.status(400).json({ error: 'Quantity must be between 1 and 99' });
   const { data: order } = await supa().from('orders').select('status').eq('id', orderId).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   const blocked = orderEditBlocked(order);
   if (blocked) return res.status(400).json({ error: blocked });
-  const { data: item } = await supa().from('order_items').select('id, unit_price, quantity').eq('id', itemId).eq('order_id', orderId).maybeSingle();
+
+  const size = variant_size ? String(variant_size).trim().toUpperCase() : undefined;
+  const cartLine: any = { quantity: qty };
+  let name = '';
+  if (product_id) {
+    cartLine.product_id = Number(product_id);
+    if (size) cartLine.variant_size = size;
+    const { data: prod } = await supa().from('products').select('name').eq('id', product_id).maybeSingle();
+    if (!prod) return res.status(400).json({ error: 'Product not found' });
+    name = prod.name + (size ? ` (${size})` : '');
+  } else if (package_id) {
+    cartLine.package_id = Number(package_id);
+    if (size) cartLine.variant_size = size;
+    const { data: pkg } = await supa().from('packages').select('name').eq('id', package_id).maybeSingle();
+    if (!pkg) return res.status(400).json({ error: 'Package not found' });
+    cartLine.slot_choices = await packageDefaults(Number(package_id));
+    name = pkg.name + (size ? ` (${size})` : '');
+  } else if (food_pack_id) {
+    cartLine.food_pack_id = Number(food_pack_id);
+    const { data: fp } = await supa().from('food_packs').select('name').eq('id', food_pack_id).maybeSingle();
+    if (!fp) return res.status(400).json({ error: 'Food pack not found' });
+    name = fp.name + ' (food pack)';
+  } else {
+    return res.status(400).json({ error: 'Pick an item to add' });
+  }
+
+  try {
+    const line = await computeCartTotals([cartLine], 0);
+    if (!line.subtotal) throw new Error('This item has no price set — set its price in the Menu first');
+    const unit = Math.round(line.subtotal / qty);
+    const { data: itemRow, error: itemErr } = await supa().from('order_items').insert({
+      order_id: orderId,
+      product_id: cartLine.product_id ?? null,
+      package_id: cartLine.package_id ?? null,
+      food_pack_id: cartLine.food_pack_id ?? null,
+      name,
+      variant_size: cartLine.variant_size ?? null,
+      quantity: qty,
+      unit_price: unit,
+      line_total: line.subtotal,
+    }).select('id').single();
+    if (itemErr) throw new Error(itemErr.message);
+    const itemId = Number(itemRow.id);
+    // Remember the package's chosen dishes on the line (slot contents), the
+    // same way checkout records them.
+    if (cartLine.package_id && Array.isArray(cartLine.slot_choices)) {
+      for (const c of cartLine.slot_choices) {
+        const { data: prod } = await supa().from('products').select('name').eq('id', c.product_id).maybeSingle();
+        let extra = 0;
+        try { extra = await choiceUpgrade(cartLine.package_id, c.slot_number, c.product_id, cartLine.variant_size); } catch { extra = 0; }
+        await supa().from('order_package_items').insert({
+          order_item_id: itemId,
+          slot_number: c.slot_number,
+          product_id: c.product_id,
+          product_name: prod?.name ?? 'Unknown',
+          upgrade_price: extra,
+        });
+      }
+    }
+    const totals = await recalcOrderTotalsAfterItemEdit(orderId);
+    res.json({ ok: true, item_id: itemId, ...totals });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Change an item's quantity / size (customer wants more, fewer, or M→L).
+r.put('/orders/:id/items/:itemId', async (req, res) => {
+  const orderId = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  const { data: order } = await supa().from('orders').select('status').eq('id', orderId).maybeSingle();
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  const blocked = orderEditBlocked(order);
+  if (blocked) return res.status(400).json({ error: blocked });
+  const { data: item } = await supa().from('order_items').select('id, product_id, unit_price, quantity, variant_size').eq('id', itemId).eq('order_id', orderId).maybeSingle();
   if (!item) return res.status(404).json({ error: 'Order item not found' });
-  if (quantity !== Number(item.quantity)) {
-    await supa().from('order_items').update({ quantity, line_total: Math.round((Number(item.unit_price) || 0) * quantity) }).eq('id', itemId);
+
+  // Size change (M/L) on a plain product line — re-priced from the menu.
+  let unitPrice = Number(item.unit_price) || 0;
+  let variantSize: string | null = item.variant_size;
+  if (req.body?.variant_size !== undefined && item.product_id) {
+    const nextSize = String(req.body.variant_size).trim().toUpperCase() || null;
+    if (nextSize !== (item.variant_size || null)) {
+      try {
+        unitPrice = await priceProduct(Number(item.product_id), nextSize || undefined);
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+      variantSize = nextSize;
+    }
+  }
+
+  const quantity = req.body?.quantity !== undefined
+    ? Math.floor(Number(req.body.quantity))
+    : Number(item.quantity);
+  if (!quantity || quantity < 1 || quantity > 99) return res.status(400).json({ error: 'Quantity must be between 1 and 99' });
+
+  const changed = quantity !== Number(item.quantity) || unitPrice !== (Number(item.unit_price) || 0) || variantSize !== item.variant_size;
+  if (changed) {
+    await supa().from('order_items').update({
+      quantity,
+      unit_price: unitPrice,
+      line_total: Math.round(unitPrice * quantity),
+      ...(variantSize !== item.variant_size ? { variant_size: variantSize } : {}),
+    }).eq('id', itemId);
   }
   const totals = await recalcOrderTotalsAfterItemEdit(orderId);
   res.json({ ok: true, ...totals });

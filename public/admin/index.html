@@ -98,21 +98,51 @@
   @keyframes btnspin { to { transform: rotate(360deg); } }
 
   /* modal */
-  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 50; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
-  .overlay.show { display: flex; }
-  .modal { background: var(--card); border-radius: var(--radius); padding: 24px; width: 480px; max-width: 96vw; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
-  .modal h3 { margin-bottom: 16px; }
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 50; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+  .overlay.show { display: flex; animation: overlay-in .2s ease; }
+  @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+  .modal { background: var(--card); border-radius: var(--radius); padding: 24px; width: 520px; max-width: 96vw; box-shadow: 0 20px 60px rgba(0,0,0,.25); animation: modal-in .25s cubic-bezier(.2,.8,.2,1); }
+  @keyframes modal-in { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  .modal h3 { margin-bottom: 16px; font-size: 18px; }
   .field { margin-bottom: 12px; }
-  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
   .modal .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  .modal-actions .btn { min-width: 90px; }
 
+  /* order editor specific */
+  .oe-add-section { background: #f8f9fb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .oe-add-section .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .oe-item-row { transition: all .15s; }
+  .oe-item-row:hover { background: #fafbfc; }
+  .oe-item-row.oe-removed { opacity: .5; background: #fef2f2; }
+  .oe-item-row.oe-removed b { text-decoration: line-through; }
+  .oe-line-total { width: 82px; text-align: right; font-weight: 600; font-size: 14px; }
+  .oe-item-thumb { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: #f0f1f3; flex-shrink: 0; }
+  .oe-item-thumb.noimg { display: flex; align-items: center; justify-content: center; color: #9aa1a9; font-size: 16px; }
+  .oe-qty-input { width: 50px; text-align: center; padding: 6px; border: 1px solid #d1d5db; border-radius: 8px; }
+  .oe-qty-input:focus { outline: 2px solid var(--brand); border-color: transparent; }
+  .oe-totals-bar { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 14px; font-weight: 600; color: #166534; margin-top: 10px; }
+  .oe-section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+
+  /* toast notifications */
   #toast { position: fixed; top: 18px; right: 18px; z-index: 99; display: flex; flex-direction: column; gap: 8px; }
-  .toast { background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.25); animation: fadein .2s; }
+  .toast { background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.25); animation: toast-in .25s cubic-bezier(.2,.8,.2,1); min-width: 200px; max-width: 380px; }
   .toast.err { background: var(--bad); }
-  @keyframes fadein { from { opacity: 0; transform: translateY(-6px);} to { opacity: 1; } }
+  .toast.out { animation: toast-out .2s ease forwards; }
+  @keyframes toast-in { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes toast-out { to { opacity: 0; transform: translateX(20px); } }
 
-  /* ---------- image cropper ---------- */
+  /* improved status badges with icons */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .b-PENDING { background: #fef3c7; color: var(--warn); }
+  .b-CONFIRMED { background: #dbeafe; color: var(--info); }
+  .b-PREPARING { background: #ede9fe; color: #7c3aed; }
+  .b-READY { background: #d1fae5; color: var(--ok); }
+  .b-COMPLETED { background: #e5e7eb; color: var(--muted); }
+  .b-CANCELLED { background: #fee2e2; color: var(--bad); }
+  .b-UNPAID { background: #fee2e2; color: var(--bad); }
+  .b-PAID { background: #d1fae5; color: var(--ok); }
   #crop-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 80; display: none;
     align-items: center; justify-content: center; padding: 16px; }
   #crop-overlay.show { display: flex; }
