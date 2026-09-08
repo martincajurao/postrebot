@@ -1213,8 +1213,12 @@ async function handleText(psid: string, text: string) {
       if (/^(hi|hello|hey|good\s*(morning|afternoon|evening)|greetings|sup|yo)\b/i.test(text)) {
         return mainMenu(psid);
       }
-      // For any other text, show quick reply menu (always visible buttons)
-      return showMenuOptions(psid);
+      // Handle "menu" request - show menu options
+      if (text.toLowerCase().includes('menu')) {
+        return showMenuOptions(psid);
+      }
+      // For any other text, don't reply - let customer chat normally
+      return;
   }
 }
 
