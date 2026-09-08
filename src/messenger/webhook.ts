@@ -345,7 +345,7 @@ async function mainMenu(psid: string) {
  */
 function showMenuOptions(psid: string) {
   return sendQuickReplies(psid, '🍽️ What would you like to do?', [
-    { title: '🛍️ Open Store Now!', payload: 'WEBVIEW' },
+    { title: '🛍️ Open Store Now!', payload: 'WELCOME' },
     { title: '🛒 Order Now', payload: 'MENU_ORDER' },
     { title: '📅 Reservation', payload: 'MENU_RESERVE' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
@@ -787,6 +787,7 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'GET_STARTED':
     case 'MAIN_MENU':
     case 'MAIN_MENU_BACK':
+    case 'WELCOME':
       return mainMenu(psid);
     case 'WEBVIEW': {
       const url = webviewUrl();
@@ -1208,16 +1209,20 @@ async function handleText(psid: string, text: string) {
       if (/\b(order\s+online|web\s*store|webview|open\s+store)\b/i.test(text)) {
         return handlePayload(psid, 'WEBVIEW');
       }
-      // Handle greetings - show menu with greeting
+      // Handle greetings - show welcome message with webview button
       if (/^(hi|hello|hey|good\s*(morning|afternoon|evening)|greetings|sup|yo)\b/i.test(text)) {
-        return sendText(psid, '👋 Hello!').then(() => showMenuOptions(psid));
+        return mainMenu(psid);
       }
-      // Handle thanks/gratitude - just respond naturally, then show menu
+      // Handle thanks/gratitude - just respond naturally, no menu
       if (/\b(thanks|thank\s*you|thx|ty|salamat)\b/i.test(text)) {
-        return sendText(psid, '😊 You\'re welcome!').then(() => showMenuOptions(psid));
+        return sendText(psid, '😊 You\'re welcome!');
       }
-      // For any other text, show menu options
-      return showMenuOptions(psid);
+      // Handle "menu" request - show menu options
+      if (text.toLowerCase().includes('menu')) {
+        return showMenuOptions(psid);
+      }
+      // For any other text, just acknowledge without showing menu
+      return sendText(psid, '👍');
   }
 }
 
