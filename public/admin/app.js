@@ -6,7 +6,7 @@ let ME_ID = Number(localStorage.getItem('me_id')) || 0;
 let ROLE = localStorage.getItem('role') || 'ADMIN';
 let currentView = 'dashboard';
 
-// Messenger webview params (psid/ts/sig, bot-signed) — enable "log in once, remembered"
+// Messenger webview params (psid/ts/sig, Zxzx bot-signed) — enable "log in once, remembered"
 const WV = (() => {
   const q = new URLSearchParams(location.search);
   const psid = q.get('psid'), ts = q.get('ts'), sig = q.get('sig');
