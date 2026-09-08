@@ -135,6 +135,14 @@
   .slot-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f1f3; font-size: 14px; }
   img.thumb, span.thumb { width: 48px; height: 48px; border-radius: 10px; object-fit: cover; background: #f0f1f3; display: inline-block; vertical-align: middle; flex: none; }
   span.thumb.noimg { display: inline-flex; align-items: center; justify-content: center; color: #9aa1a9; font-size: 20px; }
+
+  /* Skeleton shimmer while images fetch — the class is removed once the img loads */
+  img.img-skel {
+    background: linear-gradient(90deg, #eef0f3 25%, #dde2ea 50%, #eef0f3 75%);
+    background-size: 200% 100%;
+    animation: img-skel 1.4s infinite;
+  }
+  @keyframes img-skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 </style>
 </head>
 <body>

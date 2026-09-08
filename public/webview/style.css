@@ -1821,6 +1821,15 @@ body {
   100% { background-position: -200% 0; }
 }
 
+/* Image shimmer: .img-skel sits on the <img> itself while its bitmap fetches and
+   is removed on load/error (see imageHtml() / lightbox / opt-thumb in app.js).
+   Reuses the .skeleton colors + skeleton-loading keyframes above. */
+img.img-skel {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
 /* Spinner */
 .spinner {
   width: 40px;

@@ -416,7 +416,7 @@ function openImageLibrary(selectedId) {
       }
       grid.innerHTML = files.map((f) => `
         <div style="background:#fafbfc;border-radius:10px;padding:8px;text-align:center;cursor:pointer" class="library-img" data-url="${esc(f.url)}">
-          <img src="${esc(f.url)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px" loading="lazy">
+          <img class="img-skel" src="${esc(f.url)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px" loading="lazy" onload="this.classList.remove('img-skel')" onerror="this.classList.remove('img-skel')">
           <p class="muted" style="margin:4px 0;font-size:10px;word-break:break-all">${esc(f.name)}</p>
         </div>`).join('');
       grid.querySelectorAll('.library-img').forEach((el) => {
@@ -639,7 +639,7 @@ document.getElementById('crop-apply').addEventListener('click', () => {
 window.imgFail = (el) => { const s = document.createElement('span'); s.className = 'thumb noimg'; s.textContent = '🖼️'; el.replaceWith(s); };
 /** Thumbnail with graceful fallback when there is no photo or it fails to load. */
 const imgTag = (url, title = '') => url
-  ? `<img class="thumb" src="${esc(bustImg(url))}" alt="" title="${esc(title)}" onerror="imgFail(this)">`
+  ? `<img class="thumb img-skel" src="${esc(bustImg(url))}" alt="" title="${esc(title)}" onload="this.classList.remove('img-skel')" onerror="imgFail(this)">`
   : '<span class="thumb noimg" title="No photo">🖼️</span>';
 /* ================= DASHBOARD ================= */
 views.dashboard = async (main) => {
@@ -675,6 +675,119 @@ views.dashboard = async (main) => {
 
 /* ================= ORDERS ================= */
 const NEXT_STATUS = { PENDING: 'CONFIRMED', CONFIRMED: 'PREPARING', PREPARING: 'READY', READY: 'COMPLETED' };
+// ---------- Order / reservation editors (customer change of mind) ----------
+/** Active slot labels for schedule dropdowns (fresh on every open — the table is tiny). */
+async function activeSlotLabels() {
+  try { return (await api('/time-slots')).filter((s) => s.active).map((s) => s.label); }
+  catch { return []; }
+}
+/** Slot dropdown keeping the current label selectable even if it was retired. */
+function slotSelectHtml(id, current, slots) {
+  const labels = [...new Set([...slots, current].filter(Boolean))];
+  return `<select id="${id}">${labels.map((l) => `<option${l === current ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+}
+/** Full order editor: items (quantity / remove), type, contact, schedule, notes.
+ *  Saving syncs the linked reservation and notifies the customer of the changes. */
+async function openOrderEditor(orderId) {
+  let order;
+  try { order = await api('/orders/' + orderId); } catch { return toast('Could not load the order', true); }
+  const slots = await activeSlotLabels();
+  const itemsRows = (order.items || []).map((it) => `
+    <div class="oe-item" data-item-id="${it.id}" data-qty="${it.quantity}" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <div style="flex:1;min-width:0">
+        <b>${esc(it.name)}</b>${it.variant_size ? ` <span class="muted">${esc(it.variant_size)}</span>` : ''}
+        ${(it.package_items || []).length ? `<div class="muted" style="font-size:11px">${it.package_items.filter(Boolean).map((p) => 'S' + p.slot_number + ': ' + esc(p.product_name)).join(' · ')}</div>` : ''}
+        <div class="muted" style="font-size:11px">${peso(Number(it.unit_price) || 0)} each</div>
+      </div>
+      <input type="number" class="oe-qty" min="0" max="99" value="${it.quantity}" style="width:64px" title="0 removes the item">
+      <span class="oe-line muted" style="width:86px;text-align:right">${peso(Number(it.line_total) || 0)}</span>
+      <button class="btn danger sm" type="button" data-oe-del="${it.id}" title="Remove item">✕</button>
+    </div>`).join('');
+  modal(`<h3>✏️ Edit Order ${esc(order.order_number)}</h3>
+    <p class="muted" style="margin-bottom:10px">Customer changed their mind? Update anything below — the linked reservation stays in sync and the customer is notified.</p>
+    <div class="field"><label>Items</label><div id="oe-items">${itemsRows || '<p class="muted">No items.</p>'}</div>
+      <div class="muted" style="font-size:11px">Set the quantity to 0 (or press ✕) to remove an item. Totals are recalculated on save.</div></div>
+    <div class="row2">
+      <div class="field"><label>Order type</label>
+        <select id="oe-type"><option value="delivery"${order.order_type === 'delivery' ? ' selected' : ''}>🚚 Delivery</option><option value="pickup"${order.order_type === 'pickup' ? ' selected' : ''}>🏬 Pickup</option></select></div>
+      <div class="field"><label>Contact number</label><input id="oe-phone" value="${esc(order.customer_phone || '')}"></div>
+    </div>
+    <div class="field"><label>Delivery address</label><input id="oe-address" value="${esc(order.address || '')}"></div>
+    <div class="row2">
+      <div class="field"><label>Date</label><input type="date" id="oe-date" value="${esc(order.fulfillment_date || '')}"></div>
+      <div class="field"><label>Time slot</label>${slotSelectHtml('oe-slot', order.time_slot, slots)}</div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="oe-notes" rows="2">${esc(order.notes || '')}</textarea></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="oe-save">Save changes</button></div>`);
+  // Live per-line totals while quantities change.
+  document.querySelectorAll('#oe-items .oe-item').forEach((row) => {
+    const it = (order.items || []).find((x) => x.id == row.dataset.itemId);
+    const unit = Number(it && it.unit_price) || 0;
+    row.querySelector('.oe-qty').addEventListener('input', () => {
+      const q = Math.max(0, Number(row.querySelector('.oe-qty').value) || 0);
+      row.querySelector('.oe-line').textContent = peso(unit * q);
+    });
+  });
+  document.querySelectorAll('[data-oe-del]').forEach((btn) => btn.addEventListener('click', () => {
+    const row = btn.closest('.oe-item');
+    if (!row) return;
+    row.querySelector('.oe-qty').value = 0;
+    row.querySelector('.oe-qty').dispatchEvent(new Event('input'));
+    row.style.opacity = '.45';
+  }));
+  document.getElementById('oe-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    try {
+      // Items first (quantity changes / removals), then the details.
+      for (const row of document.querySelectorAll('#oe-items .oe-item')) {
+        const itemId = Number(row.dataset.itemId);
+        const origQty = Number(row.dataset.qty) || 0;
+        const qty = Math.max(0, Math.min(99, Number(row.querySelector('.oe-qty').value) || 0));
+        if (qty === origQty) continue;
+        if (qty === 0) await api(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
+        else await api(`/orders/${orderId}/items/${itemId}`, { method: 'PUT', body: { quantity: qty } });
+      }
+      await api('/orders/' + orderId, { method: 'PUT', body: {
+        order_type: document.getElementById('oe-type').value,
+        phone: document.getElementById('oe-phone').value.trim(),
+        address: document.getElementById('oe-address').value.trim(),
+        fulfillment_date: document.getElementById('oe-date').value,
+        time_slot: document.getElementById('oe-slot').value,
+        notes: document.getElementById('oe-notes').value.trim(),
+      } });
+      closeModal();
+      toast('Order updated — the customer was notified of the changes');
+      navigate('orders');
+    } catch (err) { toast(err.message || 'Could not save the changes', true); }
+  }));
+}
+/** Reservation editor: name, phone, schedule, notes — mirrored to the linked order. */
+async function openReservationEditor(resvId, r) {
+  const slots = await activeSlotLabels();
+  modal(`<h3>✏️ Edit Reservation</h3>
+    <p class="muted" style="margin-bottom:10px">${r.order_id ? 'Linked to order #' + esc(String(r.order_id)) + ' — schedule and notes changes apply to both.' : 'Standalone reservation — not linked to an order.'}</p>
+    <div class="field"><label>Customer name</label><input id="re-name" value="${esc(r.customer_name || '')}"></div>
+    <div class="field"><label>Contact number</label><input id="re-phone" value="${esc(r.phone || '')}"></div>
+    <div class="row2">
+      <div class="field"><label>Date</label><input type="date" id="re-date" value="${esc(r.res_date || '')}"></div>
+      <div class="field"><label>Time slot</label>${slotSelectHtml('re-slot', r.time_slot, slots)}</div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="re-notes" rows="2">${esc(r.notes || '')}</textarea></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="re-save">Save changes</button></div>`);
+  document.getElementById('re-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    try {
+      await api('/reservations/' + resvId, { method: 'PUT', body: {
+        customer_name: document.getElementById('re-name').value.trim(),
+        phone: document.getElementById('re-phone').value.trim(),
+        res_date: document.getElementById('re-date').value,
+        time_slot: document.getElementById('re-slot').value,
+        notes: document.getElementById('re-notes').value.trim(),
+      } });
+      closeModal();
+      toast('Reservation updated');
+      navigate('reservations');
+    } catch (err) { toast(err.message || 'Could not save the changes', true); }
+  }));
+}
 views.orders = async (main) => {
   main.innerHTML = `
     <h2 class="page-title">Orders</h2>
@@ -730,6 +843,7 @@ views.orders = async (main) => {
           <td><div class="row-actions">
             ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
             ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
+            ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn sm" data-edit-order="${o.id}" title="Edit order (change of mind)">✏️ Edit</button>` : ''}
             ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
             ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
             <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
@@ -772,6 +886,8 @@ views.orders = async (main) => {
       closeModal(); toast(`Deducted ${peso(amount)} from total`); navigate('orders');
     }));
   }));
+
+  main.querySelectorAll('[data-edit-order]').forEach((b) => b.addEventListener('click', () => openOrderEditor(Number(b.dataset.editOrder))));
 
   // ---- Bulk actions ----
   const checkAll = main.querySelector('#order-check-all');
@@ -985,6 +1101,7 @@ views.reservations = async (main) => {
           <td><div class="row-actions">
             <button class="btn sm" data-resv-view="${r.id}" title="View details">👁️</button>
             ${r.status === 'PENDING' ? `<button class="btn ok sm" data-resv-ok="${r.id}">Confirm</button>` : ''}
+            ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn sm" data-resv-edit="${r.id}" title="Edit reservation (change of mind)">✏️ Edit</button>` : ''}
             ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn sm" data-resv-move="${r.id}">Reschedule</button>` : ''}
             ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">Cancel</button>` : ''}
             ${r.order && NEXT_STATUS[r.order.status] ? `<button class="btn ok sm" data-resv-adv="${r.order_id}" data-resv-next="${NEXT_STATUS[r.order.status]}" title="Advance linked order to ${NEXT_STATUS[r.order.status]}">→ ${NEXT_STATUS[r.order.status]}</button>` : ''}
@@ -1092,6 +1209,11 @@ views.reservations = async (main) => {
         await api(`/reservations/${r.id}/reschedule`, { method: 'POST', body: { res_date: document.getElementById('mv-date').value, time_slot: document.getElementById('mv-time').value } });
         closeModal(); toast('Rescheduled'); navigate('reservations');
       }));
+    }));
+
+    main.querySelectorAll('[data-resv-edit]').forEach((b) => b.addEventListener('click', () => {
+      const r = resvs.find((x) => x.id == b.dataset.resvEdit);
+      if (r) openReservationEditor(Number(b.dataset.resvEdit), r);
     }));
 
     // Restore selections after re-render
@@ -2404,7 +2526,7 @@ views.images = async (main) => {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px" id="img-grid">
         ${files.map((f) => `
           <div style="background:#fafbfc;border-radius:12px;padding:10px;text-align:center">
-            <img src="${esc(f.url)}" style="width:100%;height:100px;object-fit:cover;border-radius:8px" loading="lazy">
+            <img class="img-skel" src="${esc(f.url)}" style="width:100%;height:100px;object-fit:cover;border-radius:8px" loading="lazy" onload="this.classList.remove('img-skel')" onerror="this.classList.remove('img-skel')">
             <p class="muted" style="margin:6px 0 4px;word-break:break-all;font-size:11px">${esc(f.name)}</p>
             <div class="row-actions" style="justify-content:center">
               <button class="btn ghost sm" data-img-copy="${esc(f.url)}">Copy URL</button>

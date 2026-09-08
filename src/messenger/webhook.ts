@@ -1057,16 +1057,10 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
     case 'FPADD':
       return addFoodPackToCart(psid, Number(rest[0]), Number(rest[1]));
     case 'MENU_RESERVE':
-      await setState(psid, 'RESERVE_TYPE');
-      return sendQuickReplies(psid, 'Reservation for?', [
-        { title: 'Cottage', payload: 'RESTYPE:Cottage' },
-        { title: 'Table', payload: 'RESTYPE:Table' },
-      ]);
-    case 'RESTYPE': {
-      const type = rest[0];
-      await setState(psid, 'RESERVE_DATE', { res_type: type });
+      // No Cottage/Table type step — the store has neither; a reservation is
+      // just date + time slot + contact details.
+      await setState(psid, 'RESERVE_DATE');
       return sendQuickReplies(psid, 'What date? (tap below, or type any date — e.g. Sep 25, 09/25, tomorrow):', dateQuickReplies('res'));
-    }
     case 'REORDER_CONFIRM':
       return reorderPreviousOrder(psid, Number(rest[0]));
     case 'RES_PHONE_ASK': {
@@ -1186,9 +1180,9 @@ async function handleText(psid: string, text: string) {
         return sendText(psid, 'That does not look like a valid phone number. Please try again:');
       }
       try {
-        const res = await createReservation({ customer_name: ctx.res_name, phone: text.trim(), res_date: ctx.res_date, time_slot: ctx.res_time, notes: ctx.res_type });
+        const res = await createReservation({ customer_name: ctx.res_name, phone: text.trim(), res_date: ctx.res_date, time_slot: ctx.res_time });
         await setState(psid, 'RESERVE_CONFIRMED', { res_id: res });
-        await sendText(psid, `Reservation confirmed! Reference: RES-${res}\n${ctx.res_type} on ${ctx.res_date} at ${ctx.res_time}.`);
+        await sendText(psid, `Reservation confirmed! Reference: RES-${res}\nOn ${ctx.res_date} at ${ctx.res_time}.`);
         return mainMenu(psid);
       } catch (e: any) {
         await sendText(psid, 'Could not complete the reservation. Please try again.');
@@ -1278,9 +1272,9 @@ export async function handleMessage(messaging: any) {
       const phone = payload.split(':')[1];
       const st = await getState(psid);
       try {
-        const res = await createReservation({ customer_name: st.ctx.res_name, phone, res_date: st.ctx.res_date, time_slot: st.ctx.res_time, notes: st.ctx.res_type });
+        const res = await createReservation({ customer_name: st.ctx.res_name, phone, res_date: st.ctx.res_date, time_slot: st.ctx.res_time });
         await setState(psid, 'RESERVE_CONFIRMED', { res_id: res });
-        await sendText(psid, `Reservation confirmed! Reference: RES-${res}\n${st.ctx.res_type} on ${st.ctx.res_date} at ${st.ctx.res_time}.`);
+        await sendText(psid, `Reservation confirmed! Reference: RES-${res}\nOn ${st.ctx.res_date} at ${st.ctx.res_time}.`);
         return mainMenu(psid);
       } catch (e: any) {
         await sendText(psid, 'Could not complete the reservation. Please try again.');

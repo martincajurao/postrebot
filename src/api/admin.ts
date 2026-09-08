@@ -7,7 +7,7 @@ import { getVapidPublicKey, storeSubscription, removeSubscription, sendPushToAdm
 import {
   createReservation, cancelReservation, updateReservationStatus,
   rescheduleReservation, slotAvailability, isDateOpen,
-  syncReservationFromOrder, syncOrderFromReservation,
+  syncReservationFromOrder, syncOrderFromReservation, ensureReservationFromOrder,
 } from '../services/reservations';
 import { computeCartTotals } from '../services/pricing';
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
@@ -331,14 +331,14 @@ r.delete('/food-packs/:id', async (req, res) => {
 
 // ---- Orders ----
 r.get('/orders', async (_req, res) => {
-  const { data } = await supa().from('orders').select('*, customers(name)').order('id', { ascending: false });
+  const { data } = await supa().from('orders').select('*, customers(name, phone)').order('id', { ascending: false });
   // Order and reservation are ONE entity: every order stays visible here with
   // the full pipeline (advance / payment / rider / discount); the Reservations
   // page shows the same entity as its schedule entry.
-  res.json((data || []).map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, customers: undefined })));
+  res.json((data || []).map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, phone: o.phone ?? o.customers?.phone ?? null, customers: undefined })));
 });
 r.get('/orders/:id', async (req, res) => {
-  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
+  const { data: order } = await supa().from('orders').select('*, customers(name, phone)').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
   const [itemsRes, pkgRes, histRes] = await Promise.all([
     supa().from('order_items').select('*').eq('order_id', order.id),
@@ -352,6 +352,9 @@ r.get('/orders/:id', async (req, res) => {
     package_items: packageItems.filter((pi: any) => pi.order_item_id === i.id),
   }));
   order.status_history = histRes.data || [];
+  order.customer_name = (order as any).customers?.name ?? null;
+  order.customer_phone = (order as any).customers?.phone ?? null;
+  (order as any).customers = undefined;
   res.json(order);
 });
 r.post('/orders/:id/status', async (req, res) => {
@@ -423,6 +426,153 @@ r.post('/orders/:id/payment-status', async (req, res) => {
   const { payment_status } = req.body;
   await updatePaymentStatus(Number(req.params.id), payment_status);
   res.json({ ok: true });
+});
+
+// ---- Orders: admin edit (customer change of mind) ----
+// Active orders only — CANCELLED / COMPLETED orders are historical records.
+function orderEditBlocked(order: any): string | null {
+  if (order.status === 'CANCELLED' || order.status === 'COMPLETED') {
+    return `A ${String(order.status).toLowerCase()} order can no longer be edited`;
+  }
+  return null;
+}
+
+/** Recompute subtotal/total after an item quantity change or removal.
+ *  Stored pipeline: total = subtotal − packageSavings + delivery_fee − additional_discount
+ *  (creation: total = subtotal − savings; confirm adds the fee; the discount
+ *  endpoint moves additional_discount). Package savings are NOT stored per line,
+ *  so their current rate is preserved: savings = round(newSubtotal × oldSavings / oldSubtotal). */
+async function recalcOrderTotalsAfterItemEdit(orderId: number): Promise<{ subtotal: number; total: number; savings: number }> {
+  const db = supa();
+  const { data: order } = await db.from('orders').select('subtotal, total, delivery_fee, additional_discount').eq('id', orderId).maybeSingle();
+  if (!order) throw new Error('Order not found');
+  const { data: items } = await db.from('order_items').select('unit_price, quantity').eq('order_id', orderId);
+  const newSubtotal = (items || []).reduce((s: number, it: any) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 0), 0);
+  const oldSubtotal = Number(order.subtotal) || 0;
+  const oldSavings = Math.max(0, oldSubtotal - (Number(order.total) || 0) + (Number(order.delivery_fee) || 0) - (Number(order.additional_discount) || 0));
+  const savings = oldSubtotal > 0 ? Math.round((oldSavings * newSubtotal) / oldSubtotal) : 0;
+  const newTotal = Math.max(0, newSubtotal - savings + (Number(order.delivery_fee) || 0) - (Number(order.additional_discount) || 0));
+  await db.from('orders').update({ subtotal: newSubtotal, total: newTotal }).eq('id', orderId);
+  return { subtotal: newSubtotal, total: newTotal, savings };
+}
+
+/** Best-effort Messenger summary of what the admin changed for the customer. */
+async function notifyOrderEdited(order: any, changes: string[]): Promise<void> {
+  if (!changes.length) return;
+  try {
+    const { data: cust } = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
+    if (cust?.psid) await sendText(cust.psid, `✏️ Update for your order (${order.order_number}):\n${changes.join('\n')}`);
+  } catch { /* notification is best effort */ }
+}
+
+// Edit order details — type, contact, address, schedule, notes. The linked
+// reservation (ONE entity) is kept in sync, a missing reservation is created
+// when the order is scheduled, and the customer is told what changed.
+r.put('/orders/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const { order_type, address, phone, notes, fulfillment_date, time_slot } = req.body || {};
+  const { data: order } = await supa().from('orders').select('*').eq('id', id).maybeSingle();
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  const blocked = orderEditBlocked(order);
+  if (blocked) return res.status(400).json({ error: blocked });
+  if (order_type != null && !['delivery', 'pickup'].includes(order_type)) return res.status(400).json({ error: 'Invalid order type' });
+
+  const upd: Record<string, any> = {};
+  if (order_type != null) upd.order_type = order_type;
+  if (address != null) upd.address = String(address).trim() || null;
+  if (notes != null) upd.notes = String(notes).trim() || null;
+
+  let newDate: string | null = null;
+  let newSlot: string | null = null;
+  if (fulfillment_date != null || time_slot != null) {
+    newDate = fulfillment_date != null ? fulfillment_date : order.fulfillment_date;
+    newSlot = time_slot != null ? time_slot : order.time_slot;
+    if (!newDate || !newSlot) return res.status(400).json({ error: 'Both a date and a time slot are required' });
+    const { data: slotData } = await supa().from('time_slots').select('*').eq('label', newSlot).eq('active', 1).maybeSingle();
+    if (!slotData) return res.status(400).json({ error: 'Invalid time slot' });
+    // Capacity check excluding this order's own reservation, so re-booking the
+    // same slot (or only moving the date) is never blocked by itself.
+    const { data: ownResv } = await supa().from('reservations').select('id').eq('order_id', id).maybeSingle();
+    const { count } = await supa().from('reservations').select('*', { count: 'exact', head: true })
+      .eq('res_date', newDate).eq('time_slot', newSlot).neq('status', 'CANCELLED');
+    const used = (count || 0) - (ownResv ? 1 : 0);
+    if (used >= (Number(slotData.max_capacity) || 0)) return res.status(400).json({ error: 'Time slot is full' });
+    upd.fulfillment_date = newDate;
+    upd.time_slot = newSlot;
+  }
+
+  if (Object.keys(upd).length === 0 && (phone == null || !String(phone).trim())) {
+    return res.status(400).json({ error: 'Nothing to update' });
+  }
+
+  await supa().from('orders').update(upd).eq('id', id);
+
+  // Mirror onto the linked reservation; create one when the order is scheduled
+  // but had no reservation yet.
+  const { data: resv } = await supa().from('reservations').select('id').eq('order_id', id).maybeSingle();
+  if (resv) {
+    const resvUpd: Record<string, any> = {};
+    if (upd.fulfillment_date != null) resvUpd.res_date = upd.fulfillment_date;
+    if (upd.time_slot != null) resvUpd.time_slot = upd.time_slot;
+    if (upd.notes != null) resvUpd.notes = upd.notes;
+    if (Object.keys(resvUpd).length > 0) await supa().from('reservations').update(resvUpd).eq('id', resv.id);
+  } else if (upd.fulfillment_date && upd.time_slot) {
+    const { data: fresh } = await supa().from('orders').select('*').eq('id', id).maybeSingle();
+    if (fresh) await ensureReservationFromOrder(fresh);
+  }
+  await syncReservationFromOrder(id);
+
+  // Remember new contact details on the customer record for future checkouts.
+  if (phone != null && String(phone).trim()) {
+    await supa().from('customers').update({ phone: String(phone).trim() }).eq('id', order.customer_id);
+  }
+
+  const changes: string[] = [];
+  if (upd.order_type && upd.order_type !== order.order_type) changes.push(`Type: ${upd.order_type === 'delivery' ? '🚚 Delivery' : '🏬 Pickup'}`);
+  if (upd.fulfillment_date && upd.fulfillment_date !== order.fulfillment_date) changes.push(`📅 Date: ${upd.fulfillment_date}`);
+  if (upd.time_slot && upd.time_slot !== order.time_slot) changes.push(`⏰ Time: ${upd.time_slot}`);
+  if (upd.address !== undefined && upd.address !== order.address) changes.push(`📍 Address: ${upd.address || '—'}`);
+  if (upd.notes !== undefined && upd.notes !== order.notes) changes.push('📝 Notes updated');
+  await notifyOrderEdited(order, changes);
+
+  res.json({ ok: true });
+});
+
+// Change an item's quantity (customer wants more/fewer of something).
+r.put('/orders/:id/items/:itemId', async (req, res) => {
+  const orderId = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  const quantity = Math.floor(Number(req.body?.quantity));
+  if (!quantity || quantity < 1 || quantity > 99) return res.status(400).json({ error: 'Quantity must be between 1 and 99' });
+  const { data: order } = await supa().from('orders').select('status').eq('id', orderId).maybeSingle();
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  const blocked = orderEditBlocked(order);
+  if (blocked) return res.status(400).json({ error: blocked });
+  const { data: item } = await supa().from('order_items').select('id, unit_price, quantity').eq('id', itemId).eq('order_id', orderId).maybeSingle();
+  if (!item) return res.status(404).json({ error: 'Order item not found' });
+  if (quantity !== Number(item.quantity)) {
+    await supa().from('order_items').update({ quantity, line_total: Math.round((Number(item.unit_price) || 0) * quantity) }).eq('id', itemId);
+  }
+  const totals = await recalcOrderTotalsAfterItemEdit(orderId);
+  res.json({ ok: true, ...totals });
+});
+
+// Remove an item the customer no longer wants.
+r.delete('/orders/:id/items/:itemId', async (req, res) => {
+  const orderId = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  const { data: order } = await supa().from('orders').select('status').eq('id', orderId).maybeSingle();
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  const blocked = orderEditBlocked(order);
+  if (blocked) return res.status(400).json({ error: blocked });
+  const { data: item } = await supa().from('order_items').select('id').eq('id', itemId).eq('order_id', orderId).maybeSingle();
+  if (!item) return res.status(404).json({ error: 'Order item not found' });
+  const { count } = await supa().from('order_items').select('*', { count: 'exact', head: true }).eq('order_id', orderId);
+  if ((count || 0) <= 1) return res.status(400).json({ error: 'An order must keep at least one item — cancel the order instead' });
+  await supa().from('order_package_items').delete().eq('order_item_id', itemId);
+  await supa().from('order_items').delete().eq('id', itemId);
+  const totals = await recalcOrderTotalsAfterItemEdit(orderId);
+  res.json({ ok: true, ...totals });
 });
 
 // ---- Orders: permanent delete / reset (ADMIN only) ----
@@ -646,6 +796,48 @@ r.post('/reservations/:id/reschedule', async (req, res) => {
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// Edit a reservation (customer change of mind): name, phone, notes, schedule.
+// Schedule + notes mirror onto the linked order — ONE entity.
+r.put('/reservations/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const { customer_name, phone, notes, res_date, time_slot } = req.body || {};
+  const { data: resv } = await supa().from('reservations').select('*').eq('id', id).maybeSingle();
+  if (!resv) return res.status(404).json({ error: 'Reservation not found' });
+  if (resv.status === 'CANCELLED' || resv.status === 'COMPLETED') {
+    return res.status(400).json({ error: `A ${String(resv.status).toLowerCase()} reservation can no longer be edited` });
+  }
+
+  const upd: Record<string, any> = {};
+  if (customer_name != null && String(customer_name).trim()) upd.customer_name = String(customer_name).trim();
+  if (phone != null) upd.phone = String(phone).trim() || null;
+  if (notes != null) upd.notes = String(notes).trim() || null;
+
+  let newDate: string | null = null;
+  let newSlot: string | null = null;
+  if (res_date != null || time_slot != null) {
+    newDate = res_date != null ? res_date : resv.res_date;
+    newSlot = time_slot != null ? time_slot : resv.time_slot;
+    if (!newDate || !newSlot) return res.status(400).json({ error: 'Both a date and a time slot are required' });
+    try {
+      await rescheduleReservation(id, newDate, newSlot); // validates the slot + capacity (excluding itself)
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+  }
+
+  if (Object.keys(upd).length > 0) await supa().from('reservations').update(upd).eq('id', id);
+
+  // Mirror schedule + notes onto the linked order.
+  if (resv.order_id) {
+    const ordUpd: Record<string, any> = {};
+    if (newDate && newSlot) { ordUpd.fulfillment_date = newDate; ordUpd.time_slot = newSlot; }
+    if (upd.notes != null) ordUpd.notes = upd.notes;
+    if (Object.keys(ordUpd).length > 0) await supa().from('orders').update(ordUpd).eq('id', resv.order_id);
+  }
+
+  res.json({ ok: true });
 });
 
 // ---- Reservations: permanent delete / reset (ADMIN only) ----

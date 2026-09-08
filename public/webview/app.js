@@ -93,7 +93,6 @@ function absUrl(u) {
 /** Image with a graceful fallback for missing/broken photos. Click opens fullscreen lightbox. */
 function imageHtml(url, alt, cls) {
   url = absUrl(url);
-  const attrs = cls ? ` class="${cls}"` : '';
   const altText = esc(alt || '');
   const wrapCls = `img-wrap${cls ? ' ' + cls : ''}`.trim();
 
@@ -103,9 +102,11 @@ function imageHtml(url, alt, cls) {
   }
 
   // On error: mark the wrapper so CSS hides the broken <img> and shows the fallback icon.
+  // While the bitmap fetches, the img carries the .img-skel shimmer (removed on load/error).
   // Click opens the fullscreen image lightbox.
   const lightboxOnclick = `onclick="openImageLightbox(event, '${esc(url)}', '${altText}');"`;
-  return `<div class="${wrapCls}" ${lightboxOnclick} style="cursor:zoom-in"><img${attrs} src="${esc(url)}" alt="${altText}" loading="lazy" onerror="this.onerror=null;this.parentNode.classList.add('img-broken')"><span class="img-fallback" aria-hidden="true">📷</span></div>`;
+  const imgCls = `img-skel${cls ? ' ' + cls : ''}`;
+  return `<div class="${wrapCls}" ${lightboxOnclick} style="cursor:zoom-in"><img class="${imgCls}" src="${esc(url)}" alt="${altText}" loading="lazy" onload="this.classList.remove('img-skel')" onerror="this.onerror=null;this.classList.remove('img-skel');this.parentNode.classList.add('img-broken')"><span class="img-fallback" aria-hidden="true">📷</span></div>`;
 }
 
 function showToast(msg) {
@@ -130,7 +131,7 @@ function openImageLightbox(event, url, name) {
     lb.addEventListener('click', closeImageLightbox);
     document.body.appendChild(lb);
   }
-  lb.innerHTML = `<img class="img-lightbox-img" src="${esc(absUrl(url))}" alt="${esc(name || '')}">`;
+  lb.innerHTML = `<img class="img-lightbox-img img-skel" src="${esc(absUrl(url))}" alt="${esc(name || '')}" onload="this.classList.remove('img-skel')" onerror="this.classList.remove('img-skel')">`;
   lb.classList.add('open');
   document.body.style.overflow = 'hidden';
 }
@@ -1051,7 +1052,7 @@ function renderPackageDetail() {
             const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
             const upgrade = Number(opt.upgrade_price) || 0;
             const thumb = opt.photo_url
-              ? `<img class="opt-thumb" src="${esc(absUrl(opt.photo_url))}" alt="" title="View photo" loading="lazy" onclick="openImageLightbox(event, '${esc(absUrl(opt.photo_url))}', '${esc(opt.name)}')" onerror="this.remove()">`
+              ? `<img class="opt-thumb img-skel" src="${esc(absUrl(opt.photo_url))}" alt="" title="View photo" loading="lazy" onload="this.classList.remove('img-skel')" onclick="openImageLightbox(event, '${esc(absUrl(opt.photo_url))}', '${esc(opt.name)}')" onerror="this.remove()">`
               : '';
             return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id})">
               ${thumb}${esc(opt.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
@@ -1432,7 +1433,7 @@ function showCart() {
   }
   lines += `<div class="total-row"><span>Subtotal${cart.items.length > 0 ? ` (${cart.items.reduce((s, i) => s + i.quantity, 0)} item${cart.items.reduce((s, i) => s + i.quantity, 0) === 1 ? '' : 's'})` : ''}</span><span>${formatMoney(t.subtotal)}</span></div>`;
   if (Number(t.discount) > 0) lines += `<div class="total-row discount"><span>Package Savings (already applied)</span><span>−${formatMoney(t.discount)}</span></div>`;
-  lines += `<div class="total-row"><span>Delivery</span><span>${Number(t.delivery) > 0 ? formatMoney(t.delivery) : 'FREE'}</span></div>`;
+  lines += `<div class="total-row"><span>Delivery</span><span>${Number(t.delivery) > 0 ? formatMoney(t.delivery) : 'To be decided'}</span></div>`;
   lines += `<div class="total-row grand"><span>Total</span><span class="value">${formatMoney(t.total)}</span></div>`;
   totals.innerHTML = lines;
 
