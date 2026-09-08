@@ -151,12 +151,16 @@ async function variantDiffL(productId: number): Promise<number> {
   return Math.max(0, Number(l?.price || 0) - Number(m?.price || 0));
 }
 
-/** Price a package cart item given slot choices (array or legacy object) and the package size. */
+/** Price a package cart item given slot choices (array or legacy object) and the package size.
+ *  For custom "Build Your Own" packages, there is NO base price — the total is the
+ *  sum of selected dish prices minus the tiered volume discount. */
 export async function pricePackage(packageId: number, slotChoices: any, packageSize?: string): Promise<{ total: number; breakdown: { label: string; amount: number }[] }> {
   const { data: pkg } = await supa().from('packages').select('*').eq('id', packageId).eq('active', 1).single();
   if (!pkg) throw new Error('Invalid package');
-  const breakdown: { label: string; amount: number }[] = [{ label: `${pkg.name} base`, amount: pkg.base_price }];
-  let total = pkg.base_price || 0;
+  // Custom packages: no base price, total = sum of dish prices − volume discount
+  const breakdown: { label: string; amount: number }[] = [];
+  let total = pkg.is_custom ? 0 : (pkg.base_price || 0);
+  if (!pkg.is_custom) breakdown.push({ label: `${pkg.name} base`, amount: pkg.base_price });
 
   const { data: slots } = await supa().from('package_slots').select('*').eq('package_id', packageId);
   let choices = normalizeChoices(slotChoices);
@@ -187,7 +191,7 @@ export async function pricePackage(packageId: number, slotChoices: any, packageS
       extra = 0;
     }
     const { data: prod } = await supa().from('products').select('name').eq('id', choice.product_id).maybeSingle();
-    if (extra > 0) breakdown.push({ label: `${prod?.name ?? 'Dish'}${size ? ' ' + size : ''} upgrade`, amount: extra });
+    if (extra > 0) breakdown.push({ label: pkg.is_custom ? `${prod?.name ?? 'Dish'}${size ? ' ' + size : ''}` : `${prod?.name ?? 'Dish'}${size ? ' ' + size : ''} upgrade`, amount: extra });
     total += extra;
   }
   // Custom ("Build Your Own") packages use a volume-based auto-discount

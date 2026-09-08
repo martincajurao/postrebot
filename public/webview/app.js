@@ -920,11 +920,15 @@ function autoDiscount(itemsSum) {
   return 0;
 }
 
-/** Client-side mirror of server pricing: base + slot upgrades (± per-slot size) − package discount. */
+/** Client-side mirror of server pricing: base + slot upgrades (± per-slot size) − package discount.
+ *  For custom "Build Your Own" packages, there is NO base price — the total is the
+ *  sum of selected dish prices minus the tiered volume discount. */
 function pricePackageChoices(pkg, choices, size, slotSizes) {
   const slots = (pkg.slots || []).slice().sort((a, b) => a.slot_number - b.slot_number);
-  let total = Number(pkg.base_price) || 0;
-  const lines = [{ label: esc(pkg.name) + ' base', amount: total }];
+  // Custom packages: no base price, total = sum of dish prices − volume discount
+  let total = pkg.is_custom ? 0 : (Number(pkg.base_price) || 0);
+  const lines = [];
+  if (!pkg.is_custom) lines.push({ label: esc(pkg.name) + ' base', amount: total });
   let itemsSum = 0; // sum of selected dish M-prices (for custom auto-discount)
   for (const slot of slots) {
     const choice = choices[Number(slot.slot_number)];
@@ -939,13 +943,20 @@ function pricePackageChoices(pkg, choices, size, slotSizes) {
       if (!sizeExtra) sizeExtra = variantPriceDiff(choice);
       extra += sizeExtra;
     }
-    if (extra > 0) {
-      lines.push({ label: (opt && opt.name) + ' upgrade', amount: extra });
-      total += extra;
+    if (pkg.is_custom) {
+      // For custom packages, the upgrade_price IS the dish price (no base to add to)
+      if (extra > 0) {
+        total += extra;
+        lines.push({ label: opt && opt.name, amount: extra });
+      }
+      // Track the dish's base price (excluding L upgrade) for volume discount
+      if (dishPrice > 0) itemsSum += dishPrice;
+    } else {
+      if (extra > 0) {
+        lines.push({ label: (opt && opt.name) + ' upgrade', amount: extra });
+        total += extra;
+      }
     }
-    // For custom packages, track the dish's base price (excluding L upgrade)
-    // so the volume discount reflects the total value of dishes chosen.
-    if (pkg.is_custom && dishPrice > 0) itemsSum += dishPrice;
   }
   // Custom ("Build Your Own") packages use a volume-based auto-discount;
   // fixed packages use the admin-set pkg.discount.
@@ -1079,11 +1090,11 @@ function renderPackageDetail() {
     ${imageHtml(pkg.photo_url, pkg.name, 'detail-image')}
     <div class="detail-name">${esc(pkg.name)}</div>
     <div class="detail-desc">${esc(pkg.description || '')}</div>
-    <div class="pkg-price-line compact">
+    ${pkg.is_custom ? '' : `<div class="pkg-price-line compact">
       ${Number(pkg.discount) > 0 ? `<span class="was">${formatMoney(pkg.base_price)}</span>` : ''}
       <span class="price">${formatMoney(netPackagePrice(pkg))}</span>
       ${Number(pkg.discount) > 0 ? `<span class="save">Save ${formatMoney(pkg.discount)}</span>` : ''}
-    </div>
+    </div>`}
     ${slotsHtml}
     <div class="variant-options">
       <label>Size:</label>
