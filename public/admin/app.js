@@ -801,10 +801,14 @@ async function openOrderEditor(orderId) {
     kind: it.package_id ? 'package' : (it.food_pack_id ? 'foodpack' : 'product'),
     product_id: it.product_id || null, package_id: it.package_id || null, food_pack_id: it.food_pack_id || null,
     name: it.name, variant_size: it.variant_size || '', unit_price: Number(it.unit_price) || 0,
+    discount: Number(it.discount) || 0, // Package discount per unit
     quantity: it.quantity, origQty: it.quantity, origSize: it.variant_size || '',
     package_items: it.package_items || [],
   }));
-  const lineSum = () => items.filter((x) => !x.remove).reduce((s, x) => s + x.unit_price * x.quantity, 0);
+  // Net price = unit_price - discount (for packages with discounts)
+  const netUnitPrice = (it) => Math.max(0, it.unit_price - (it.discount || 0));
+  const lineSum = () => items.filter((x) => !x.remove).reduce((s, x) => s + netUnitPrice(x) * x.quantity, 0);
+  const totalDiscount = () => items.filter((x) => !x.remove).reduce((s, x) => s + (x.discount || 0) * x.quantity, 0) + currentDiscount;
   const currentDiscount = Number(order.additional_discount) || 0;
   const currentDeliveryFee = Number(order.delivery_fee) || 0;
   modal(`<h3>✏️ Edit Order ${esc(order.order_number)}</h3>
@@ -860,7 +864,7 @@ async function openOrderEditor(orderId) {
       <div style="flex:1;min-width:0">
         <div><b>${esc(it.name)}</b>${it.isNew ? ' <span class="badge b-CONFIRMED">NEW</span>' : ''}</div>
         ${slots}
-        <div class="muted" style="font-size:11px">${peso(it.unit_price)} each</div>
+        <div class="muted" style="font-size:11px">${peso(netUnitPrice(it))} each${it.discount > 0 ? ` <span style="color:#27ae60">(was ${peso(it.unit_price)}, save ${peso(it.discount)})</span>` : ''}</div>
       </div>
       ${sizeSel}
       <div style="display:flex;align-items:center;gap:3px">
@@ -868,17 +872,19 @@ async function openOrderEditor(orderId) {
         <input type="number" class="oe-qty oe-qty-input" min="0" max="99" value="${it.quantity}">
         <button class="btn ghost sm" type="button" data-oe-step="1" style="padding:2px 7px">＋</button>
       </div>
-      <span class="oe-line-total">${peso(it.unit_price * it.quantity)}</span>
+      <span class="oe-line-total">${peso(netUnitPrice(it) * it.quantity)}</span>
       <button class="btn danger sm" type="button" data-oe-del title="${it.isNew ? 'Remove row' : 'Remove item'}">✕</button>
     </div>`;
   };
   const renderItems = () => {
     const hasItems = items.filter((x) => !x.remove).length > 0;
     itemsEl.innerHTML = items.map(itemRow).join('') || '<p class="muted">No items.</p>';
-    const itemsTotal = lineSum();
-    const estimatedTotal = Math.max(0, itemsTotal - currentDiscount + currentDeliveryFee);
+    const netTotal = lineSum(); // Sum of net prices (after package discounts)
+    const grossTotal = items.filter((x) => !x.remove).reduce((s, x) => s + x.unit_price * x.quantity, 0);
+    const pkgDiscounts = items.filter((x) => !x.remove).reduce((s, x) => s + (x.discount || 0) * x.quantity, 0);
+    const estimatedTotal = Math.max(0, netTotal - currentDiscount + currentDeliveryFee);
     totalsEl.innerHTML = hasItems
-      ? `<div style="font-size:1.1rem;font-weight:700">Total: ${peso(estimatedTotal)}</div><div style="font-size:0.85rem;color:#666">Items: ${peso(itemsTotal)}${currentDiscount > 0 ? ` − Discount: ${peso(currentDiscount)}` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''}</div>`
+      ? `<div style="font-size:1.1rem;font-weight:700">Total: ${peso(estimatedTotal)}</div><div style="font-size:0.85rem;color:#666">Items: ${peso(grossTotal)}${pkgDiscounts > 0 ? ` − Package savings: ${peso(pkgDiscounts)}` : ''}${currentDiscount > 0 ? ` − Discount: ${peso(currentDiscount)}` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''}</div>`
       : '';
   };
   // helpful hint shown below the items list
@@ -914,11 +920,13 @@ async function openOrderEditor(orderId) {
       const v = (meta?.variants || []).find((x) => x.size === it.variant_size);
       if (v) it.unit_price = Number(v.price);
     }
-    row.querySelector('.oe-line-total').textContent = peso(it.unit_price * it.quantity);
-    const itemsTotal = lineSum();
-    const estimatedTotal = Math.max(0, itemsTotal - currentDiscount + currentDeliveryFee);
+    row.querySelector('.oe-line-total').textContent = peso(netUnitPrice(it) * it.quantity);
+    const netTotal = lineSum();
+    const grossTotal = items.filter((x) => !x.remove).reduce((s, x) => s + x.unit_price * x.quantity, 0);
+    const pkgDiscounts = items.filter((x) => !x.remove).reduce((s, x) => s + (x.discount || 0) * x.quantity, 0);
+    const estimatedTotal = Math.max(0, netTotal - currentDiscount + currentDeliveryFee);
     totalsEl.innerHTML = items.filter((x) => !x.remove).length > 0
-      ? `<div style="font-size:1.1rem;font-weight:700">Total: ${peso(estimatedTotal)}</div><div style="font-size:0.85rem;color:#666">Items: ${peso(itemsTotal)}${currentDiscount > 0 ? ` − Discount: ${peso(currentDiscount)}` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''}</div>`
+      ? `<div style="font-size:1.1rem;font-weight:700">Total: ${peso(estimatedTotal)}</div><div style="font-size:0.85rem;color:#666">Items: ${peso(grossTotal)}${pkgDiscounts > 0 ? ` − Package savings: ${peso(pkgDiscounts)}` : ''}${currentDiscount > 0 ? ` − Discount: ${peso(currentDiscount)}` : ''}${currentDeliveryFee > 0 ? ` + Delivery: ${peso(currentDeliveryFee)}` : ''}</div>`
       : '';
   });
   renderItems();

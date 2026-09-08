@@ -321,6 +321,10 @@ async function seedDefaults(): Promise<void> {
   if (!orderItemColsV8.includes('food_pack_id')) {
     await query(`ALTER TABLE order_items ADD COLUMN food_pack_id INTEGER REFERENCES food_packs(id);`);
   }
+  // v9: discount column on order_items to store package discount per unit
+  if (!orderItemColsV8.includes('discount')) {
+    await query(`ALTER TABLE order_items ADD COLUMN discount INTEGER DEFAULT 0;`);
+  }
 
   // v7: product_id on order_package_items so reorders can rebuild the exact
   // slot choices (previously only product_name was stored, making reordered

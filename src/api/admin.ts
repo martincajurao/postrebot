@@ -347,6 +347,32 @@ r.get('/orders/:id', async (req, res) => {
   ]);
   const items = itemsRes.data || [];
   const packageItems = pkgRes.data || [];
+
+  // For existing orders without discount field, calculate from package info
+  const db = supa();
+  for (const item of items) {
+    if (item.package_id && (item.discount === undefined || item.discount === null)) {
+      // Calculate discount from package
+      const { data: pkg } = await db.from('packages').select('is_custom, discount').eq('id', item.package_id).maybeSingle();
+      if (pkg?.is_custom) {
+        // Custom package: calculate tiered volume discount
+        const { data: pkgItems } = await db.from('order_package_items').select('product_id').eq('order_item_id', item.id);
+        let itemsSum = 0;
+        for (const pi of pkgItems || []) {
+          itemsSum += await menuPriceM(Number(pi.product_id));
+        }
+        item.discount = autoDiscount(itemsSum);
+      } else if (pkg) {
+        // Fixed package: admin-set discount per unit
+        item.discount = Number(pkg.discount || 0);
+      } else {
+        item.discount = 0;
+      }
+    } else if (!item.package_id) {
+      item.discount = 0;
+    }
+  }
+
   order.items = items.map((i: any) => ({
     ...i,
     package_items: packageItems.filter((pi: any) => pi.order_item_id === i.id),
