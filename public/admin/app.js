@@ -2484,10 +2484,28 @@ if ('serviceWorker' in navigator) {
       playChime();
       speakOrder((d.title || '') + '. ' + (d.body || ''));
       navigate(currentView); // auto-refresh current view so new orders appear instantly
-      // Increment badge count on new order notification
-      incrementBadgeCount();
+      // Sync badge with actual pending orders from API
+      syncBadgeWithPendingOrders();
     }
   });
+}
+
+/** Sync app badge with actual pending orders count from API. */
+async function syncBadgeWithPendingOrders() {
+  if (!('setAppBadge' in navigator)) return;
+  try {
+    const d = await api('/dashboard');
+    const pendingCount = d.pendingOrders || 0;
+    currentBadgeCount = pendingCount;
+    if (pendingCount > 0) {
+      navigator.setAppBadge(pendingCount).catch(() => {});
+    } else {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  } catch (e) {
+    // API call failed, fall back to increment
+    incrementBadgeCount();
+  }
 }
 
 /** Increment the app badge count by 1 (called on new order push). */

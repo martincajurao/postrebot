@@ -70,11 +70,8 @@ self.addEventListener('notificationclick', (event) => {
 
 // Handle messages from the app (e.g., update badge count)
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'update-badge') {
-    const count = event.data.count || 0;
-    // Store badge count for later use
-    self.registration.setClientBadgeCount(count).catch(() => {});
-  }
+  // Badge is handled by the client app using navigator.setAppBadge()
+  // No action needed in service worker
 });
 
 // Fetch handler - pass through all requests without caching
