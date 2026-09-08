@@ -1,0 +1,25 @@
+{
+  "name": "Postre Admin",
+  "short_name": "Postre Admin",
+  "description": "Messenger Ordering & Reservation System - Admin Panel",
+  "start_url": "/admin/",
+  "scope": "/admin/",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#e0553f",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/admin/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/admin/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

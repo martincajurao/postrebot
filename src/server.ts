@@ -27,6 +27,20 @@ migrate()
 app.use('/webhook', messengerWebhook);
 app.post('/api/login', loginHandler);
 
+// PWA assets at root level (manifest, service worker, icons)
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.json')) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    }
+    if (filePath.endsWith('.js') && filePath.includes('sw')) {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Service-Worker-Allowed', '/');
+    }
+    res.setHeader('Cache-Control', 'no-cache');
+  },
+}));
+
 // Webview ordering interface (REST API + static frontend)
 app.use('/api/webview', webviewApi);
 
