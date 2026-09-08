@@ -781,7 +781,10 @@ function showPackages() {
     showView('view-packages');
     return;
   }
-  const sorted = packages.slice().sort((a, b) => Number(!!a.is_custom) - Number(!!b.is_custom));
+  // Show only ONE "Build Your Own" custom package (the first) — dedup any duplicates.
+  const customPkgs = packages.filter((p) => p.is_custom);
+  const firstCustom = customPkgs.length > 0 ? [customPkgs[0]] : [];
+  const sorted = packages.filter((p) => !p.is_custom).concat(firstCustom).slice();
   container.innerHTML = sorted.map((pkg) => {
     const saved = Number(pkg.discount) > 0;
     const selSize = cardSizes["package-" + pkg.id] || "M";
