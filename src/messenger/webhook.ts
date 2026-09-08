@@ -345,7 +345,7 @@ async function mainMenu(psid: string) {
  */
 function showMenuOptions(psid: string) {
   return sendQuickReplies(psid, '🍽️ What would you like to do?', [
-    { title: '🛍️ Open Store', payload: 'WEBVIEW' },
+    { title: '🛍️ Open Store Now!', payload: 'WEBVIEW' },
     { title: '🛒 Order Now', payload: 'MENU_ORDER' },
     { title: '📅 Reservation', payload: 'MENU_RESERVE' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
@@ -1208,20 +1208,16 @@ async function handleText(psid: string, text: string) {
       if (/\b(order\s+online|web\s*store|webview|open\s+store)\b/i.test(text)) {
         return handlePayload(psid, 'WEBVIEW');
       }
-      // Handle greetings and common conversation without showing full welcome
+      // Handle greetings - show menu with greeting
       if (/^(hi|hello|hey|good\s*(morning|afternoon|evening)|greetings|sup|yo)\b/i.test(text)) {
-        return sendText(psid, '👋 Hello! How can I help you today?').then(() => showMenuOptions(psid));
+        return sendText(psid, '👋 Hello!').then(() => showMenuOptions(psid));
       }
-      // Handle thanks/gratitude
+      // Handle thanks/gratitude - just respond naturally, then show menu
       if (/\b(thanks|thank\s*you|thx|ty|salamat)\b/i.test(text)) {
-        return sendText(psid, '😊 You\'re welcome! Let me know if you need anything else.').then(() => showMenuOptions(psid));
+        return sendText(psid, '😊 You\'re welcome!').then(() => showMenuOptions(psid));
       }
-      // Handle "menu" request - show options without full welcome
-      if (text.toLowerCase().includes('menu')) {
-        return showMenuOptions(psid);
-      }
-      // For any other unknown text, show friendly response with menu options
-      return sendText(psid, 'Sorry, I didn\'t quite get that.').then(() => showMenuOptions(psid));
+      // For any other text, show menu options
+      return showMenuOptions(psid);
   }
 }
 
