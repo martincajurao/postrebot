@@ -76,6 +76,26 @@ function fmtTimeSlot(slot) {
   return `${h}:${m}${ampm}`;
 }
 
+/** Update the PWA app badge with the number of pending orders.
+ *  Uses the Badging API (Chrome 81+, Edge 81+, Android 12+). */
+function updateAppBadge(count) {
+  if (!('setAppBadge' in navigator)) return;
+  currentBadgeCount = count;
+  if (count > 0) {
+    navigator.setAppBadge(count).catch(() => {});
+  } else {
+    navigator.clearAppBadge().catch(() => {});
+  }
+}
+
+/** Clear the app badge when admin views the dashboard (acknowledged orders). */
+function clearAppBadge() {
+  if ('clearAppBadge' in navigator) {
+    currentBadgeCount = 0;
+    navigator.clearAppBadge().catch(() => {});
+  }
+}
+
 /** Generate formatted booking details for copy-paste to riders/delivery. */
 async function generateBookingDetails(orderId) {
   const order = await api(`/orders/${orderId}`);
@@ -708,6 +728,7 @@ const imgTag = (url, title = '') => url
 /* ================= DASHBOARD ================= */
 views.dashboard = async (main) => {
   const d = await api('/dashboard');
+  updateAppBadge(d.pendingOrders || 0);
   const slotRows = d.todayReservations.length
     ? d.todayReservations.map((r) =>
       `<div class="slot-row"><span>${esc(r.time_slot)} — ${esc(r.customer_name)}</span><span class="badge b-${esc(r.status)}">${esc(r.status)}</span></div>`).join('')
@@ -1018,6 +1039,8 @@ views.orders = async (main) => {
     <div class="card"><div class="table-wrap" id="orders-body"><p class="muted">Loading…</p></div></div>`;
   const filter = sessionStorage.getItem('orderFilter') || '';
   const orders = await api('/orders' + (filter ? '?status=' + filter : ''));
+  const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
+  updateAppBadge(pendingCount);
   const filters = ['', 'PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
   const selected = new Set();
   const renderBulkBar = () => {
@@ -2453,7 +2476,7 @@ document.addEventListener('click', () => {
   } catch { /* audio unsupported */ }
 }, { once: true });
 
-// Chime + voice for every push the service worker forwards to this page.
+// Chime + voice + badge for every push the service worker forwards to this page.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (ev) => {
     const d = ev.data || {};
@@ -2461,8 +2484,18 @@ if ('serviceWorker' in navigator) {
       playChime();
       speakOrder((d.title || '') + '. ' + (d.body || ''));
       navigate(currentView); // auto-refresh current view so new orders appear instantly
+      // Increment badge count on new order notification
+      incrementBadgeCount();
     }
   });
+}
+
+/** Increment the app badge count by 1 (called on new order push). */
+let currentBadgeCount = 0;
+function incrementBadgeCount() {
+  if (!('setAppBadge' in navigator)) return;
+  currentBadgeCount++;
+  navigator.setAppBadge(currentBadgeCount).catch(() => {});
 }
 
 function updatePushToggles() {

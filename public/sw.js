@@ -1,8 +1,8 @@
 /* Service Worker for Postre Admin PWA
  * - Handles push notifications for new orders
+ * - Updates app badge with pending order count
  * - Does NOT cache API requests (Supabase, auth, webhooks)
  * - Does NOT interfere with Messenger webview functionality
- * - Only activates for admin panel routes
  */
 
 const ADMIN_SCOPE = '/admin';
@@ -66,6 +66,15 @@ self.addEventListener('notificationclick', (event) => {
       ? self.clients.openWindow(ADMIN_SCOPE)
       : Promise.resolve(),
   );
+});
+
+// Handle messages from the app (e.g., update badge count)
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'update-badge') {
+    const count = event.data.count || 0;
+    // Store badge count for later use
+    self.registration.setClientBadgeCount(count).catch(() => {});
+  }
 });
 
 // Fetch handler - pass through all requests without caching
