@@ -339,6 +339,21 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
     console.log('[messenger] skip persistent menu (no PAGE_ACCESS_TOKEN configured)');
     return false;
   }
+
+  // Messenger caches the persistent menu aggressively. Re-posting a new menu
+  // does NOT always replace a previously registered one, so the first time this
+  // process runs we explicitly CLEAR the menu (empty call_to_actions) and then
+  // set the current one. This permanently drops any stale entries (e.g. the old
+  // "📅 Reservation" button) that users still see.
+  if (!clearPersistentMenuOnce) {
+    clearPersistentMenuOnce = true;
+    try {
+      await postPersistentMenu({ persistent_menu: [{ locale: 'default', composer_input_disabled: false, call_to_actions: [] }] });
+    } catch (e: any) {
+      console.error('[messenger] clear persistent menu error:', e?.message || e);
+    }
+  }
+
   const webviewUrl = webviewBaseUrl.replace(/\/+$/, '') + '/webview';
   const whitelisted = await ensureWebviewWhitelisted(webviewUrl);
 
@@ -371,28 +386,36 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
   };
   try {
     console.log(`[setPersistentMenu] POST persistent menu with messenger_extensions=${whitelisted} for ${webviewUrl}`);
-    const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const text = await res.text();
-    if (res.ok) {
-      console.log(`[messenger] persistent menu set (webview: ${webviewUrl}, extensions: ${whitelisted})`);
-      return true;
-    }
-    // Parse Meta error details
-    try {
-      const errJson = JSON.parse(text);
-      const err = errJson?.error || {};
-      console.error(`[setPersistentMenu] Meta error: code=${err.code}, type=${err.type}, message=${err.message}, subcode=${err.error_subcode}`);
-    } catch { /* not JSON */ }
-    console.error(`[messenger] persistent menu failed (${res.status}): ${text}`);
-    return false;
+    return await postPersistentMenu(payload);
   } catch (e: any) {
     console.error('[messenger] persistent menu error:', e?.message || e);
     return false;
   }
+}
+
+/** True once this process has cleared the previously-registered persistent menu. */
+let clearPersistentMenuOnce = false;
+
+/** POST a persistent_menu payload to the Messenger Profile API. */
+async function postPersistentMenu(payload: any): Promise<boolean> {
+  const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/me/messenger_profile?access_token=${PAGE_TOKEN}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  if (res.ok) {
+    console.log('[messenger] persistent menu updated');
+    return true;
+  }
+  // Parse Meta error details
+  try {
+    const errJson = JSON.parse(text);
+    const err = errJson?.error || {};
+    console.error(`[setPersistentMenu] Meta error: code=${err.code}, type=${err.type}, message=${err.message}, subcode=${err.error_subcode}`);
+  } catch { /* not JSON */ }
+  console.error(`[messenger] persistent menu failed (${res.status}): ${text}`);
+  return false;
 }
 
 /** Messenger must be able to download carousel images itself; drop any URL it cannot fetch. */
