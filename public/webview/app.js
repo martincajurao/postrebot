@@ -537,6 +537,8 @@ async function loadConfig() {
     const data = await api('/config');
     if (data && data.payment) config.payment = data.payment;
     if (data && data.contact) config.contact = data.contact;
+    // Capture the Google Maps API key sent by the server (from env GOOGLE_MAPS_API_KEY).
+    if (data && data.mapsApiKey) serverMapsApiKey = String(data.mapsApiKey);
   } catch (e) {
     console.warn('[webview] /config failed:', e && e.message);
   }
@@ -2070,9 +2072,62 @@ const LOCATION_KEY = () => 'webview_location_' + sessionId;
 // Store's home area — centers the map and acts as the delivery-fee origin later.
 const STORE_LOCATION = { lat: 13.6218, lng: 123.1948, label: 'Naga City' };
 
-// Leaflet map + pin for the location gate (created once, on first show).
-let locMap = null;
-let locMarker = null;
+// Google Maps API key — populated from the server's /config endpoint
+// (src/api/webview.ts sends mapsApiKey from process.env.GOOGLE_MAPS_API_KEY).
+// Falls back to empty string; the gate then runs in address-only mode.
+let serverMapsApiKey = '';
+
+let googleMap = null;
+let googleMarker = null;
+let googleGeocoder = null;
+let googleAutocomplete = null;
+let googleMapsLoaded = false;
+let googleMapsLoadFailed = false;
+
+/** Dynamically load the Google Maps JavaScript API (+ Places library). */
+function loadGoogleMaps() {
+  return new Promise((resolve, reject) => {
+    if (window.google && window.google.maps) {
+      googleMapsLoaded = true;
+      resolve();
+      return;
+    }
+    if (googleMapsLoadFailed) {
+      reject(new Error('Google Maps previously failed to load'));
+      return;
+    }
+    if (!serverMapsApiKey) {
+      googleMapsLoadFailed = true;
+      reject(new Error('Google Maps API key not set'));
+      return;
+    }
+
+    window.initGoogleMapsCallback = () => {
+      googleMapsLoaded = true;
+      resolve();
+    };
+
+    const script = document.createElement('script');
+    script.src = 'https://maps.googleapis.com/maps/api/js?key='
+      + encodeURIComponent(serverMapsApiKey)
+      + '&libraries=places&callback=initGoogleMapsCallback';
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => {
+      googleMapsLoadFailed = true;
+      reject(new Error('Failed to load Google Maps script'));
+    };
+    document.head.appendChild(script);
+
+    // Don't wait forever — fall back to address-only if it never loads.
+    setTimeout(() => {
+      if (!googleMapsLoaded && !googleMapsLoadFailed) {
+        googleMapsLoadFailed = true;
+        reject(new Error('Google Maps load timed out'));
+      }
+    }, 12000);
+  });
+}
 
 /** Saved delivery location for this session (or null when not set yet). */
 function getSavedLocation() {
@@ -2086,12 +2141,12 @@ function saveLocation(loc) {
   try { storageSet(LOCATION_KEY(), JSON.stringify(loc)); } catch { /* non-fatal */ }
 }
 
-/** True when the Leaflet map could be set up and initialized (CDN reachable,
- * element present, and initialization succeeded). When false, the customer
- * can still confirm with address-only — delivery fee will fall back to a
- * default/zone rate instead of a distance-based one. */
+/** True when the Google Maps API loaded and the map was initialized.
+ * When false, the customer can still confirm with address-only — delivery fee
+ * will fall back to a default/zone rate instead of a distance-based one. */
 function mapAvailable() {
-  return typeof L !== 'undefined' && !!$id('loc-map') && !mapInitFailed;
+  return googleMapsLoaded && !!window.google && !!window.google.maps
+    && !!googleMap && !googleMapsLoadFailed && !!$id('loc-map');
 }
 
 /** Show the mandatory location modal. Always shown on every webview open so
@@ -2116,37 +2171,47 @@ function showLocationGate() {
   gate.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
 
-  // No map support (CDN blocked / very old webview) → hide it and fall back
-  // to address-only confirmation so ordering never gets bricked.
-  if (!mapAvailable()) {
-    const wrap = document.querySelector('.loc-map-wrap');
-    if (wrap) wrap.style.display = 'none';
-  } else {
-    // Defer to the next frame so #loc-map has real dimensions once the
-    // sheet is visible — Leaflet measures the container at init time.
+  // Attempt to load Google Maps and initialize the map. If it fails (no key,
+  // CDN blocked, very old webview) we fall back to address-only mode.
+  const wrap = document.querySelector('.loc-map-wrap');
+  if (wrap) wrap.style.display = '';
+
+  // If Google Maps is already loaded (e.g. second time opening the gate),
+  // init immediately. Otherwise kick off an async load.
+  if (googleMapsLoaded && window.google && window.google.maps) {
     requestAnimationFrame(() => initLocationMap());
-    // When a location was already saved with coordinates, re-drop the pin so
-    // the customer sees where they're set to receive the order.
-    if (saved && saved.lat != null && saved.lng != null) {
-      const coords = { lat: saved.lat, lng: saved.lng };
-      // initLocationMap() may not have created locMap yet when this runs;
-      // if the map isn't ready, the pin will be restored when it is (see
-      // the requestAnimationFrame below). Otherwise drop it immediately.
-      if (locMap) {
-        setMapPin(coords, false);
-        locMap.setView([coords.lat, coords.lng], 15);
-      } else {
-        const tryRestore = () => {
-          if (locMap) {
-            setMapPin(coords, false);
-            locMap.setView([coords.lat, coords.lng], 15);
-          } else {
-            setTimeout(tryRestore, 150);
-          }
-        };
-        setTimeout(tryRestore, 200);
-      }
+    if (saved && saved.lat != null && saved.lng != null && googleMap) {
+      setMapPin({ lat: saved.lat, lng: saved.lng }, false);
+      googleMap.setCenter({ lat: saved.lat, lng: saved.lng });
+      googleMap.setZoom(15);
     }
+  } else if (!googleMapsLoadFailed) {
+    // Load Google Maps, then init. Show a brief loading state on the map.
+    if (wrap) {
+      wrap.classList.add('loc-map-loading');
+      const hint = $id('loc-status');
+      if (hint) hint.textContent = '🗺️ Loading map…';
+    }
+    loadGoogleMaps()
+      .then(() => {
+        requestAnimationFrame(() => initLocationMap());
+        if (saved && saved.lat != null && saved.lng != null && googleMap) {
+          setMapPin({ lat: saved.lat, lng: saved.lng }, false);
+          googleMap.setCenter({ lat: saved.lat, lng: saved.lng });
+          googleMap.setZoom(15);
+        }
+      })
+      .catch((e) => {
+        console.warn('[webview] Google Maps unavailable, address-only mode:', e && e.message);
+        if (wrap) wrap.style.display = 'none';
+        showLocError('Map unavailable — please enter your address manually below.');
+      })
+      .finally(() => {
+        if (wrap) wrap.classList.remove('loc-map-loading');
+      });
+  } else {
+    // Already failed before — address-only mode.
+    if (wrap) wrap.style.display = 'none';
   }
 
   // Re-validate the confirm button as the address is typed.
@@ -2158,33 +2223,99 @@ function showLocationGate() {
   updateLocConfirmState();
 }
 
-/** Create the map once, after the modal is visible. */
+/** Create the Google Map once, after the modal is visible. */
 function initLocationMap() {
-  if (locMap) {
-    // Re-opened (e.g. after a retry) — Leaflet needs a size recalculation.
-    setTimeout(() => { if (locMap) locMap.invalidateSize(); }, 150);
+  if (googleMap) {
+    // Re-opened — trigger a resize so tiles render correctly.
+    setTimeout(() => {
+      if (googleMap && window.google) {
+        google.maps.event.trigger(googleMap, 'resize');
+        // Re-center on the store (or existing pin) after resize.
+        if (googleMarker) {
+          const pos = googleMarker.getPosition();
+          googleMap.setCenter({ lat: pos.lat(), lng: pos.lng() });
+        } else {
+          googleMap.setCenter({ lat: STORE_LOCATION.lat, lng: STORE_LOCATION.lng });
+        }
+      }
+    }, 150);
     return;
   }
   try {
-    locMap = L.map('loc-map', { scrollWheelZoom: false })
-      .setView([STORE_LOCATION.lat, STORE_LOCATION.lng], 14);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(locMap);
+    const mapEl = $id('loc-map');
+    if (!mapEl || !window.google) throw new Error('Google Maps not available');
+
+    googleMap = new google.maps.Map(mapEl, {
+      center: { lat: STORE_LOCATION.lat, lng: STORE_LOCATION.lng },
+      zoom: 14,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: false,
+      zoomControl: true,
+      gestureHandling: 'cooperative',
+      backgroundColor: '#eef2f5',
+    });
+
+    googleGeocoder = new google.maps.Geocoder();
+
     // Tap anywhere to drop/move the pin.
-    locMap.on('click', (e) => setMapPin(e.latlng, false));
-    // Re-measure once the container has settled so tiles + pin render correctly
-    // even when the sheet was opened from a previously-hidden state.
-    setTimeout(() => { if (locMap) locMap.invalidateSize(); }, 80);
+    googleMap.addListener('click', (e) => {
+      setMapPin({ lat: e.latLng.lat(), lng: e.latLng.lng() }, false);
+    });
+
+    // Initialize Places Autocomplete on the address input.
+    initPlacesAutocomplete();
+
+    // Re-measure once the container has settled so tiles + pin render correctly.
+    setTimeout(() => {
+      if (googleMap && window.google) {
+        google.maps.event.trigger(googleMap, 'resize');
+      }
+    }, 100);
   } catch (e) {
-    console.warn('[webview] map init failed, falling back to address-only:', e && e.message);
-    locMap = null;
-    locMarker = null;
-    mapInitFailed = true;
+    console.warn('[webview] Google Maps init failed, falling back to address-only:', e && e.message);
+    googleMap = null;
+    googleMarker = null;
+    googleGeocoder = null;
+    googleAutocomplete = null;
+    googleMapsLoadFailed = true;
     const wrap = document.querySelector('.loc-map-wrap');
     if (wrap) wrap.style.display = 'none';
     showLocError('Map unavailable — please enter your address manually below.');
+  }
+}
+
+/** Wire up Google Places Autocomplete on the address input. */
+function initPlacesAutocomplete() {
+  const input = $id('loc-address');
+  if (!input || !window.google) return;
+
+  try {
+    googleAutocomplete = new google.maps.places.Autocomplete(input, {
+      types: ['geocode', 'establishment'],
+      fields: ['formatted_address', 'geometry', 'name', 'place_id'],
+    });
+
+    // When the customer picks a suggestion, drop a pin on that spot.
+    googleAutocomplete.addListener('place_changed', () => {
+      const place = googleAutocomplete.getPlace();
+      if (place && place.geometry && place.geometry.location) {
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        setMapPin({ lat, lng }, false);
+        if (googleMap) {
+          googleMap.setCenter({ lat, lng });
+          googleMap.setZoom(16);
+        }
+        if (place.formatted_address) {
+          // Update the input with the full formatted address.
+          $id('loc-address').value = place.formatted_address;
+        }
+        updateLocConfirmState();
+      }
+    });
+  } catch (e) {
+    console.warn('[webview] Places Autocomplete init failed:', e && e.message);
   }
 }
 
@@ -2215,7 +2346,7 @@ function hideLocError() {
 let pendingCoords = null;
 // Where the point came from: 'gps' or 'pin' (map tap/drag).
 let pinSource = null;
-// Set true when the map couldn't be initialized (Leaflet error, container
+// Set true when the map couldn't be initialized (Google Maps error, container
 // issue, etc.). When true, the customer can confirm with address-only
 // (no coordinates required) — delivery fee falls back to a default/zone rate.
 let mapInitFailed = false;
@@ -2225,15 +2356,21 @@ function setMapPin(latlng, fromGps) {
   pendingCoords = { lat: latlng.lat, lng: latlng.lng };
   pinSource = fromGps ? 'gps' : 'pin';
   if (mapAvailable()) {
-    if (!locMarker) {
-      locMarker = L.marker(latlng, {
+    if (!googleMarker) {
+      googleMarker = new google.maps.Marker({
+        position: { lat: latlng.lat, lng: latlng.lng },
+        map: googleMap,
         draggable: true,
-        icon: L.divIcon({ className: 'loc-pin', html: '📍', iconSize: [32, 32], iconAnchor: [16, 30] }),
-      }).addTo(locMap);
+        animation: google.maps.Animation.DROP,
+        title: 'Delivery location',
+      });
       // Dragging fine-tunes the point (same handling as a fresh tap).
-      locMarker.on('dragend', () => setMapPin(locMarker.getLatLng(), false));
+      googleMarker.addListener('dragend', () => {
+        const pos = googleMarker.getPosition();
+        setMapPin({ lat: pos.lat(), lng: pos.lng() }, false);
+      });
     } else {
-      locMarker.setLatLng(latlng);
+      googleMarker.setPosition({ lat: latlng.lat, lng: latlng.lng });
     }
   }
   hideLocError();
@@ -2273,7 +2410,8 @@ function useCurrentLocation() {
     const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     if (mapAvailable()) {
       setMapPin(coords, true);
-      locMap.setView([coords.lat, coords.lng], 16);
+      googleMap.setCenter({ lat: coords.lat, lng: coords.lng });
+      googleMap.setZoom(16);
     } else {
       pendingCoords = coords;
       updateLocConfirmState();
@@ -2300,24 +2438,25 @@ function useCurrentLocation() {
   }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
 }
 
-/** Reverse-geocode coordinates into a readable address (OpenStreetMap). */
+/** Reverse-geocode coordinates into a readable address (Google Maps). */
 async function reverseGeocode(lat, lng) {
-  const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1'
-    + '&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error('reverse geocode HTTP ' + res.status);
-  const data = await res.json();
-  const a = data.address || {};
-  const parts = [
-    a.house_number, a.road,
-    a.neighbourhood || a.suburb || a.quarter,
-    a.barangay || a.village || a.city_district,
-    a.city || a.municipality || a.town,
-    a.province,
-  ].filter(Boolean);
-  const text = parts.join(', ');
-  if (!text) throw new Error('reverse geocode returned no address');
-  return text;
+  if (!googleGeocoder) {
+    if (!window.google) throw new Error('Google Maps not loaded');
+    googleGeocoder = new google.maps.Geocoder();
+  }
+  return new Promise((resolve, reject) => {
+    googleGeocoder.geocode(
+      { location: { lat, lng } },
+      (results, status) => {
+        if (status === google.maps.GeocoderStatus.OK && results && results.length > 0) {
+          // Use the first (most specific) result's formatted address.
+          resolve(results[0].formatted_address);
+        } else {
+          reject(new Error('Geocoder failed: ' + status));
+        }
+      }
+    );
+  });
 }
 
 /** Live guidance under the map: exactly what's still missing before confirming. */
