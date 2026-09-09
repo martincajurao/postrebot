@@ -2333,6 +2333,48 @@ img.img-skel {
   margin-top: 16px;
 }
 
+/* --- Map pin picker (Leaflet) --- */
+.loc-map-wrap {
+  margin: 14px 0 4px;
+}
+
+#loc-map {
+  position: relative;
+  z-index: 1;
+  height: 190px;
+  border-radius: 12px;
+  border: 2px solid #f0f0f0;
+  background: #eef2f5;
+}
+
+/* The map owns its own gestures — don't let map drags scroll the sheet. */
+.loc-gate-card .leaflet-container {
+  font: inherit;
+  touch-action: none;
+  border-radius: 10px;
+}
+
+.loc-map-hint {
+  font-size: 0.72rem;
+  color: #636e72;
+  text-align: center;
+  margin: 8px 0 0;
+  line-height: 1.4;
+}
+
+.loc-map-hint.loc-status-ok {
+  color: #27ae60;
+  font-weight: 600;
+}
+
+/* Drop-pin icon (Leaflet divIcon) */
+.loc-pin {
+  font-size: 26px;
+  line-height: 32px;
+  text-align: center;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.3));
+}
+
 @keyframes loc-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

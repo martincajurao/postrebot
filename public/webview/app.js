@@ -1674,8 +1674,9 @@ function startCheckout() {
   const container = $id('checkout-form');
   if (!container) return;
 
-  // Load remembered customer data
+  // Load remembered customer data + the location confirmed at the gate
   const remembered = loadCustomerData();
+  const savedLoc = getSavedLocation();
 
   const pay = config.payment || {};
   const methods = [
@@ -1698,7 +1699,7 @@ function startCheckout() {
     </div>
     <div class="form-group" id="address-group">
       <label>Delivery Address</label>
-      <textarea id="address" placeholder="House #, street, barangay, city">${esc(remembered?.address || '')}</textarea>
+      <textarea id="address" placeholder="House #, street, barangay, city">${esc(remembered?.address || (savedLoc && savedLoc.address) || '')}</textarea>
     </div>
     <div class="form-group">
       <label>Contact Number</label>
@@ -1809,6 +1810,14 @@ async function placeOrder() {
     return out;
   });
 
+  // Delivery-fee groundwork: attach the confirmed location's coordinates so
+  // the server can compute a distance-based fee (fee engine comes later —
+  // the server currently ignores these fields, which is harmless).
+  const savedLoc = getSavedLocation();
+  const orderCoords = (savedLoc && savedLoc.lat != null && savedLoc.lng != null)
+    ? { lat: savedLoc.lat, lng: savedLoc.lng }
+    : {};
+
   let result;
   try {
     result = await api('/checkout', {
@@ -1824,6 +1833,7 @@ async function placeOrder() {
         payment_method: paymentMethod,
         notes,
         items: payloadItems,
+        ...orderCoords,
       }),
     });
   } catch (e) {
@@ -2044,10 +2054,20 @@ function closeWebview() {
 
 // ---------- Location gate (first-run modal) ----------
 // Customers must set a delivery location before the home menu unlocks —
-// FoodPanda-style. The saved location is kept per session in localStorage.
-// NOTE: the delivery fee itself is intentionally NOT computed yet — this
-// only collects and stores the address/coordinates it will later use.
+// FoodPanda-style. A real location is REQUIRED: either the device GPS or a
+// pin dropped on the embedded map (works even where the browser blocks
+// geolocation, e.g. Messenger's in-app browser or plain-HTTP origins).
+// The saved location (address + lat/lng) is kept per session in localStorage
+// and rides along with checkout for the future delivery-fee calculation
+// (the fee engine itself is intentionally not implemented yet).
 const LOCATION_KEY = () => 'webview_location_' + sessionId;
+
+// Store's home area — centers the map and acts as the delivery-fee origin later.
+const STORE_LOCATION = { lat: 13.6218, lng: 123.1948, label: 'Naga City' };
+
+// Leaflet map + pin for the location gate (created once, on first show).
+let locMap = null;
+let locMarker = null;
 
 /** Saved delivery location for this session (or null when not set yet). */
 function getSavedLocation() {
@@ -2061,16 +2081,73 @@ function saveLocation(loc) {
   try { storageSet(LOCATION_KEY(), JSON.stringify(loc)); } catch { /* non-fatal */ }
 }
 
+/** True when the Leaflet map could be set up and initialized (CDN reachable,
+ * element present, and initialization succeeded). When false, the customer
+ * can still confirm with address-only — delivery fee will fall back to a
+ * default/zone rate instead of a distance-based one. */
+function mapAvailable() {
+  return typeof L !== 'undefined' && !!$id('loc-map') && !mapInitFailed;
+}
+
 /** Show the mandatory location modal. */
 function showLocationGate() {
   const gate = $id('location-gate');
   if (!gate) return;
   // Prefill from the address remembered at checkout so repeat customers
-  // only need to confirm.
+  // only need to drop/keep the pin and confirm.
   const remembered = loadCustomerData();
   if (remembered && remembered.address) $id('loc-address').value = remembered.address;
   gate.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
+
+  // No map support (CDN blocked / very old webview) → hide it and fall back
+  // to address-only confirmation so ordering never gets bricked.
+  if (!mapAvailable()) {
+    const wrap = document.querySelector('.loc-map-wrap');
+    if (wrap) wrap.style.display = 'none';
+  } else {
+    // Defer to the next frame so #loc-map has real dimensions once the
+    // sheet is visible — Leaflet measures the container at init time.
+    requestAnimationFrame(() => initLocationMap());
+  }
+
+  // Re-validate the confirm button as the address is typed.
+  const addrEl = $id('loc-address');
+  if (addrEl && !addrEl.dataset.locBound) {
+    addrEl.dataset.locBound = '1';
+    addrEl.addEventListener('input', updateLocConfirmState);
+  }
+  updateLocConfirmState();
+}
+
+/** Create the map once, after the modal is visible. */
+function initLocationMap() {
+  if (locMap) {
+    // Re-opened (e.g. after a retry) — Leaflet needs a size recalculation.
+    setTimeout(() => { if (locMap) locMap.invalidateSize(); }, 150);
+    return;
+  }
+  try {
+    locMap = L.map('loc-map', { scrollWheelZoom: false })
+      .setView([STORE_LOCATION.lat, STORE_LOCATION.lng], 14);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(locMap);
+    // Tap anywhere to drop/move the pin.
+    locMap.on('click', (e) => setMapPin(e.latlng, false));
+    // Re-measure once the container has settled so tiles + pin render correctly
+    // even when the sheet was opened from a previously-hidden state.
+    setTimeout(() => { if (locMap) locMap.invalidateSize(); }, 80);
+  } catch (e) {
+    console.warn('[webview] map init failed, falling back to address-only:', e && e.message);
+    locMap = null;
+    locMarker = null;
+    mapInitFailed = true;
+    const wrap = document.querySelector('.loc-map-wrap');
+    if (wrap) wrap.style.display = 'none';
+    showLocError('Map unavailable — please enter your address manually below.');
+  }
 }
 
 /** Hide the location modal and restore page scrolling. */
@@ -2092,19 +2169,59 @@ function hideLocError() {
   if (el) el.classList.add('hidden');
 }
 
-// Coordinates captured by the GPS button and stored with the confirmed
-// address (kept for the future delivery-fee distance calculation).
+// Coordinates of the chosen delivery point — set by the GPS button or by
+// dropping the pin on the map. Saved with the confirmed address and sent
+// with checkout for the future delivery-fee distance calculation.
 let pendingCoords = null;
+// Where the point came from: 'gps' or 'pin' (map tap/drag).
+let pinSource = null;
+// Set true when the map couldn't be initialized (Leaflet error, container
+// issue, etc.). When true, the customer can confirm with address-only
+// (no coordinates required) — delivery fee falls back to a default/zone rate.
+let mapInitFailed = false;
 
-/** GPS button — locate the device and reverse-geocode it into an address. */
+/** Drop/move the pin and remember the chosen point. */
+function setMapPin(latlng, fromGps) {
+  pendingCoords = { lat: latlng.lat, lng: latlng.lng };
+  pinSource = fromGps ? 'gps' : 'pin';
+  if (mapAvailable()) {
+    if (!locMarker) {
+      locMarker = L.marker(latlng, {
+        draggable: true,
+        icon: L.divIcon({ className: 'loc-pin', html: '📍', iconSize: [32, 32], iconAnchor: [16, 30] }),
+      }).addTo(locMap);
+      // Dragging fine-tunes the point (same handling as a fresh tap).
+      locMarker.on('dragend', () => setMapPin(locMarker.getLatLng(), false));
+    } else {
+      locMarker.setLatLng(latlng);
+    }
+  }
+  hideLocError();
+  updateLocConfirmState();
+  if (!fromGps) {
+    // Name the picked point so the address box pre-fills — only when empty,
+    // never stomping on what the customer already typed.
+    reverseGeocode(latlng.lat, latlng.lng)
+      .then((addr) => {
+        const el = $id('loc-address');
+        if (el && !el.value.trim()) el.value = addr;
+      })
+      .catch(() => { /* offline / rate-limited — address stays hand-typed */ });
+  }
+}
+
+/** GPS button — locate the device, pin it on the map and reverse-geocode it. */
 function useCurrentLocation() {
   hideLocError();
   const btn = $id('loc-gps-btn');
   const label = $id('loc-gps-label');
   if (!btn || !label) return;
 
-  if (!navigator.geolocation) {
-    showLocError('Geolocation is not available on this device — please type your address below.');
+  // Geolocation only exists on secure origins (HTTPS / localhost) and is
+  // frequently blocked inside Messenger's in-app browser — the map below is
+  // the guaranteed fallback there.
+  if (!navigator.geolocation || !window.isSecureContext) {
+    showLocError('Location services aren\u2019t available here — tap your spot on the map below instead.');
     return;
   }
 
@@ -2113,14 +2230,22 @@ function useCurrentLocation() {
   const resetBtn = () => { btn.disabled = false; label.textContent = 'Use my current location'; };
 
   navigator.geolocation.getCurrentPosition(async (pos) => {
-    pendingCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    if (mapAvailable()) {
+      setMapPin(coords, true);
+      locMap.setView([coords.lat, coords.lng], 16);
+    } else {
+      pendingCoords = coords;
+      updateLocConfirmState();
+    }
     try {
-      const address = await reverseGeocode(pendingCoords.lat, pendingCoords.lng);
+      const address = await reverseGeocode(coords.lat, coords.lng);
       $id('loc-address').value = address;
-      showToast('📍 Location found — check it and confirm below');
+      updateLocConfirmState();
+      showToast('📍 Location found — check it and confirm');
     } catch (e) {
       console.warn('[webview] reverse geocode failed:', e && e.message);
-      // GPS worked but naming the address didn't — keep the coordinates and
+      // GPS worked but naming the address didn't — keep the pin/coords and
       // let the customer complete the address manually.
       showLocError('We got your position but couldn\u2019t name the address — please complete it below.');
       $id('loc-address').focus();
@@ -2129,9 +2254,9 @@ function useCurrentLocation() {
   }, (err) => {
     resetBtn();
     console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
-    if (err && err.code === 1) showLocError('Location permission was denied — please type your address below.');
-    else if (err && err.code === 3) showLocError('Getting your location timed out — try again or type your address below.');
-    else showLocError('Could not get your location — please type your address below.');
+    if (err && err.code === 1) showLocError('Location permission was denied — tap your spot on the map below instead.');
+    else if (err && err.code === 3) showLocError('Getting your location timed out — try again or tap the map below.');
+    else showLocError('Could not get your location — tap your spot on the map below instead.');
   }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
 }
 
@@ -2155,6 +2280,23 @@ async function reverseGeocode(lat, lng) {
   return text;
 }
 
+/** Live guidance under the map: exactly what's still missing before confirming. */
+function updateLocConfirmState() {
+  const status = $id('loc-status');
+  if (!status) return;
+  if (!mapAvailable()) { status.textContent = ''; return; }
+  const address = (($id('loc-address') && $id('loc-address').value) || '').trim();
+  const hasAddress = address.length >= 5;
+  status.classList.toggle('loc-status-ok', !!pendingCoords && hasAddress);
+  if (!pendingCoords) {
+    status.textContent = '📍 Tap the map to drop your pin — or use "Use my current location"';
+  } else if (!hasAddress) {
+    status.textContent = '✓ Pin saved — now complete your address below';
+  } else {
+    status.textContent = '✓ Location set — ready to confirm!';
+  }
+}
+
 /** Confirm button — validate and persist the delivery location, then unlock home. */
 function confirmLocation() {
   hideLocError();
@@ -2163,16 +2305,29 @@ function confirmLocation() {
     showLocError('Please enter your complete address (house #, street, barangay, city).');
     return;
   }
+  if (mapAvailable() && !pendingCoords) {
+    showLocError('Please set your location first — tap the map or use "Use my current location".');
+    return;
+  }
   const landmark = (($id('loc-landmark') && $id('loc-landmark').value) || '').trim();
   saveLocation({
     address,
     landmark: landmark || null,
     lat: pendingCoords ? pendingCoords.lat : null,
     lng: pendingCoords ? pendingCoords.lng : null,
-    source: pendingCoords ? 'gps' : 'manual',
+    source: pendingCoords ? pinSource : 'manual',
     savedAt: new Date().toISOString(),
   });
+  // When source is 'manual' (customer typed an address without GPS / map pin),
+  // lat/lng are null. The future delivery-fee engine should handle this by:
+  //   1. Using a default/flat delivery fee, or
+  //   2. Parsing the address (barangay, city) for zone-based pricing, or
+  //   3. Geocoding the address server-side (Google Maps / OpenStreetMap) to
+  //      recover coordinates and compute a distance-based fee.
+  // For now the location is stored as-is and the checkout delivery line stays
+  // "To be decided" until the fee logic is wired up.
   pendingCoords = null;
+  pinSource = null;
   hideLocationGate();
   showToast('📍 Location saved!');
 }

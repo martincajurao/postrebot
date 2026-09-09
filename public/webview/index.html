@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260909-3">
+  <link rel="stylesheet" href="style.css?v=20260909-5">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -27,6 +27,11 @@
     };
   </script>
   <script src="https://connect.facebook.net/en_US/messenger.Extensions.js"></script>
+  <!-- Leaflet + OpenStreetMap: map pin picker for the location gate (no API key) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <!-- Supabase JS: optional fallback data source (primary is the /api/webview REST API) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -279,7 +284,12 @@
           <span id="loc-gps-label">Use my current location</span>
         </button>
 
-        <div class="loc-divider"><span>or enter manually</span></div>
+        <div class="loc-map-wrap" id="loc-map-wrap">
+          <div id="loc-map" aria-label="Tap the map to set your delivery location"></div>
+          <p class="loc-map-hint" id="loc-status">📍 Tap the map to drop your pin — drag it to your exact spot</p>
+        </div>
+
+        <div class="loc-divider"><span>then complete your address</span></div>
 
         <div class="form-group">
           <label for="loc-address">Complete address</label>
@@ -300,6 +310,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260909-3"></script>
+  <script src="app.js?v=20260909-5"></script>
 </body>
 </html>
