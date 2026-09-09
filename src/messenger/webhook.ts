@@ -19,7 +19,7 @@ import { getStoreInfo, StoreInfo } from '../services/store-info';
 const r = Router();
 
 // ---------- payment/contact info (Admin → Settings → 💳 Payment & Contact) ----------
-// Values come from app_settings (editable live in the admin panel) with the
+// Values come from app_settings (editable live inasdasd the admin panel) with the
 // PAYMENT_*/CONTACT_* env vars as defaults — cached briefly in store-info.ts.
 function paymentInfo(v: StoreInfo): Record<string, string> {
   return {
