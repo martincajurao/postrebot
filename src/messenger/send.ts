@@ -377,6 +377,11 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
           menuButton,
           {
             type: 'postback',
+            title: '❓ How to Order',
+            payload: 'MENU_HOWTO',
+          },
+          {
+            type: 'postback',
             title: '📞 Contact Us',
             payload: 'MENU_CONTACT',
           },

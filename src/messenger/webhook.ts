@@ -334,6 +334,7 @@ async function mainMenu(psid: string) {
   // Quick replies for actions NOT available in the webview
   return sendQuickReplies(psid, 'Or choose an option below:', [
     { title: '🛒 Browse Our Menu', payload: 'WELCOME' },
+    { title: '❓ How to Order', payload: 'MENU_HOWTO' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
@@ -346,6 +347,7 @@ async function mainMenu(psid: string) {
 function showMenuOptions(psid: string) {
   return sendQuickReplies(psid, '🍽️ What would you like to do?', [
     { title: '🛒 Browse Our Menu', payload: 'WELCOME' },
+    { title: '❓ How to Order', payload: 'MENU_HOWTO' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
@@ -1080,6 +1082,17 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
       await setState(psid, 'RESERVE_PHONE', (await getState(psid)).ctx);
       return sendText(psid, 'Contact number for the reservation?');
     }
+    case 'MENU_HOWTO':
+      return sendText(psid,
+        '🛒 HOW TO ORDER\n' +
+        '━━━━━━━━━━━━━━━━━━━\n' +
+        '1️⃣ Tap "🛒 Browse Our Menu" below or in the menu.\n' +
+        '2️⃣ Pick your items & packages, choose size and quantity.\n' +
+        '3️⃣ Go to 🛒 Cart → Checkout and enter your details.\n' +
+        '4️⃣ Confirm your order — we\'ll notify you as it progresses.\n' +
+        '━━━━━━━━━━━━━━━━━━━\n' +
+        '💡 Ordering inside the chat works too — just type "menu" to start!'
+      ).then(() => mainMenu(psid));
     case 'MENU_CONTACT': {
       setState(psid, 'CONTACT_MENU');
       const ci = contactInfo(await getStoreInfo());
