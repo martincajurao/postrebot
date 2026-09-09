@@ -346,7 +346,6 @@ async function mainMenu(psid: string) {
 function showMenuOptions(psid: string) {
   return sendQuickReplies(psid, '🍽️ What would you like to do?', [
     { title: '🛍️ Open Store Now!', payload: 'WELCOME' },
-    { title: '🛒 Order Now', payload: 'MENU_ORDER' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
