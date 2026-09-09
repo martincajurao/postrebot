@@ -2495,26 +2495,31 @@ img.img-skel {
 /* --- Wide dish/package cards inside a rail --- */
 .fp-card {
   width: 76%;
-  max-width: 300px;
+  max-width: 230px;
 }
 
 .fp-card img {
-  height: 145px;
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4), 0 4px 10px rgba(0, 0, 0, 0.10);
 }
 
 .fp-card.fp-card-tall img {
-  height: 175px;
+  height: 150px;
 }
 
 /* Wider screens: show more of the rail, larger circular categories */
 @media (min-width: 520px) {
   .fp-card {
-    width: 46%;
-    max-width: 320px;
+    width: 40%;
+    max-width: 270px;
   }
 
   .fp-card.fp-card-tall {
-    width: 60%;
+    width: 52%;
   }
 
   .fp-cat {
@@ -2530,14 +2535,14 @@ img.img-skel {
 
 /* --- Packages-first promo banner on the home menu --- */
 .cat-packages-promo {
-  margin: 12px 0 10px;
-  border-radius: 20px;
+  margin: 10px 0 14px;
+  border-radius: 22px;
   background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-  padding: 20px 22px;
+  padding: 24px 26px;
   color: #fff;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 6px 24px rgba(231, 76, 60, 0.35);
+  box-shadow: 0 8px 28px rgba(231, 76, 60, 0.4);
   border: 1.5px solid rgba(255, 255, 255, 0.25);
 }
 .cat-packages-promo::after {
@@ -2570,9 +2575,9 @@ img.img-skel {
 .packages-promo-badge {
   background: rgba(255, 255, 255, 0.25);
   border: 1.5px solid rgba(255, 255, 255, 0.5);
-  border-radius: 22px;
-  padding: 6px 14px;
-  font-size: 0.75rem;
+  border-radius: 24px;
+  padding: 7px 16px;
+  font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.4px;
   text-transform: uppercase;
@@ -2588,14 +2593,14 @@ img.img-skel {
   min-width: 0;
 }
 .packages-promo-title {
-  font-size: 1.35rem;
+  font-size: 1.5rem;
   font-weight: 800;
   margin: 0;
   line-height: 1.15;
   color: #fff;
 }
 .packages-promo-sub {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   opacity: 0.92;
   margin: 4px 0 0;
   color: #ffe0e0;
@@ -2605,14 +2610,14 @@ img.img-skel {
   background: #fff;
   color: #c0392b;
   border: none;
-  border-radius: 26px;
-  padding: 12px 24px;
+  border-radius: 28px;
+  padding: 14px 28px;
   font-weight: 800;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   cursor: pointer;
   font-family: inherit;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
   flex: none;
   white-space: nowrap;
   animation: cta-glow 2.5s ease-in-out infinite;
@@ -2631,37 +2636,42 @@ img.img-skel {
 
 /* --- Smaller compact cards inside category rails --- */
 .fp-card-sm {
-  width: 50%;
-  max-width: 170px;
+  width: 42%;
+  max-width: 140px;
+  border-radius: 8px;
 }
 .fp-card-sm img {
-  height: 60px;
+  height: 48px;
+  border-radius: 6px;
 }
 .fp-card-sm .info {
-  padding: 4px 7px;
-  gap: 2px;
+  padding: 3px 5px;
+  gap: 1px;
 }
 .fp-card-sm .name {
-  font-size: 0.7rem;
-  line-height: 1.2;
+  font-size: 0.62rem;
+  line-height: 1.15;
+  max-height: 2.3em;
+  overflow: hidden;
 }
 .fp-card-sm .desc {
   font-size: 0.58rem;
   display: none;
 }
 .fp-card-sm .price {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
 }
 .fp-card-sm .card-actions {
-  margin-top: 2px;
+  margin-top: 1px;
 }
 .fp-card-sm .card-actions .card-add-btn {
-  font-size: 0.65rem;
-  padding: 4px 8px;
+  font-size: 0.58rem;
+  padding: 3px 6px;
+  border-radius: 6px;
 }
 .fp-card-sm .size-pill {
-  font-size: 0.58rem;
-  padding: 1px 5px;
+  font-size: 0.52rem;
+  padding: 1px 4px;
 }
 .fp-card-sm .size-pill.selected {
   background: #e74c3c;
@@ -2707,11 +2717,11 @@ img.img-skel {
 /* Narrower cards on wider screens */
 @media (min-width: 520px) {
   .fp-card-sm {
-    width: 30%;
-    max-width: 200px;
+    width: 24%;
+    max-width: 160px;
   }
   .fp-card-sm img {
-    height: 66px;
+    height: 52px;
   }
   .fp-card-sm .desc {
     display: block;
