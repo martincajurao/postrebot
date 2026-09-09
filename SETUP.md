@@ -104,11 +104,9 @@ Then in Meta:
 ## 6. Enable Messaging on the Page
 
 1. In Messenger settings → **Built-in NPP (Get Started button)** → enable it, and add a **postback** with payload `GET_STARTED` (the bot's main menu handles this payload).
-2. **Persistent Menu** (recommended — gives users a permanent, always-on shortcut bar): add postback payloads:
-   - "🛒 Order Now" → `MENU_ORDER`
-   - "🎁 Packages" → `MENU_PACKAGES`
-   - "📅 Reservation" → `MENU_RESERVE`
-   - "🛒 My Cart" → `MENU_CART`
+2. **Persistent Menu** (recommended — gives users a permanent, always-on shortcut bar; the server registers it automatically on every boot via `setPersistentMenu` and keeps it alive with a periodic re-registration):
+   - "🛒 Browse Our Menu" → web-url shortcut that opens the webview store
+   - "📞 Contact Us" → `MENU_CONTACT`
 
 > The in-chat **main menu** shows 4 primary options (View Menu, Order Now, Food Packs,
 > Packages) plus shortcut chips (Cart, Track Order, Reservation, History, Contact).

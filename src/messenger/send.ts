@@ -344,7 +344,7 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
 
   const menuButton: any = {
     type: 'web_url',
-    title: '🛍️ Order Online',
+    title: '🛒 Browse Our Menu',
     url: webviewUrl,
     webview_height_ratio: 'full',
   };

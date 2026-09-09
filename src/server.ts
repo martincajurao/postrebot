@@ -147,7 +147,7 @@ app.listen(PORT, async () => {
       const ok = await whitelistWebviewDomain(base);
       console.log(`[boot] whitelistWebviewDomain resolved: ${ok}`);
 
-      // Register persistent menu (☰ "Order Online" entry) after whitelist is established
+      // Register persistent menu (☰ "Browse Our Menu" entry) after whitelist is established
       console.log(`[boot] registering persistent menu for: ${base}`);
       const menuOk = await setPersistentMenu(base);
       console.log(`[boot] setPersistentMenu resolved: ${menuOk}`);
