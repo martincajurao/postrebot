@@ -322,7 +322,7 @@ async function mainMenu(psid: string) {
     const whitelisted = await ensureWebviewWhitelisted(webviewLink, { force: true });
     console.log(`[mainMenu] WHITELIST STATUS: ${whitelisted}`);
     // Send a web_url button directly in the welcome message - opens WebView in one tap
-    const result = await sendUrlButton(psid, '🍽️ Welcome to Postre Food Products!\n\nTap the button below to browse our Menu & Packages!:', '🛍️ Open Store Now!', webviewLink);
+    const result = await sendUrlButton(psid, '🍽️ Welcome to Postre Food Products!\n\nTap the button below to browse our Menu & Packages!:', '🛒 Browse Our Menu', webviewLink);
     console.log(`[mainMenu] sendUrlButton RESULT: ok=${result.ok}, status=${result.status}, body=${result.body}`);
     if (!result.ok) {
       console.error(`[mainMenu] WEBVIEW BUTTON FAILED: ${result.body}`);
@@ -333,7 +333,7 @@ async function mainMenu(psid: string) {
   }
   // Quick replies for actions NOT available in the webview
   return sendQuickReplies(psid, 'Or choose an option below:', [
-    { title: '🛍️ Open Store Now!', payload: 'WELCOME' },
+    { title: '🛒 Browse Our Menu', payload: 'WELCOME' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
@@ -345,7 +345,7 @@ async function mainMenu(psid: string) {
  */
 function showMenuOptions(psid: string) {
   return sendQuickReplies(psid, '🍽️ What would you like to do?', [
-    { title: '🛍️ Open Store Now!', payload: 'WELCOME' },
+    { title: '🛒 Browse Our Menu', payload: 'WELCOME' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }
