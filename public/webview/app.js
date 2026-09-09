@@ -2300,7 +2300,11 @@ function setMapPin(latlng, fromGps) {
   }
 }
 
-/** GPS button — locate the device, pin it on the map and reverse-geocode it. */
+/** GPS button — locate the device, pin it on the map and reverse-geocode it.
+ *  Robust against slow/blocked geolocation: races the native API against a
+ *  short timeout, and always (always) re-enables the button — even when the
+ *  Geocoder hangs. On any failure the map pans to the store so the customer
+ *  can tap their spot instead. */
 function useCurrentLocation() {
   hideLocError();
   const btn = $id('loc-gps-btn');
@@ -2312,43 +2316,108 @@ function useCurrentLocation() {
   // the guaranteed fallback there.
   if (!navigator.geolocation || !window.isSecureContext) {
     showLocError('Location services aren\u2019t available here — tap your spot on the map below instead.');
+    focusMap();
     return;
   }
 
   btn.disabled = true;
   label.textContent = 'Getting your location…';
-  const resetBtn = () => { btn.disabled = false; label.textContent = 'Use my current location'; };
 
-  navigator.geolocation.getCurrentPosition(async (pos) => {
-    const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    if (mapAvailable()) {
-      setMapPin(coords, true);
-      googleMap.setCenter({ lat: coords.lat, lng: coords.lng });
-      googleMap.setZoom(16);
-    } else {
-      pendingCoords = coords;
-      updateLocConfirmState();
-    }
-    try {
-      const address = await reverseGeocode(coords.lat, coords.lng);
-      $id('loc-address').value = address;
-      updateLocConfirmState();
-      showToast('📍 Location found — check it and confirm');
-    } catch (e) {
-      console.warn('[webview] reverse geocode failed:', e && e.message);
-      // GPS worked but naming the address didn't — keep the pin/coords and
-      // let the customer complete the address manually.
-      showLocError('We got your position but couldn\u2019t name the address — please complete it below.');
-      $id('loc-address').focus();
-    }
+  // Safety net: no matter what happens (slow GPS, hung Geocoder, thrown error),
+  // the button always recovers after MAX_WAIT ms so the customer is never stuck.
+  const MAX_WAIT = 10000;
+  let settled = false;
+  const resetBtn = () => {
+    if (settled) return;
+    settled = true;
+    btn.disabled = false;
+    label.textContent = 'Use my current location';
+  };
+  const safetyNet = setTimeout(resetBtn, MAX_WAIT);
+
+  // RACE: native geolocation vs. a shorter custom timeout. The first one to
+  // settle wins; the loser is ignored. This prevents the browser's slow
+  // built-in timeout (or an indefinite hang) from trapping the customer.
+  const GPS_TIMEOUT_MS = 7000;
+  let gpsSettled = false;
+  const onGpsDone = () => { gpsSettled = true; };
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      onGpsDone();
+      if (settled) return; // custom timeout already fired — abandon
+      clearTimeout(safetyNet);
+      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      if (mapAvailable()) {
+        setMapPin(coords, true);
+        googleMap.setCenter({ lat: coords.lat, lng: coords.lng });
+        googleMap.setZoom(16);
+      } else {
+        pendingCoords = coords;
+        pinSource = 'gps';
+        updateLocConfirmState();
+      }
+      // Reverse-geocode with its own short timeout so a hung Geocoder can't
+      // trap the customer either. If it fails, keep the pin and let them type.
+      try {
+        const address = await Promise.race([
+          reverseGeocode(coords.lat, coords.lng),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('geocode-timeout')), 5000)),
+        ]);
+        if (settled) return;
+        $id('loc-address').value = address;
+        updateLocConfirmState();
+        showToast('📍 Location found — check it and confirm');
+      } catch (e) {
+        console.warn('[webview] reverse geocode failed/timeout:', e && e.message);
+        showLocError('We got your position but couldn\u2019t name the address — please complete it below.');
+        $id('loc-address').focus();
+      }
+      resetBtn();
+    },
+    (err) => {
+      onGpsDone();
+      if (settled) return; // custom timeout already fired — abandon
+      clearTimeout(safetyNet);
+      resetBtn();
+      console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
+      if (err && err.code === 1) {
+        showLocError('Location permission was denied — tap your spot on the map below instead.');
+      } else if (err && err.code === 3) {
+        showLocError('Getting your location timed out — try again or tap the map below.');
+      } else {
+        showLocError('Could not get your location — tap your spot on the map below instead.');
+      }
+      // Recover gracefully: pan to store and let them tap the map.
+      focusMap();
+    },
+    { enableHighAccuracy: false, timeout: GPS_TIMEOUT_MS, maximumAge: 60000 },
+  );
+
+  // Custom short timeout: if native GPS hasn't responded in GPS_TIMEOUT_MS,
+  // fire this BEFORE the browser's own timeout so the customer recovers faster.
+  setTimeout(() => {
+    if (gpsSettled || settled) return;
+    // Abort the native call is not possible, but we abandon its callback.
+    clearTimeout(safetyNet);
     resetBtn();
-  }, (err) => {
-    resetBtn();
-    console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
-    if (err && err.code === 1) showLocError('Location permission was denied — tap your spot on the map below instead.');
-    else if (err && err.code === 3) showLocError('Getting your location timed out — try again or tap the map below.');
-    else showLocError('Could not get your location — tap your spot on the map below instead.');
-  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+    console.warn('[webview] geolocation custom timeout fired');
+    showLocError('Getting your location is taking too long — tap your spot on the map below, or try again.');
+    focusMap();
+  }, GPS_TIMEOUT_MS);
+}
+
+/** Pan the map to the store and nudge the customer to tap their spot. */
+function focusMap() {
+  if (mapAvailable()) {
+    googleMap.setCenter({ lat: STORE_LOCATION.lat, lng: STORE_LOCATION.lng });
+    googleMap.setZoom(14);
+  }
+  // Scroll the map into view inside the sheet so it's obvious what to do next.
+  const mapEl = $id('loc-map');
+  if (mapEl && mapEl.scrollIntoView) {
+    try { mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* non-fatal */ }
+  }
 }
 
 /** Reverse-geocode coordinates into a readable address (Google Geocoder). */
