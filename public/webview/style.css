@@ -2361,3 +2361,197 @@ img.img-skel {
   from { transform: scale(0.92); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+
+/* === FoodPanda-style rails (horizontal snap carousels) === */
+/* Shared horizontal rail: swipe + scroll-snap, hidden scrollbar, with a
+   peek of the next card. overscroll-behavior-x stops the swipe from
+   triggering the webview's back gesture. */
+.fp-rail {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
+  scroll-padding-left: 2px;
+  padding: 4px 2px 8px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.fp-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.fp-rail > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+/* Empty state inside a rail must not be squeezed into a flex item. */
+.fp-rail .empty-state {
+  width: 100%;
+  flex: 1 1 auto;
+  padding: 30px 20px;
+}
+
+/* --- Circular category rail (home menu) --- */
+.fp-cat {
+  width: 78px;
+  text-align: center;
+  cursor: pointer;
+  animation: card-enter 0.4s ease-out backwards;
+}
+
+.fp-cat:nth-child(1) { animation-delay: 0.05s; }
+.fp-cat:nth-child(2) { animation-delay: 0.1s; }
+.fp-cat:nth-child(3) { animation-delay: 0.15s; }
+.fp-cat:nth-child(4) { animation-delay: 0.2s; }
+.fp-cat:nth-child(5) { animation-delay: 0.25s; }
+.fp-cat:nth-child(6) { animation-delay: 0.3s; }
+
+.fp-cat-icon {
+  width: 62px;
+  height: 62px;
+  margin: 0 auto 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.7rem;
+  line-height: 1;
+  background: #fff;
+  border: 2px solid #f0f0f0;
+  border-radius: 50%;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07);
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.fp-cat:active .fp-cat-icon {
+  transform: scale(0.9);
+  border-color: #e74c3c;
+  background: #fef5f4;
+}
+
+.fp-cat-name {
+  display: block;
+  font-weight: 600;
+  font-size: 0.72rem;
+  color: #2d3436;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.fp-cat-count {
+  display: block;
+  font-size: 0.62rem;
+  color: #b2bec3;
+  margin-top: 2px;
+}
+
+/* --- Wide dish/package cards inside a rail --- */
+.fp-card {
+  width: 76%;
+  max-width: 300px;
+}
+
+.fp-card img {
+  height: 145px;
+}
+
+.fp-card.fp-card-tall img {
+  height: 175px;
+}
+
+/* Wider screens: show more of the rail, larger circular categories */
+@media (min-width: 520px) {
+  .fp-card {
+    width: 46%;
+    max-width: 320px;
+  }
+
+  .fp-card.fp-card-tall {
+    width: 60%;
+  }
+
+  .fp-cat {
+    width: 92px;
+  }
+
+  .fp-cat-icon {
+    width: 72px;
+    height: 72px;
+    font-size: 2rem;
+  }
+}
+
+/* --- "More to Explore" promo tiles (previously unstyled) --- */
+.promo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.promo-tile {
+  background: linear-gradient(145deg, #ffffff 0%, #fafbfc 100%);
+  border: 2px solid #f0f0f0;
+  border-radius: 16px;
+  padding: 18px 14px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s ease;
+}
+
+.promo-tile:active {
+  transform: scale(0.96);
+  border-color: #e74c3c;
+  background: linear-gradient(145deg, #fef5f4 0%, #fff 100%);
+}
+
+.promo-icon {
+  font-size: 1.6rem;
+  margin-bottom: 8px;
+  line-height: 1;
+}
+
+.promo-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #2d3436;
+}
+
+.promo-sub {
+  font-size: 0.7rem;
+  color: #999;
+  margin-top: 2px;
+}
+
+/* --- Store info card (previously unstyled) --- */
+.store-info-card {
+  margin-top: 20px;
+  background: #fff;
+  border: 2px solid #f0f0f0;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.store-info-card h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #2d3436;
+  margin-bottom: 10px;
+}
+
+.store-info-card #store-info {
+  font-size: 0.85rem;
+  color: #636e72;
+  line-height: 1.9;
+}
+
+.store-info-card #store-info a {
+  color: #e74c3c;
+  text-decoration: none;
+  font-weight: 600;
+}

@@ -563,15 +563,17 @@ function renderCategories() {
   if (categories.length === 0) {
     container.innerHTML = '<div class="empty-state"><div class="icon">🍽️</div><p>No categories available right now.</p></div>';
   } else {
+    // FoodPanda-style circular category rail (horizontal snap carousel).
     container.innerHTML = categories.map((c) => {
       const count = products.filter((p) => Number(p.category_id) === Number(c.id)).length;
-      return `<div class="category-card" onclick="showProducts(${c.id})">
-        <div class="icon">${categoryIcon(c.name)}</div>
-        <div class="name">${esc(c.name)}</div>
-        <div class="count">${count} ${count === 1 ? 'item' : 'items'}</div>
+      return `<div class="fp-cat" onclick="showProducts(${c.id})">
+        <span class="fp-cat-icon">${categoryIcon(c.name)}</span>
+        <span class="fp-cat-name">${esc(c.name)}</span>
+        <span class="fp-cat-count">${count} ${count === 1 ? 'item' : 'items'}</span>
       </div>`;
     }).join('');
   }
+  renderPopularDishes();
   const pp = $id('promo-packages');
   if (pp) pp.textContent = packages.length > 0
     ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' available'
@@ -645,6 +647,43 @@ function selectCardSize(event, kind, id, size) {
   }
 }
 
+/** Shared product card markup (category grid + "Popular right now" carousel).
+ * extraCls adds a modifier class, e.g. 'fp-card' for the horizontal rail. */
+function productCardHtml(p, extraCls) {
+  const unavailable = Number(p.unavailable) === 1;
+  const vs = productVariants(p);
+  const selSize = cardSizes['product-' + p.id] || (vs[0] ? vs[0].size : null);
+  // Sizes inline in the price row to save vertical space on the card.
+  const sizePills = vs.length > 1
+    ? vs.map((v) =>
+        `<button class="size-pill${v.size === selSize ? ' selected' : ''}" onclick="selectCardSize(event, 'product', ${p.id}, '${esc(v.size)}')">${esc(v.size)}</button>`
+      ).join('')
+    : '';
+  return `<div class="product-card${extraCls ? ' ' + extraCls : ''}${unavailable ? ' unavailable' : ''}" ${unavailable ? '' : `onclick="showProductDetail(${p.id})"`}>
+    ${imageHtml(p.photo_url, p.name)}
+    <div class="info">
+      <div class="name">${esc(p.name)}</div>
+      ${p.description ? `<div class="desc">${esc(p.description)}</div>` : ''}
+      <div class="price-row">
+        <span class="price card-price">${productCardPrice(p, selSize)}</span>
+        ${sizePills ? `<span class="card-sizes card-sizes-inline">${sizePills}</span>` : ''}
+      </div>
+      ${unavailable ? '' : `<div class="card-actions"><button class="card-add-btn" onclick="addToCartProductQuick(${p.id}, event)">+ Add to Cart</button></div>`}
+      ${unavailable ? '<span class="badge-flag">Unavailable</span>' : ''}
+    </div>
+  </div>`;
+}
+
+/** FoodPanda-style "Popular right now" horizontal dish carousel on the home menu. */
+function renderPopularDishes() {
+  const container = $id('popular-list');
+  const header = $id('popular-section');
+  if (!container) return;
+  const list = products.filter((p) => Number(p.unavailable) !== 1).slice(0, 10);
+  if (header) header.style.display = list.length > 0 ? '' : 'none';
+  container.innerHTML = list.map((p) => productCardHtml(p, 'fp-card')).join('');
+}
+
 function showProducts(categoryId) {
   currentCategoryId = Number(categoryId);
   const cat = categories.find((c) => Number(c.id) === currentCategoryId);
@@ -662,30 +701,7 @@ function showProducts(categoryId) {
     return;
   }
 
-  container.innerHTML = list.map((p) => {
-    const unavailable = Number(p.unavailable) === 1;
-    const vs = productVariants(p);
-    const selSize = cardSizes['product-' + p.id] || (vs[0] ? vs[0].size : null);
-    // Sizes inline in the price row to save vertical space on the card.
-    const sizePills = vs.length > 1
-      ? vs.map((v) =>
-          `<button class="size-pill${v.size === selSize ? ' selected' : ''}" onclick="selectCardSize(event, 'product', ${p.id}, '${esc(v.size)}')">${esc(v.size)}</button>`
-        ).join('')
-      : '';
-    return `<div class="product-card${unavailable ? ' unavailable' : ''}" ${unavailable ? '' : `onclick="showProductDetail(${p.id})"`}>
-      ${imageHtml(p.photo_url, p.name)}
-      <div class="info">
-        <div class="name">${esc(p.name)}</div>
-        ${p.description ? `<div class="desc">${esc(p.description)}</div>` : ''}
-        <div class="price-row">
-          <span class="price card-price">${productCardPrice(p, selSize)}</span>
-          ${sizePills ? `<span class="card-sizes card-sizes-inline">${sizePills}</span>` : ''}
-        </div>
-        ${unavailable ? '' : `<div class="card-actions"><button class="card-add-btn" onclick="addToCartProductQuick(${p.id}, event)">+ Add to Cart</button></div>`}
-        ${unavailable ? '<span class="badge-flag">Unavailable</span>' : ''}
-      </div>
-    </div>`;
-  }).join('');
+  container.innerHTML = list.map((p) => productCardHtml(p)).join('');
   showView('view-products');
 }
 
@@ -785,7 +801,8 @@ function showPackages() {
   const customPkgs = packages.filter((p) => p.is_custom);
   const firstCustom = customPkgs.length > 0 ? [customPkgs[0]] : [];
   const sorted = packages.filter((p) => !p.is_custom).concat(firstCustom).slice();
-  container.innerHTML = sorted.map((pkg) => {
+  // FoodPanda-style horizontal snap carousel (peek of the next package card).
+  container.innerHTML = `<div class="fp-rail fp-card-rail">` + sorted.map((pkg) => {
     const saved = Number(pkg.discount) > 0;
     const selSize = cardSizes["package-" + pkg.id] || "M";
 
@@ -801,7 +818,7 @@ function showPackages() {
       ? `<div class="pkg-dishes">${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` +${names.length - 3} more` : ""}</div>`
       : "";
 
-    return `<div class="product-card pkg-card-tall">
+    return `<div class="product-card fp-card fp-card-tall">
       ${imageHtml(pkg.photo_url, pkg.name)}
       <div class="info">
         <div class="name">${esc(pkg.name)}</div>
@@ -818,7 +835,7 @@ function showPackages() {
         </div>
       </div>
     </div>`;
-  }).join('');
+  }).join('') + `</div>`;
   showView('view-packages');
 }
 
@@ -1325,8 +1342,9 @@ function showFoodPacks() {
     showView('view-food-packs');
     return;
   }
-  container.innerHTML = foodPacks.map((fp) => `
-    <div class="product-card" onclick="showFoodPackDetail(${fp.id})">
+  // FoodPanda-style horizontal snap carousel (peek of the next food pack).
+  container.innerHTML = `<div class="fp-rail fp-card-rail">` + foodPacks.map((fp) => `
+    <div class="product-card fp-card" onclick="showFoodPackDetail(${fp.id})">
       ${imageHtml(fp.photo_url, fp.name)}
       <div class="info">
         <div class="name">${esc(fp.name)}</div>
@@ -1334,7 +1352,7 @@ function showFoodPacks() {
         ${fp.serves ? `<div class="serves">Serves ${esc(fp.serves)}</div>` : ''}
         <div class="price">${formatMoney(fp.price)}</div>
       </div>
-    </div>`).join('');
+    </div>`).join('') + `</div>`;
   showView('view-food-packs');
 }
 
