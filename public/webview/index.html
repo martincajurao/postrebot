@@ -106,12 +106,29 @@
     <main class="main hidden" id="main-content">
       <!-- Categories view -->
       <section id="view-categories" class="view active">
-        <div class="section-header">
-          <h2>Our Menu</h2>
-          <p class="section-sub">Choose a category to start ordering</p>
+        <!-- ====== Packages-first promo banner (pinned to top of home) ====== -->
+        <div class="cat-packages-promo" id="cat-packages-promo" style="display:none">
+          <div class="packages-promo-inner">
+            <div class="packages-promo-badge">🔥 Best Value</div>
+             <div class="packages-promo-featured">✨ Featured</div>
+            <div class="packages-promo-text">
+              <div class="packages-promo-title">Packages &amp; Bundles</div>
+              <div class="packages-promo-sub" id="packages-promo-sub">Save more when you order combos</div>
+            </div>
+            <button class="packages-promo-cta fp-btn fp-btn-primary" onclick="showPackages()">
+              View Packages &nbsp;›
+            </button>
+          </div>
         </div>
-        <div id="categories-list" class="fp-rail fp-cat-rail"></div>
+
+        <div class="section-header section-spaced">
+          <h2>Our Menu</h2>
+          <p class="section-sub">Tap a dish to see sizes &amp; add to cart</p>
+        </div>
+
+        <!-- ====== Per-category dish carousels ====== -->
         <div id="category-sections"></div>
+
         <div class="section-header section-spaced">
           <h2>More to Explore</h2>
         </div>

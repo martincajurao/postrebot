@@ -558,22 +558,17 @@ async function loadOrders() {
 
 // ---------- Categories ----------
 function renderCategories() {
-  const container = $id('categories-list');
-  if (!container) return;
-  if (categories.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">🍽️</div><p>No categories available right now.</p></div>';
-  } else {
-    // FoodPanda-style circular category rail (horizontal snap carousel).
-    container.innerHTML = categories.map((c) => {
-      const count = products.filter((p) => Number(p.category_id) === Number(c.id)).length;
-      return `<div class="fp-cat" onclick="showProducts(${c.id})">
-        <span class="fp-cat-icon">${categoryIcon(c.name)}</span>
-        <span class="fp-cat-name">${esc(c.name)}</span>
-        <span class="fp-cat-count">${count} ${count === 1 ? 'item' : 'items'}</span>
-      </div>`;
-    }).join('');
-  }
+  // Category rail removed — customers now land on the packages-first home.
   renderCategorySections();
+  // Wire up the packages promo banner at the top of the home.
+  const promo = $id('cat-packages-promo');
+  if (promo) {
+    const sub = $id('packages-promo-sub');
+    if (sub) sub.textContent = packages.length > 0
+      ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' — save more!'
+      : 'Save more when you order combos';
+    promo.style.display = packages.length > 0 ? 'block' : 'none';
+  }
   const pp = $id('promo-packages');
   if (pp) pp.textContent = packages.length > 0
     ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' available'
@@ -682,11 +677,11 @@ function renderCategorySections() {
     const list = products.filter((p) => Number(p.category_id) === Number(c.id));
     if (list.length === 0) return '';
     // Cap the rail length — "See all" opens the full category grid.
-    const cards = list.slice(0, 12).map((p) => productCardHtml(p, 'fp-card')).join('');
+    const cards = list.slice(0, 12).map((p) => productCardHtml(p, 'fp-card fp-card-sm')).join('');
     return `<div class="fp-section">
       <div class="fp-section-header">
-        <div>
-          <h3>${categoryIcon(c.name)} ${esc(c.name)}</h3>
+        <div class="fp-section-title-row">
+          <span class="fp-cat-label">${categoryIcon(c.name)} ${esc(c.name)}</span>
           <p class="fp-section-sub">${list.length} item${list.length === 1 ? '' : 's'}</p>
         </div>
         <button type="button" class="fp-see-all" onclick="showProducts(${c.id})">See all ›</button>
@@ -2089,14 +2084,25 @@ function mapAvailable() {
   return typeof L !== 'undefined' && !!$id('loc-map') && !mapInitFailed;
 }
 
-/** Show the mandatory location modal. */
+/** Show the mandatory location modal. Always shown on every webview open so
+ * customers can review or update their delivery location. When a location was
+ * already saved this session, pre-fill the address and re-drop the pin on the
+ * map so returning customers only need to re-confirm (not re-type). */
 function showLocationGate() {
   const gate = $id('location-gate');
   if (!gate) return;
+  const mainContent = $id('main-content');
+  if (mainContent) mainContent.classList.add('hidden');
   // Prefill from the address remembered at checkout so repeat customers
   // only need to drop/keep the pin and confirm.
   const remembered = loadCustomerData();
   if (remembered && remembered.address) $id('loc-address').value = remembered.address;
+  // Pre-fill from a previously saved gate location too, and restore the pin
+  // on the map so the customer sees their saved spot visually.
+  const saved = getSavedLocation();
+  if (saved && saved.address && !$id('loc-address').value) {
+    $id('loc-address').value = saved.address;
+  }
   gate.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
 
@@ -2109,6 +2115,28 @@ function showLocationGate() {
     // Defer to the next frame so #loc-map has real dimensions once the
     // sheet is visible — Leaflet measures the container at init time.
     requestAnimationFrame(() => initLocationMap());
+    // When a location was already saved with coordinates, re-drop the pin so
+    // the customer sees where they're set to receive the order.
+    if (saved && saved.lat != null && saved.lng != null) {
+      const coords = { lat: saved.lat, lng: saved.lng };
+      // initLocationMap() may not have created locMap yet when this runs;
+      // if the map isn't ready, the pin will be restored when it is (see
+      // the requestAnimationFrame below). Otherwise drop it immediately.
+      if (locMap) {
+        setMapPin(coords, false);
+        locMap.setView([coords.lat, coords.lng], 15);
+      } else {
+        const tryRestore = () => {
+          if (locMap) {
+            setMapPin(coords, false);
+            locMap.setView([coords.lat, coords.lng], 15);
+          } else {
+            setTimeout(tryRestore, 150);
+          }
+        };
+        setTimeout(tryRestore, 200);
+      }
+    }
   }
 
   // Re-validate the confirm button as the address is typed.
@@ -2154,6 +2182,7 @@ function initLocationMap() {
 function hideLocationGate() {
   const gate = $id('location-gate');
   if (gate) gate.classList.add('hidden');
+  if (mainContent) mainContent.classList.remove('hidden');
   document.body.style.overflow = '';
 }
 
@@ -2451,9 +2480,11 @@ async function init() {
   renderCategories();
   showCategories();
 
-  // First-run gate: a customer must set a delivery location before they can
-  // use the app. Returning customers with a saved location skip straight home.
-  if (!getSavedLocation()) showLocationGate();
+  // Location gate: customers confirm their delivery location before using the app.
+  // This runs on EVERY webview open (not just first run) so the customer always
+  // has a chance to review or update their location. A previously saved location
+  // is pre-filled so returning customers only need to re-confirm, not re-type.
+  showLocationGate();
 }
 
 function retryLoad() {
