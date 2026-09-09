@@ -2335,7 +2335,7 @@ img.img-skel {
 
 /* --- Map pin picker (Google Maps) --- */
 .loc-map-wrap {
-  margin: 14px 0 4px;
+  margin: 10px 0 4px;
   position: relative;
 }
 
@@ -2348,33 +2348,71 @@ img.img-skel {
   background: #eef2f5;
 }
 
-/* Google Maps loading state — shown while the API boots. */
-.loc-map-loading #loc-map {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #eef2f5;
-}
-
-.loc-map-loading #loc-map::after {
-  content: '';
-  width: 28px;
-  height: 28px;
-  border: 3px solid #e9ecef;
-  border-top-color: #e74c3c;
-  border-radius: 50%;
-  animation: loc-map-spin 0.8s linear infinite;
-}
-
-@keyframes loc-map-spin {
-  to { transform: rotate(360deg); }
-}
-
 /* The map owns its own gestures — don't let map drags scroll the sheet. */
-.loc-gate-card .gm-style {
-  font: inherit;
+.loc-gate-card #loc-map {
   touch-action: none;
   border-radius: 10px;
+}
+
+/* Google Places dropdown */
+.pac-container {
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-family: inherit;
+  margin-top: 4px;
+  z-index: 6000 !important;
+}
+
+.pac-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.pac-item:hover,
+.pac-item-selected {
+  background: #fef5f4;
+}
+
+.pac-icon {
+  margin-top: 4px;
+}
+
+/* --- Google Places address search --- */
+.loc-search-wrap {
+  position: relative;
+  margin: 10px 0;
+}
+
+#loc-search {
+  width: 100%;
+  padding: 11px 14px;
+  border: 2px solid #e9ecef;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: #f8f9fa;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#loc-search:focus {
+  outline: none;
+  border-color: #e74c3c;
+  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.12);
+  background: #fff;
+}
+
+/* (Google Places Autocomplete manages its own suggestion dropdown) */
+  margin-top: 2px;
+}
+
+.loc-search-status {
+  padding: 12px 14px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: #636e72;
 }
 
 .loc-map-hint {
