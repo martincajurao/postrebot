@@ -573,7 +573,7 @@ function renderCategories() {
       </div>`;
     }).join('');
   }
-  renderPopularDishes();
+  renderCategorySections();
   const pp = $id('promo-packages');
   if (pp) pp.textContent = packages.length > 0
     ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' available'
@@ -674,14 +674,27 @@ function productCardHtml(p, extraCls) {
   </div>`;
 }
 
-/** FoodPanda-style "Popular right now" horizontal dish carousel on the home menu. */
-function renderPopularDishes() {
-  const container = $id('popular-list');
-  const header = $id('popular-section');
+/** FoodPanda-style home: one horizontal dish carousel per menu category. */
+function renderCategorySections() {
+  const container = $id('category-sections');
   if (!container) return;
-  const list = products.filter((p) => Number(p.unavailable) !== 1).slice(0, 10);
-  if (header) header.style.display = list.length > 0 ? '' : 'none';
-  container.innerHTML = list.map((p) => productCardHtml(p, 'fp-card')).join('');
+  const html = categories.map((c) => {
+    const list = products.filter((p) => Number(p.category_id) === Number(c.id));
+    if (list.length === 0) return '';
+    // Cap the rail length — "See all" opens the full category grid.
+    const cards = list.slice(0, 12).map((p) => productCardHtml(p, 'fp-card')).join('');
+    return `<div class="fp-section">
+      <div class="fp-section-header">
+        <div>
+          <h3>${categoryIcon(c.name)} ${esc(c.name)}</h3>
+          <p class="fp-section-sub">${list.length} item${list.length === 1 ? '' : 's'}</p>
+        </div>
+        <button type="button" class="fp-see-all" onclick="showProducts(${c.id})">See all ›</button>
+      </div>
+      <div class="fp-rail fp-card-rail">${cards}</div>
+    </div>`;
+  }).join('');
+  container.innerHTML = html || '<div class="empty-state"><div class="icon">🍽️</div><p>Menu items coming soon.</p></div>';
 }
 
 function showProducts(categoryId) {

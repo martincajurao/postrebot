@@ -2486,6 +2486,57 @@ img.img-skel {
   }
 }
 
+/* --- Per-category carousel sections on the home menu --- */
+.fp-section {
+  margin-bottom: 22px;
+}
+
+.fp-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 4px;
+}
+
+.fp-section-header h3 {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #2d3436;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.3;
+}
+
+.fp-section-sub {
+  font-size: 0.72rem;
+  color: #999;
+  margin-top: 2px;
+}
+
+.fp-see-all {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #e74c3c;
+  font-weight: 700;
+  font-size: 0.78rem;
+  font-family: inherit;
+  padding: 6px 2px;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.fp-see-all:active {
+  transform: scale(0.95);
+  opacity: 0.7;
+}
+
+.fp-section .fp-rail {
+  margin-bottom: -4px;
+}
+
 /* --- "More to Explore" promo tiles (previously unstyled) --- */
 .promo-grid {
   display: grid;
