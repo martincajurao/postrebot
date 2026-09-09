@@ -330,28 +330,20 @@ export function whitelistWebviewDomain(buttonUrl: string, opts: { force?: boolea
 }
 
 /**
- * Register a persistent menu (☰ next to the composer) with the web store entry
- * point, so customers always have an in-Messenger way to open the webview.
- * Uses the same whitelisting gate as message buttons.
+ * Keep the persistent menu (☰ next to the composer) in sync with what we want.
+ * Messenger caches the persistent menu aggressively and re-posting alone does
+ * not always replace a previously-registered one, so this is self-healing:
+ *   1. GET the menu Meta currently has registered.
+ *   2. If it already matches the desired buttons (Browse Our Menu / How to
+ *      Order / Contact Us) do nothing.
+ *   3. Otherwise CLEAR it (empty call_to_actions) and re-register the desired
+ *      one — this permanently drops stale entries (e.g. the old "Order Online"
+ *      / "📅 Reservation" buttons) instead of letting them linger.
  */
 export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean> {
   if (!PAGE_TOKEN) {
     console.log('[messenger] skip persistent menu (no PAGE_ACCESS_TOKEN configured)');
     return false;
-  }
-
-  // Messenger caches the persistent menu aggressively. Re-posting a new menu
-  // does NOT always replace a previously registered one, so the first time this
-  // process runs we explicitly CLEAR the menu (empty call_to_actions) and then
-  // set the current one. This permanently drops any stale entries (e.g. the old
-  // "📅 Reservation" button) that users still see.
-  if (!clearPersistentMenuOnce) {
-    clearPersistentMenuOnce = true;
-    try {
-      await postPersistentMenu({ persistent_menu: [{ locale: 'default', composer_input_disabled: false, call_to_actions: [] }] });
-    } catch (e: any) {
-      console.error('[messenger] clear persistent menu error:', e?.message || e);
-    }
   }
 
   const webviewUrl = webviewBaseUrl.replace(/\/+$/, '') + '/webview';
@@ -368,27 +360,57 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
     menuButton.fallback_url = webviewUrl;
   }
 
+  const desired: any[] = [
+    menuButton,
+    { type: 'postback', title: '❓ How to Order', payload: 'MENU_HOWTO' },
+    { type: 'postback', title: '📞 Contact Us', payload: 'MENU_CONTACT' },
+  ];
+  const key = (b: any) => `${b.type}|${b.title}` + (b.payload ? `|${b.payload}` : '');
+  const desiredKeys = desired.map(key).sort();
+
+  // Compare against what Meta actually has registered (best effort).
+  let currentKeys: string[] = [];
+  try {
+    const res = await fetch(`https://graph.facebook.com/${GRAPH_API_VERSION}/me/messenger_profile?access_token=${PAGE_TOKEN}&fields=persistent_menu`, { method: 'GET' });
+    if (res.ok) {
+      const json = await res.json();
+      const locales = (json?.data?.[0]?.persistent_menu) || [];
+      const def = locales.find((e: any) => e.locale === 'default');
+      currentKeys = (def?.call_to_actions || []).map(key).sort();
+      console.log(`[setPersistentMenu] Meta currently has: [${currentKeys.join(', ')}]`);
+    } else {
+      console.error(`[setPersistentMenu] could not read current menu (${res.status}) — will force clear+set`);
+    }
+  } catch (e: any) {
+    console.error('[setPersistentMenu] read current menu failed:', e?.message || e);
+  }
+
   const payload = {
     persistent_menu: [
       {
         locale: 'default',
         composer_input_disabled: false,
-        call_to_actions: [
-          menuButton,
-          {
-            type: 'postback',
-            title: '❓ How to Order',
-            payload: 'MENU_HOWTO',
-          },
-          {
-            type: 'postback',
-            title: '📞 Contact Us',
-            payload: 'MENU_CONTACT',
-          },
-        ],
+        call_to_actions: desired,
       },
     ],
   };
+
+  if (JSON.stringify(currentKeys) === JSON.stringify(desiredKeys) && currentKeys.length > 0) {
+    console.log('[setPersistentMenu] persistent menu already up to date — no change needed.');
+    return true;
+  }
+
+  // Stale or missing menu — clear it first so Messenger drops the old cached
+  // buttons, then register the current one.
+  console.log('[setPersistentMenu] menu differs — clearing, then re-registering.');
+  try {
+    await postPersistentMenu({ persistent_menu: [{ locale: 'default', composer_input_disabled: false, call_to_actions: [] }] });
+  } catch (e: any) {
+    console.error('[setPersistentMenu] clear error:', e?.message || e);
+  }
+  // Let the clear propagate before re-adding the buttons.
+  await new Promise((r) => setTimeout(r, 1500));
+
   try {
     console.log(`[setPersistentMenu] POST persistent menu with messenger_extensions=${whitelisted} for ${webviewUrl}`);
     return await postPersistentMenu(payload);
@@ -397,9 +419,6 @@ export async function setPersistentMenu(webviewBaseUrl: string): Promise<boolean
     return false;
   }
 }
-
-/** True once this process has cleared the previously-registered persistent menu. */
-let clearPersistentMenuOnce = false;
 
 /** POST a persistent_menu payload to the Messenger Profile API. */
 async function postPersistentMenu(payload: any): Promise<boolean> {

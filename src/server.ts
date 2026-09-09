@@ -155,7 +155,7 @@ app.listen(PORT, async () => {
       // Keep the persistent menu ALWAYS active: re-assert it on a recurring
       // timer so a one-off Meta/network hiccup at boot (or a later API-side
       // remove) can never silently drop the ☰ popup until the next deploy.
-      const refreshMs = Math.max(5 * 60 * 1000, Number(process.env.PERSISTENT_MENU_REFRESH_MS || 6 * 60 * 60 * 1000));
+      const refreshMs = Math.max(5 * 60 * 1000, Number(process.env.PERSISTENT_MENU_REFRESH_MS || 30 * 60 * 1000));
       const registerMenu = async (backoffMs = refreshMs) => {
         try {
           const ok = await setPersistentMenu(base);
