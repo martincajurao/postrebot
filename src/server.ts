@@ -27,7 +27,7 @@ migrate()
 app.use('/webhook', messengerWebhook);
 app.post('/api/login', loginHandler);
 
-// PWA assets at root level (manifest, service worker, icons)
+// PWA assets at root level (manifest, service worksdsdser, icons)
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.json')) {
