@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260907-1">
+  <link rel="stylesheet" href="style.css?v=20260909-1">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -263,10 +263,42 @@
       </div>
     </nav>
 
+    <!-- Location gate — first-run modal: customers must set a delivery
+         location (FoodPanda-style) before the home menu unlocks. The saved
+         location feeds the delivery-fee calculation later (fee logic to come). -->
+    <div id="location-gate" class="loc-gate hidden" role="dialog" aria-modal="true" aria-labelledby="loc-gate-title">
+      <div class="loc-gate-card">
+        <div class="loc-gate-handle"></div>
+        <div class="loc-gate-icon">📍</div>
+        <h2 id="loc-gate-title">Where should we deliver?</h2>
+        <p class="loc-gate-sub">Set your location so your order reaches the right place. You only need to do this once.</p>
+
+        <button type="button" class="loc-gps-btn" id="loc-gps-btn" onclick="useCurrentLocation()">
+          <span class="loc-gps-icon">🧭</span>
+          <span id="loc-gps-label">Use my current location</span>
+        </button>
+
+        <div class="loc-divider"><span>or enter manually</span></div>
+
+        <div class="form-group">
+          <label for="loc-address">Complete address</label>
+          <textarea id="loc-address" rows="3" placeholder="House #, street, barangay, city"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="loc-landmark">Landmark (optional)</label>
+          <input type="text" id="loc-landmark" placeholder="e.g. near Sto. Tomas Chapel">
+        </div>
+
+        <p id="loc-gate-error" class="loc-gate-error hidden"></p>
+
+        <button type="button" class="btn btn-primary loc-confirm-btn" id="loc-confirm-btn" onclick="confirmLocation()">Confirm Location</button>
+      </div>
+    </div>
+
     <!-- Toast notification -->
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260907-1"></script>
+  <script src="app.js?v=20260909-1"></script>
 </body>
 </html>

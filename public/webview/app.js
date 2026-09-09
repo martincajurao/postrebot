@@ -2011,6 +2011,141 @@ function closeWebview() {
   setTimeout(() => { if (!window.closed) showCategories(); }, 300);
 }
 
+// ---------- Location gate (first-run modal) ----------
+// Customers must set a delivery location before the home menu unlocks —
+// FoodPanda-style. The saved location is kept per session in localStorage.
+// NOTE: the delivery fee itself is intentionally NOT computed yet — this
+// only collects and stores the address/coordinates it will later use.
+const LOCATION_KEY = () => 'webview_location_' + sessionId;
+
+/** Saved delivery location for this session (or null when not set yet). */
+function getSavedLocation() {
+  try {
+    const loc = JSON.parse(storageGet(LOCATION_KEY()) || 'null');
+    return loc && loc.address ? loc : null;
+  } catch { return null; }
+}
+
+function saveLocation(loc) {
+  try { storageSet(LOCATION_KEY(), JSON.stringify(loc)); } catch { /* non-fatal */ }
+}
+
+/** Show the mandatory location modal. */
+function showLocationGate() {
+  const gate = $id('location-gate');
+  if (!gate) return;
+  // Prefill from the address remembered at checkout so repeat customers
+  // only need to confirm.
+  const remembered = loadCustomerData();
+  if (remembered && remembered.address) $id('loc-address').value = remembered.address;
+  gate.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+/** Hide the location modal and restore page scrolling. */
+function hideLocationGate() {
+  const gate = $id('location-gate');
+  if (gate) gate.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+function showLocError(msg) {
+  const el = $id('loc-gate-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+function hideLocError() {
+  const el = $id('loc-gate-error');
+  if (el) el.classList.add('hidden');
+}
+
+// Coordinates captured by the GPS button and stored with the confirmed
+// address (kept for the future delivery-fee distance calculation).
+let pendingCoords = null;
+
+/** GPS button — locate the device and reverse-geocode it into an address. */
+function useCurrentLocation() {
+  hideLocError();
+  const btn = $id('loc-gps-btn');
+  const label = $id('loc-gps-label');
+  if (!btn || !label) return;
+
+  if (!navigator.geolocation) {
+    showLocError('Geolocation is not available on this device — please type your address below.');
+    return;
+  }
+
+  btn.disabled = true;
+  label.textContent = 'Getting your location…';
+  const resetBtn = () => { btn.disabled = false; label.textContent = 'Use my current location'; };
+
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    pendingCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    try {
+      const address = await reverseGeocode(pendingCoords.lat, pendingCoords.lng);
+      $id('loc-address').value = address;
+      showToast('📍 Location found — check it and confirm below');
+    } catch (e) {
+      console.warn('[webview] reverse geocode failed:', e && e.message);
+      // GPS worked but naming the address didn't — keep the coordinates and
+      // let the customer complete the address manually.
+      showLocError('We got your position but couldn\u2019t name the address — please complete it below.');
+      $id('loc-address').focus();
+    }
+    resetBtn();
+  }, (err) => {
+    resetBtn();
+    console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
+    if (err && err.code === 1) showLocError('Location permission was denied — please type your address below.');
+    else if (err && err.code === 3) showLocError('Getting your location timed out — try again or type your address below.');
+    else showLocError('Could not get your location — please type your address below.');
+  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+}
+
+/** Reverse-geocode coordinates into a readable address (OpenStreetMap). */
+async function reverseGeocode(lat, lng) {
+  const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1'
+    + '&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error('reverse geocode HTTP ' + res.status);
+  const data = await res.json();
+  const a = data.address || {};
+  const parts = [
+    a.house_number, a.road,
+    a.neighbourhood || a.suburb || a.quarter,
+    a.barangay || a.village || a.city_district,
+    a.city || a.municipality || a.town,
+    a.province,
+  ].filter(Boolean);
+  const text = parts.join(', ');
+  if (!text) throw new Error('reverse geocode returned no address');
+  return text;
+}
+
+/** Confirm button — validate and persist the delivery location, then unlock home. */
+function confirmLocation() {
+  hideLocError();
+  const address = (($id('loc-address') && $id('loc-address').value) || '').trim();
+  if (address.length < 5) {
+    showLocError('Please enter your complete address (house #, street, barangay, city).');
+    return;
+  }
+  const landmark = (($id('loc-landmark') && $id('loc-landmark').value) || '').trim();
+  saveLocation({
+    address,
+    landmark: landmark || null,
+    lat: pendingCoords ? pendingCoords.lat : null,
+    lng: pendingCoords ? pendingCoords.lng : null,
+    source: pendingCoords ? 'gps' : 'manual',
+    savedAt: new Date().toISOString(),
+  });
+  pendingCoords = null;
+  hideLocationGate();
+  showToast('📍 Location saved!');
+}
+
 // ---------- Init ----------
 /**
  * Ask MessengerExtensions for the current user's PSID (waits up to ~2.5s for the SDK).
@@ -2129,6 +2264,10 @@ async function init() {
   if (mainContent) mainContent.classList.remove('hidden');
   renderCategories();
   showCategories();
+
+  // First-run gate: a customer must set a delivery location before they can
+  // use the app. Returning customers with a saved location skip straight home.
+  if (!getSavedLocation()) showLocationGate();
 }
 
 function retryLoad() {

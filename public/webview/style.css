@@ -1287,7 +1287,7 @@ body {
   border-radius: 12px;
   font-size: 0.85rem;
   font-weight: 500;
-  z-index: 300;
+  z-index: 6000;
   animation: fadeInUp 0.3s ease;
   box-shadow: 0 8px 24px rgba(0,0,0,0.2);
   max-width: 90%;
@@ -2201,4 +2201,163 @@ img.img-skel {
     transform: scale(4);
     opacity: 0;
   }
+}
+
+/* === Location gate (first-run delivery-location modal) === */
+/* Shown before the home menu unlocks. Bottom sheet on phones, centered
+   dialog on wider screens. z-index sits above header (100), bottom nav
+   (100) and cart bar (90/300), below the toast (6000). */
+.loc-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(45, 52, 54, 0.6);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: loc-fade-in 0.25s ease;
+}
+
+.loc-gate-card {
+  width: 100%;
+  max-width: 480px;
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+  padding: 12px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  max-height: 92vh;
+  overflow-y: auto;
+  animation: loc-sheet-up 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.loc-gate-handle {
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  background: #e9ecef;
+  margin: 0 auto 14px;
+}
+
+.loc-gate-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.7rem;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: #fef5f4;
+}
+
+.loc-gate h2 {
+  text-align: center;
+  font-size: 1.25rem;
+  color: #2d3436;
+  margin-bottom: 6px;
+}
+
+.loc-gate-sub {
+  text-align: center;
+  color: #636e72;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin-bottom: 18px;
+}
+
+.loc-gps-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 14px;
+  border: 2px solid #e74c3c;
+  border-radius: 12px;
+  background: #fff;
+  color: #e74c3c;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+
+.loc-gps-btn:active {
+  transform: scale(0.98);
+  background: #fef5f4;
+}
+
+.loc-gps-btn:disabled {
+  opacity: 0.6;
+}
+
+.loc-gps-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.loc-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: #b2bec3;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.loc-divider::before,
+.loc-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e9ecef;
+}
+
+.loc-gate-error {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: #fdecea;
+  color: #c0392b;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.loc-confirm-btn {
+  width: 100%;
+  margin-top: 16px;
+}
+
+@keyframes loc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes loc-sheet-up {
+  from { transform: translateY(60px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Wider screens: center the card as a dialog instead of a bottom sheet */
+@media (min-width: 520px) {
+  .loc-gate {
+    align-items: center;
+    padding: 24px;
+  }
+
+  .loc-gate-card {
+    border-radius: 20px;
+    padding-bottom: 20px;
+    animation: loc-sheet-pop 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+@keyframes loc-sheet-pop {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
