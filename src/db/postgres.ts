@@ -325,6 +325,13 @@ async function seedDefaults(): Promise<void> {
   if (!orderItemColsV8.includes('discount')) {
     await query(`ALTER TABLE order_items ADD COLUMN discount INTEGER DEFAULT 0;`);
   }
+  // v10: additional_discount on orders (admin manual deduction). Missing on
+  // live DBs created before this column existed — backfill without failing
+  // when the column is already there.
+  const orderCols = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['orders'])).map((c: any) => c.column_name);
+  if (!orderCols.includes('additional_discount')) {
+    await query(`ALTER TABLE orders ADD COLUMN additional_discount INTEGER DEFAULT 0;`);
+  }
 
   // v7: product_id on order_package_items so reorders can rebuild the exact
   // slot choices (previously only product_name was stored, making reordered

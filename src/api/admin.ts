@@ -340,6 +340,9 @@ r.get('/orders', async (_req, res) => {
 r.get('/orders/:id', async (req, res) => {
   const { data: order } = await supa().from('orders').select('*, customers(name, phone)').eq('id', req.params.id).maybeSingle();
   if (!order) return res.status(404).json({ error: 'Order not found' });
+  // additional_discount may not exist on DBs created before that column was
+  // added — default to 0 so the edit modal never breaks.
+  if (order.additional_discount === undefined) order.additional_discount = 0;
   const [itemsRes, pkgRes, histRes] = await Promise.all([
     supa().from('order_items').select('*').eq('order_id', order.id),
     supa().from('order_package_items').select('*').order('order_item_id, slot_number'),
@@ -348,10 +351,12 @@ r.get('/orders/:id', async (req, res) => {
   const items = itemsRes.data || [];
   const packageItems = pkgRes.data || [];
 
-  // For existing orders without discount field, calculate from package info
+  // For existing orders without a stored package discount (legacy rows saved
+  // with discount 0/NULL), calculate from package info so the edit modal can
+  // show the net line price (e.g. C1 gross 3100 − 800 = 2300, not 3100).
   const db = supa();
   for (const item of items) {
-    if (item.package_id && (item.discount === undefined || item.discount === null)) {
+    if (item.package_id && !(Number(item.discount) > 0)) {
       // Calculate discount from package
       const { data: pkg } = await db.from('packages').select('is_custom, discount').eq('id', item.package_id).maybeSingle();
       if (pkg?.is_custom) {
@@ -490,7 +495,13 @@ function autoDiscount(itemsSum: number): number {
  * when a non-package item is added/removed or the quantity changes. */
 async function recalcOrderTotalsAfterItemEdit(orderId: number): Promise<{ subtotal: number; total: number; savings: number }> {
   const db = supa();
-  const { data: order } = await db.from('orders').select('subtotal, total, delivery_fee, additional_discount').eq('id', orderId).maybeSingle();
+  // additional_discount may not exist yet on older DBs — fall back to 0.
+  let order: any = null;
+  {
+    const r = await db.from('orders').select('subtotal, total, delivery_fee, additional_discount').eq('id', orderId).maybeSingle();
+    if (!r.error) order = r.data;
+    else order = (await db.from('orders').select('subtotal, total, delivery_fee').eq('id', orderId).maybeSingle()).data;
+  }
   if (!order) throw new Error('Order not found');
   const { data: items } = await db.from('order_items').select('*').eq('order_id', orderId);
 
@@ -649,6 +660,7 @@ r.post('/orders/:id/items', async (req, res) => {
     const line = await computeCartTotals([cartLine], 0);
     if (!line.subtotal) throw new Error('This item has no price set — set its price in the Menu first');
     const unit = Math.round(line.subtotal / qty);
+    const unitDiscount = Math.round((line.discount || 0) / Math.max(1, qty));
     const { data: itemRow, error: itemErr } = await supa().from('order_items').insert({
       order_id: orderId,
       product_id: cartLine.product_id ?? null,
@@ -659,6 +671,7 @@ r.post('/orders/:id/items', async (req, res) => {
       quantity: qty,
       unit_price: unit,
       line_total: line.subtotal,
+      discount: unitDiscount,
     }).select('id').single();
     if (itemErr) throw new Error(itemErr.message);
     const itemId = Number(itemRow.id);

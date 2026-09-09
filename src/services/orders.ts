@@ -148,14 +148,17 @@ export async function createOrderFromCart(
   for (const it of items) {
     let unit: number;
     let lineSubtotal: number;
+    let lineDiscountTotal = 0;
     if (it.unit_price !== undefined && it.line_total !== undefined) {
       // Client-resolved cart: lines were already priced server-side in resolveClientCartItems.
       unit = Math.round(Number(it.unit_price) || 0);
       lineSubtotal = Number(it.line_total) || 0;
+      lineDiscountTotal = Number(it.discount) || 0;
     } else {
       const line = await computeCartTotals([it], 0);
       unit = Math.round(line.subtotal / it.quantity);
       lineSubtotal = line.subtotal;
+      lineDiscountTotal = line.discount;
     }
     const { data: oiRow, error: oiErr } = await db.from('order_items').insert({
       order_id: orderId,
@@ -167,6 +170,7 @@ export async function createOrderFromCart(
       quantity: it.quantity,
       unit_price: unit,
       line_total: lineSubtotal,
+      discount: Math.round(lineDiscountTotal / Math.max(1, Number(it.quantity) || 1)),
     }).select('id').single();
     if (oiErr) throw new Error(`Order item creation failed: ${oiErr.message}`);
     const orderItemId = Number(oiRow!.id);

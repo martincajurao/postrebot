@@ -977,7 +977,7 @@ async function openOrderEditor(orderId) {
       it = { key: 'n' + (++seq), isNew: true, remove: false, kind: 'product', product_id: id, package_id: null, food_pack_id: null, name: p.name + (size ? ` (${size})` : ''), variant_size: size || '', unit_price: v ? Number(v.price) : 0, quantity: qty, origQty: 0, origSize: '', package_items: [] };
     } else if (kindSel.value === 'package') {
       const p = catalogs.packages.find((x) => x.id === id);
-      it = { key: 'n' + (++seq), isNew: true, remove: false, kind: 'package', product_id: null, package_id: id, food_pack_id: null, name: p.name + (size ? ` (${size})` : ''), variant_size: size || '', unit_price: Math.max(0, (p.base_price || 0) - (p.discount || 0)), quantity: qty, origQty: 0, origSize: '', package_items: [] };
+      it = { key: 'n' + (++seq), isNew: true, remove: false, kind: 'package', product_id: null, package_id: id, food_pack_id: null, name: p.name + (size ? ` (${size})` : ''), variant_size: size || '', unit_price: Number(p.base_price) || 0, discount: Number(p.discount) || 0, quantity: qty, origQty: 0, origSize: '', package_items: [] };
     } else {
       const f = catalogs.foodPacks.find((x) => x.id === id);
       it = { key: 'n' + (++seq), isNew: true, remove: false, kind: 'foodpack', product_id: null, package_id: null, food_pack_id: id, name: f.name + ' (food pack)', variant_size: '', unit_price: Number(f.price) || 0, quantity: qty, origQty: 0, origSize: '', package_items: [] };
