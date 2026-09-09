@@ -334,7 +334,6 @@ async function mainMenu(psid: string) {
   // Quick replies for actions NOT available in the webview
   return sendQuickReplies(psid, 'Or choose an option below:', [
     { title: '🛍️ Open Store Now!', payload: 'WELCOME' },
-    { title: '🛒 Order Now', payload: 'MENU_ORDER' },
     { title: '📞 Contact Us', payload: 'MENU_CONTACT' },
   ]);
 }

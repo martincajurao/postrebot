@@ -1058,7 +1058,7 @@ async function openReservationEditor(resvId, r) {
 views.orders = async (main) => {
   main.innerHTML = `
     <h2 class="page-title">Orders</h2>
-    <div class="card"><div class="table-wrap" id="orders-body"><p class="muted">Loading…</p></div></div>`;
+    <div class="card"><div id="orders-body"><p class="muted">Loading…</p></div></div>`;
   const filter = sessionStorage.getItem('orderFilter') || '';
   const orders = await api('/orders' + (filter ? '?status=' + filter : ''));
   const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
@@ -1081,10 +1081,13 @@ views.orders = async (main) => {
     if (del) del.disabled = selected.size === 0;
   };
   main.querySelector('#orders-body').innerHTML = `
-    <p style="margin-bottom:10px">
-      <select id="order-filter" style="width:auto">
+    <div class="oc-select-head">
+      <input type="checkbox" id="order-check-all" title="Select all">
+      <span>Select all</span>
+      <select id="order-filter" style="width:auto;margin-left:auto">
         ${filters.map((f) => `<option value="${f}" ${f === filter ? 'selected' : ''}>${f || 'All statuses'}</option>`).join('')}
-      </select></p>
+      </select>
+    </div>
     <div id="order-bulk" style="display:none;margin-bottom:10px;padding:8px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;align-items:center;gap:8px;flex-wrap:wrap">
       <b id="order-bulk-count">0 selected</b>
       <button class="btn ok sm" id="order-bulk-advance">→ Advance</button>
@@ -1093,40 +1096,47 @@ views.orders = async (main) => {
       ${ROLE === 'ADMIN' ? `<button class="btn danger sm" id="order-bulk-del">🗑 Delete</button><button class="btn danger sm" id="order-bulk-reset">🔄 Reset all</button>` : ''}
       <button class="btn ghost sm" id="order-bulk-clear">✕ Clear</button>
     </div>
-    <table>
-      <thead><tr>
-        <th style="width:32px"><input type="checkbox" id="order-check-all" title="Select all"></th>
-        <th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Schedule</th><th>Payment</th><th>Status</th><th>Actions</th>
-      </tr></thead>
-      <tbody>
-      ${orders.map((o) => `
-        <tr>
-          <td><input type="checkbox" class="order-check" value="${o.id}" title="Select order"></td>
-          <td><b>${esc(o.order_number)}</b><br><span class="muted">${esc((o.created_at || '').slice(0, 10))}</span></td>
-          <td>${esc(o.customer_name || '—')}<br><span class="muted">${esc(o.phone || '')}</span></td>
-          <td>${(o.items || []).map((i) => `${esc(i.name)}${i.variant_size ? ` (${esc(i.variant_size)})` : ''} ×${i.quantity}${(i.package_items || []).length ? `<br><span class="muted" style="font-size:0.72rem">${i.package_items.map((p) => esc(p.product_name)).join(' · ')}</span>` : ''}`).join('<br>') || '<span class="muted">—</span>'}</td>
-          <td>${peso(o.total)}${o.additional_discount ? `<br><span class="muted">− ${peso(o.additional_discount)} disc.</span>` : ''}</td>
-          <td>${o.order_type === 'delivery' ? '🚚 ' + esc(o.address || '') : '🏬 Pickup'}<br><span class="muted">${esc(o.fulfillment_date || '')} ${esc(o.time_slot || '')}</span></td>
-          <td><span class="badge b-${esc(o.payment_status)}">${esc(o.payment_status)}</span><br><span class="muted">${esc(o.payment_method || '')}</span></td>
-          <td><span class="badge b-${esc(o.status)}">${esc(o.status)}</span></td>
-          <td><div class="row-actions menu">
-            ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : (o.status === 'COMPLETED' ? '<span class="muted">Done</span>' : '')}
-            <div class="row-menu-wrap">
-              <button class="btn ghost sm" data-menu-btn title="More actions" aria-haspopup="true">⋯</button>
-              <div class="row-menu">
-                ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn ghost sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
-                ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-edit-order="${o.id}" title="Edit order (change of mind)">✏️ Edit</button>` : ''}
-                <button class="btn ghost sm" data-booking="${o.id}" title="Generate booking details">📋 Booking</button>
-                ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">✕ Cancel order</button>` : ''}
-                ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">💰 Mark Paid</button>` : ''}
-                <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
-                ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-order="${o.id}" title="Permanently delete">🗑 Delete</button>` : ''}
+    <div class="oc-grid">
+      ${orders.map((o) => {
+        const itemChips = (o.items || []).map((i) => {
+          const label = `${esc(i.name)}${i.variant_size ? ` (${esc(i.variant_size)})` : ''} ×${i.quantity}`;
+          const dishes = (i.package_items || []).filter(Boolean).map((p) => `S${p.slot_number}: ${esc(p.product_name)}`).join(' · ');
+          return `<span class="oc-chip"${dishes ? ` title="${label} · ${dishes}"` : ''}${(i.package_items || []).length ? '>🧺 ' : '>'}${label}</span>`;
+        }).join('') || '<span class="muted" style="font-size:12px">No items</span>';
+        return `
+        <div class="oc-card">
+          <div class="oc-head">
+            <label class="oc-check"><input type="checkbox" class="order-check" value="${o.id}" title="Select order"></label>
+            <div class="oc-title"><b>${esc(o.order_number)}</b> <span class="muted" style="font-size:12px">· ${esc((o.created_at || '').slice(0, 10))}</span></div>
+            <span class="badge b-${esc(o.status)}">${esc(o.status)}</span>
+          </div>
+          <div class="oc-cust">
+            <span class="oc-line">👤 ${esc(o.customer_name || '—')} <span class="muted">${esc(o.phone || '')}</span></span>
+            <span class="oc-line">${o.order_type === 'delivery' ? '🚚 ' + esc(o.address || '') : '🏬 Pickup'}</span>
+            ${o.fulfillment_date ? `<span class="oc-line">📅 ${esc(o.fulfillment_date)} <span class="muted">${esc(o.time_slot || '')}</span></span>` : ''}
+            <span class="oc-line"><span class="badge b-${esc(o.payment_status)}">${esc(o.payment_status)}</span>${o.payment_method ? ` <span class="muted">${esc(o.payment_method)}</span>` : ''}</span>
+          </div>
+          <div class="oc-items">${itemChips}</div>
+          <div class="oc-foot">
+            <div><span class="oc-total">${peso(o.total)}</span>${o.additional_discount ? `<div class="oc-sub">incl. − ${peso(o.additional_discount)} discount</div>` : ''}</div>
+            <div class="oc-actions">
+              ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : (o.status === 'COMPLETED' ? '<span class="muted" style="font-size:12px">Done</span>' : '')}
+              <div class="row-menu-wrap">
+                <button class="btn ghost sm" data-menu-btn title="More actions" aria-haspopup="true">⋯</button>
+                <div class="row-menu">
+                  ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn ghost sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
+                  ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-edit-order="${o.id}" title="Edit order (change of mind)">✏️ Edit</button>` : ''}
+                  <button class="btn ghost sm" data-booking="${o.id}" title="Generate booking details">📋 Booking</button>
+                  ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">✕ Cancel order</button>` : ''}
+                  ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">💰 Mark Paid</button>` : ''}
+                  <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
+                  ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-order="${o.id}" title="Permanently delete">🗑 Delete</button>` : ''}
+                </div>
               </div>
             </div>
-          </div></td>
-        </tr>`).join('') || '<tr><td colspan="9" class="muted">No orders.</td></tr>'}
-      </tbody>
-    </table>`;
+          </div>
+        </div>`;}).join('') || '<div class="oc-empty">No orders.</div>'}
+    </div>`;
   main.querySelector('#order-filter').addEventListener('change', (e) => {
     sessionStorage.setItem('orderFilter', e.target.value);
     navigate('orders');
@@ -1372,37 +1382,47 @@ views.reservations = async (main) => {
         ${ROLE === 'ADMIN' ? `<button class="btn danger sm" id="resv-bulk-del">🗑 Delete</button><button class="btn danger sm" id="resv-bulk-reset">🔄 Reset all</button>` : ''}
         <button class="btn ghost sm" id="resv-bulk-clear">✕ Clear</button>
       </div>
-      <div class="table-wrap"><table>
-      <thead><tr>
-        <th style="width:32px"><input type="checkbox" id="resv-check-all" title="Select all"></th>
-        <th>Time</th><th>Customer</th><th>Phone</th><th>Order</th><th>Status</th><th>Actions</th>
-      </tr></thead>
-      <tbody>
-      ${resvs.map((r) => `
-        <tr>
-          <td><input type="checkbox" class="resv-check" value="${r.id}" title="Select reservation"></td>
-          <td><b>${esc(r.time_slot)}</b></td>
-          <td><div>${esc(r.customer_name)}</div>${r.notes ? `<div class="muted" style="font-size:0.75rem">${esc(r.notes)}</div>` : ''}</td>
-          <td>${esc(r.phone || '—')}</td>
-          <td>${r.order_id ? `<a href="#" class="order-link" data-order="${r.order_id}" style="color:#e74c3c">#${r.order_id}</a>${r.order ? `<div class="muted" style="font-size:0.75rem;margin-top:2px">₱${Number(r.order.total || 0).toLocaleString('en-PH')} · <span class="badge b-${esc(r.order.status)}">${esc(r.order.status)}</span>${r.order.payment_status === 'PAID' ? ' · 💰' : ''}</div>` : ''}` : '—'}</td>
-          <td><span class="badge b-${esc(r.status)}">${esc(r.status)}</span></td>
-          <td><div class="row-actions menu">
-            ${r.status === 'PENDING' ? `<button class="btn ok sm" data-resv-ok="${r.id}">Confirm</button>` : ''}
-            <div class="row-menu-wrap">
-              <button class="btn ghost sm" data-menu-btn title="More actions" aria-haspopup="true">⋯</button>
-              <div class="row-menu">
-                <button class="btn ghost sm" data-resv-view="${r.id}" title="View details">👁️ View details</button>
-                ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-resv-edit="${r.id}" title="Edit reservation (change of mind)">✏️ Edit</button>` : ''}
-                ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-resv-move="${r.id}">📅 Reschedule</button>` : ''}
-                ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">✕ Cancel</button>` : ''}
-                ${r.order && NEXT_STATUS[r.order.status] ? `<button class="btn ghost sm" data-resv-adv="${r.order_id}" data-resv-next="${NEXT_STATUS[r.order.status]}" title="Advance linked order to ${NEXT_STATUS[r.order.status]}">→ Order: ${NEXT_STATUS[r.order.status]}</button>` : ''}
-                ${r.order && r.order.payment_status !== 'PAID' && r.order.status !== 'CANCELLED' ? `<button class="btn ghost sm" data-resv-paid="${r.order_id}" title="Mark linked order as paid">💰 Order Paid</button>` : ''}
-                ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-resv="${r.id}" title="Permanently delete">🗑 Delete</button>` : ''}
+      <div class="rc-select-head">
+        <input type="checkbox" id="resv-check-all" title="Select all">
+        <span>Select all</span>
+      </div>
+      <div class="rc-grid">
+        ${resvs.map((r) => `
+        <div class="rc-card">
+          <div class="rc-head">
+            <label class="rc-check"><input type="checkbox" class="resv-check" value="${r.id}" title="Select reservation"></label>
+            <div class="rc-title">⏰ <b>${esc(r.time_slot)}</b> <span class="muted" style="font-size:12px">· RES-${esc(r.id)}</span></div>
+            <span class="badge b-${esc(r.status)}">${esc(r.status)}</span>
+          </div>
+          <div class="rc-cust">
+            <span class="rc-line">👤 ${esc(r.customer_name)} <span class="muted">${esc(r.phone || '')}</span></span>
+            ${r.res_date ? `<span class="rc-line">📅 ${esc(r.res_date)}</span>` : ''}
+            ${r.notes ? `<span class="rc-line">📝 ${esc(r.notes)}</span>` : ''}
+          </div>
+          <div class="rc-order">
+            ${r.order_id
+              ? `🔗 <a href="#" class="order-link" data-order="${r.order_id}" style="color:var(--brand);font-weight:600">Order #${r.order_id}</a>${r.order ? ` · <b>${peso(r.order.total || 0)}</b> · <span class="badge b-${esc(r.order.status)}">${esc(r.order.status)}</span>${r.order.payment_status === 'PAID' ? ' 💰' : ''}` : ''}`
+              : '<span class="muted">No linked order</span>'}
+          </div>
+          <div class="rc-foot">
+            <div class="rc-actions">
+              ${r.status === 'PENDING' ? `<button class="btn ok sm" data-resv-ok="${r.id}">Confirm</button>` : ''}
+              <div class="row-menu-wrap">
+                <button class="btn ghost sm" data-menu-btn title="More actions" aria-haspopup="true">⋯</button>
+                <div class="row-menu">
+                  <button class="btn ghost sm" data-resv-view="${r.id}" title="View details">👁️ View details</button>
+                  ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-resv-edit="${r.id}" title="Edit reservation (change of mind)">✏️ Edit</button>` : ''}
+                  ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-resv-move="${r.id}">📅 Reschedule</button>` : ''}
+                  ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">✕ Cancel</button>` : ''}
+                  ${r.order && NEXT_STATUS[r.order.status] ? `<button class="btn ghost sm" data-resv-adv="${r.order_id}" data-resv-next="${NEXT_STATUS[r.order.status]}" title="Advance linked order to ${NEXT_STATUS[r.order.status]}">→ Order: ${NEXT_STATUS[r.order.status]}</button>` : ''}
+                  ${r.order && r.order.payment_status !== 'PAID' && r.order.status !== 'CANCELLED' ? `<button class="btn ghost sm" data-resv-paid="${r.order_id}" title="Mark linked order as paid">💰 Order Paid</button>` : ''}
+                  ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-resv="${r.id}" title="Permanently delete">🗑 Delete</button>` : ''}
+                </div>
               </div>
             </div>
-          </div></td>
-        </tr>`).join('') || '<tr><td colspan="7" class="muted">No reservations for this date.</td></tr>'}
-      </tbody></table></div>`;
+          </div>
+        </div>`).join('') || '<div class="rc-empty">No reservations for this date.</div>'}
+      </div>`;
 
     // View details handler
     main.querySelectorAll('[data-resv-view]').forEach((b) => b.addEventListener('click', async () => {
