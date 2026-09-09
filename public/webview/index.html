@@ -38,7 +38,7 @@
 <body>
   <div id="app">
     <!-- Header -->
-    <header class="header">
+    <header id="site-header" class="header">
       <div class="header-top">
         <div class="header-content">
           <div class="header-logo">
@@ -75,6 +75,9 @@
         </span>
       </div>
     </header>
+
+    <!-- Scrollable content area -->
+    <div id="scroll-container" class="scroll-container">
 
     <!-- Loading state -->
     <div id="loading-view" class="view active" style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:60px 20px">
@@ -247,6 +250,7 @@
         </div>
       </section>
     </main>
+    </div><!-- /scroll-container -->
 
     <!-- Bottom navigation -->
     <nav class="bottom-nav" id="bottom-nav">

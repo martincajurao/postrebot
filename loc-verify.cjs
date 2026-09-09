@@ -82,6 +82,62 @@ const { chromium } = require('C:/Users/Mizeri Jiwu/.vscode/extensions/danielsanm
     mainHidden: document.getElementById('main-content').classList.contains('hidden'),
   }));
 
+  // --- HOME_LAYOUT: Now fetch the packages from the server (the server has the
+  //     in-memory Supabase client seeded from src/db/seed.ts). Read the packages
+  //     endpoint directly and compare the returned order with the in-memory sort.
+  //     If the server endpoint isn't available, skip this sub-check (graceful).
+  let serverPkgs = null;
+  try {
+    const raw = await fetch('http://localhost:3000/packages', { signal: AbortSignal.timeout(6000) });
+    if (raw.ok) serverPkgs = await raw.json();
+  } catch { /* server may not expose /packages; skip gracefully */ }
+  const homeLayout = await page.evaluate(() => {
+    const sections = [...document.querySelectorAll('[id^="view-"]')]
+      .map((el) => ({ id: el.id, cls: el.className }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const firstVisible = document.querySelector('[id^="view-"].view:not(.hidden)');
+    const visibleContent = firstVisible
+      ? Array.from(firstVisible.querySelectorAll('.section, .fp-section, .fp-rail, .packages-list, .package-card, .food-packs-list, .promo-grid'))
+          .map((el) => el.outerHTML.slice(0, 80).replace(/\s+/g, ' ').trim())
+      : [];
+    const packagesExists = !!document.getElementById('cat-packages-promo') && !!packages.length;
+    const packagesSectionId = (() => {
+      // Find the view that renders the packages carousel/promo:
+      //  - view-categories contains #cat-packages-promo (promo banner)
+      //  - view-packages contains .packages-list / .package-card
+      //  - view-food-packs contains food pack cards (not packages)
+      const catView = document.getElementById('view-categories');
+      if (catView && packagesExists) return 'view-categories (promo banner)';
+      const pkgView = document.getElementById('view-packages');
+      if (pkgView && pkgView.querySelector('.packages-list, .package-card, .packages-promo')) return 'view-packages (carousel)';
+      return 'NOT_FOUND';
+    })();
+    const allPackages = (typeof packages !== 'undefined') ? packages.slice() : [];
+    return {
+      sections,
+      firstVisibleSec: firstVisible ? { id: firstVisible.id, cls: firstVisible.className } : null,
+      firstVisibleContent,
+      packagesExists,
+      packagesSectionId,
+      allPackagesCount: allPackages.length,
+      allPackages: allPackages.slice(0, 5).map((p) => ({
+        id: p.id, name: p.name, base_price: p.base_price,
+        position: allPackages.indexOf(p),
+      })),
+    };
+  });
+  const serverPkgsAsc = (serverPkgs && Array.isArray(serverPkgs))
+    ? serverPkgs.slice().sort((a, b) => (a.base_price || 0) - (b.base_price || 0))
+    : null;
+  const serverPkgsMatchInMemoryAsc = (() => {
+    if (!serverPkgs || !Array.isArray(serverPkgs) || homeLayout.allPackages.length === 0) return null;
+    const sIds = serverPkgsAsc.map((p) => p.id);
+    const mIds = homeLayout.allPackages.map((p) => p.id);
+    if (sIds.length !== mIds.length) return { mismatch: true, reason: `count server=${sIds.length} mem=${mIds.length}` };
+    for (let i = 0; i < sIds.length; i++) { if (sIds[i] !== mIds[i]) return { mismatch: true, firstDiffAt: i, s: sIds[i], m: mIds[i] }; }
+    return { mismatch: false };
+  })();
+
   await browser.close();
 
   console.log('GATE_FIRST_OPEN:', JSON.stringify(gate1));

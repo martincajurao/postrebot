@@ -805,10 +805,18 @@ function showPackages() {
     showView('view-packages');
     return;
   }
-  // Show only ONE "Build Your Own" custom package (the first) — dedup any duplicates.
-  const customPkgs = packages.filter((p) => p.is_custom);
-  const firstCustom = customPkgs.length > 0 ? [customPkgs[0]] : [];
-  const sorted = packages.filter((p) => !p.is_custom).concat(firstCustom).slice();
+  // All packages sorted by net price ascending (Build-Your-Own custom package,
+  // if present, is treated like any other package and also sorted by price).
+  const sorted = packages.slice().sort((a, b) => {
+    const aCustom = !!(a && a.is_custom);
+    const bCustom = !!(b && b.is_custom);
+    const aPrice = netPackagePrice(a);
+    const bPrice = netPackagePrice(b);
+    if (aPrice !== bPrice) return aPrice - bPrice;
+    // stable tie-break: custom packages sink to the bottom.
+    if (aCustom !== bCustom) return aCustom ? 1 : -1;
+    return 0;
+  });
   // FoodPanda-style horizontal snap carousel (peek of the next package card).
   container.innerHTML = `<div class="fp-rail fp-card-rail">` + sorted.map((pkg) => {
     const saved = Number(pkg.discount) > 0;
@@ -931,6 +939,8 @@ function showPackageDetail(pkgId) {
 function currentPackage() {
   return packages.find((x) => Number(x.id) === Number(packageDetail.pkgId)) || null;
 }
+
+  packages = packages.slice().sort((a, b) => (a.base_price || 0) - (b.base_price || 0));
 
 /**
  * Auto-discount for "Build Your Own" custom packages, based on the sum of the
@@ -2182,6 +2192,7 @@ function initLocationMap() {
 function hideLocationGate() {
   const gate = $id('location-gate');
   if (gate) gate.classList.add('hidden');
+  const mainContent = $id('main-content');
   if (mainContent) mainContent.classList.remove('hidden');
   document.body.style.overflow = '';
 }
