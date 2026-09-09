@@ -1,4 +1,4 @@
-﻿﻿import { Router } from 'express';
+﻿﻿﻿import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { supa } from '../db/supabase';
 import { authMiddleware, requireRole, verifyWebviewPsid, rememberAdminForPsid, getRememberedAdmin, forgetRememberedAdmin, issueAdminToken } from './auth';
@@ -332,10 +332,35 @@ r.delete('/food-packs/:id', async (req, res) => {
 // ---- Orders ----
 r.get('/orders', async (_req, res) => {
   const { data } = await supa().from('orders').select('*, customers(name, phone)').order('id', { ascending: false });
+  const orders = data || [];
+  // Populate the Items column in one batched query (items + their package slots).
+  const ids = orders.map((o: any) => o.id);
+  const itemsByOrder = new Map<number, any[]>();
+  if (ids.length) {
+    const { data: items } = await supa().from('order_items')
+      .select('order_id, name, variant_size, quantity, order_package_items(product_name, upgrade_price, slot_number)')
+      .in('order_id', ids);
+    for (const it of items || []) {
+      const list = itemsByOrder.get(Number(it.order_id)) || [];
+      list.push({
+        name: it.name,
+        variant_size: it.variant_size,
+        quantity: it.quantity,
+        package_items: (it as any).order_package_items || [],
+      });
+      itemsByOrder.set(Number(it.order_id), list);
+    }
+  }
   // Order and reservation are ONE entity: every order stays visible here with
   // the full pipeline (advance / payment / rider / discount); the Reservations
   // page shows the same entity as its schedule entry.
-  res.json((data || []).map((o: any) => ({ ...o, customer_name: o.customers?.name ?? null, phone: o.phone ?? o.customers?.phone ?? null, customers: undefined })));
+  res.json(orders.map((o: any) => ({
+    ...o,
+    items: itemsByOrder.get(Number(o.id)) || [],
+    customer_name: o.customers?.name ?? null,
+    phone: o.phone ?? o.customers?.phone ?? null,
+    customers: undefined,
+  })));
 });
 r.get('/orders/:id', async (req, res) => {
   const { data: order } = await supa().from('orders').select('*, customers(name, phone)').eq('id', req.params.id).maybeSingle();

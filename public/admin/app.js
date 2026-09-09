@@ -1,4 +1,4 @@
-﻿/* Postre Admin SPA */
+﻿﻿/* Postre Admin SPA */
 const API = '/api/admin';
 let TOKEN = localStorage.getItem('token') || '';
 let ME = localStorage.getItem('me') || '';
@@ -1104,20 +1104,25 @@ views.orders = async (main) => {
           <td><input type="checkbox" class="order-check" value="${o.id}" title="Select order"></td>
           <td><b>${esc(o.order_number)}</b><br><span class="muted">${esc((o.created_at || '').slice(0, 10))}</span></td>
           <td>${esc(o.customer_name || '—')}<br><span class="muted">${esc(o.phone || '')}</span></td>
-          <td>${(o.items || []).map((i) => `${esc(i.name)} ×${i.quantity}`).join('<br>')}</td>
+          <td>${(o.items || []).map((i) => `${esc(i.name)}${i.variant_size ? ` (${esc(i.variant_size)})` : ''} ×${i.quantity}${(i.package_items || []).length ? `<br><span class="muted" style="font-size:0.72rem">${i.package_items.map((p) => esc(p.product_name)).join(' · ')}</span>` : ''}`).join('<br>') || '<span class="muted">—</span>'}</td>
           <td>${peso(o.total)}${o.additional_discount ? `<br><span class="muted">− ${peso(o.additional_discount)} disc.</span>` : ''}</td>
           <td>${o.order_type === 'delivery' ? '🚚 ' + esc(o.address || '') : '🏬 Pickup'}<br><span class="muted">${esc(o.fulfillment_date || '')} ${esc(o.time_slot || '')}</span></td>
           <td><span class="badge b-${esc(o.payment_status)}">${esc(o.payment_status)}</span><br><span class="muted">${esc(o.payment_method || '')}</span></td>
           <td><span class="badge b-${esc(o.status)}">${esc(o.status)}</span></td>
-          <td><div class="row-actions">
-            ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : ''}
-            ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
-            ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn sm" data-edit-order="${o.id}" title="Edit order (change of mind)">✏️ Edit</button>` : ''}
-            <button class="btn ghost sm" data-booking="${o.id}" title="Generate booking details">📋 Booking</button>
-            ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">Cancel</button>` : ''}
-            ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">Mark Paid</button>` : ''}
-            <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
-            ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-order="${o.id}" title="Permanently delete">🗑</button>` : ''}
+          <td><div class="row-actions menu">
+            ${NEXT_STATUS[o.status] ? `<button class="btn ok sm" data-advance="${o.id}" data-next="${NEXT_STATUS[o.status]}">→ ${NEXT_STATUS[o.status]}</button>` : (o.status === 'COMPLETED' ? '<span class="muted">Done</span>' : '')}
+            <div class="row-menu-wrap">
+              <button class="btn ghost sm" data-menu-btn title="More actions" aria-haspopup="true">⋯</button>
+              <div class="row-menu">
+                ${o.status === 'READY' && o.order_type === 'delivery' ? `<button class="btn ghost sm" data-otw="${o.id}">🛵 Rider OTW</button>` : ''}
+                ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-edit-order="${o.id}" title="Edit order (change of mind)">✏️ Edit</button>` : ''}
+                <button class="btn ghost sm" data-booking="${o.id}" title="Generate booking details">📋 Booking</button>
+                ${o.status !== 'CANCELLED' && o.status !== 'COMPLETED' ? `<button class="btn danger sm" data-cancel="${o.id}">✕ Cancel order</button>` : ''}
+                ${o.payment_status !== 'PAID' ? `<button class="btn ghost sm" data-paid="${o.id}">💰 Mark Paid</button>` : ''}
+                <button class="btn ghost sm" data-discount="${o.id}">% Discount</button>
+                ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-order="${o.id}" title="Permanently delete">🗑 Delete</button>` : ''}
+              </div>
+            </div>
           </div></td>
         </tr>`).join('') || '<tr><td colspan="9" class="muted">No orders.</td></tr>'}
       </tbody>
@@ -1381,15 +1386,20 @@ views.reservations = async (main) => {
           <td>${esc(r.phone || '—')}</td>
           <td>${r.order_id ? `<a href="#" class="order-link" data-order="${r.order_id}" style="color:#e74c3c">#${r.order_id}</a>${r.order ? `<div class="muted" style="font-size:0.75rem;margin-top:2px">₱${Number(r.order.total || 0).toLocaleString('en-PH')} · <span class="badge b-${esc(r.order.status)}">${esc(r.order.status)}</span>${r.order.payment_status === 'PAID' ? ' · 💰' : ''}</div>` : ''}` : '—'}</td>
           <td><span class="badge b-${esc(r.status)}">${esc(r.status)}</span></td>
-          <td><div class="row-actions">
-            <button class="btn sm" data-resv-view="${r.id}" title="View details">👁️</button>
+          <td><div class="row-actions menu">
             ${r.status === 'PENDING' ? `<button class="btn ok sm" data-resv-ok="${r.id}">Confirm</button>` : ''}
-            ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn sm" data-resv-edit="${r.id}" title="Edit reservation (change of mind)">✏️ Edit</button>` : ''}
-            ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn sm" data-resv-move="${r.id}">Reschedule</button>` : ''}
-            ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">Cancel</button>` : ''}
-            ${r.order && NEXT_STATUS[r.order.status] ? `<button class="btn ok sm" data-resv-adv="${r.order_id}" data-resv-next="${NEXT_STATUS[r.order.status]}" title="Advance linked order to ${NEXT_STATUS[r.order.status]}">→ ${NEXT_STATUS[r.order.status]}</button>` : ''}
-            ${r.order && r.order.payment_status !== 'PAID' && r.order.status !== 'CANCELLED' ? `<button class="btn sm" data-resv-paid="${r.order_id}" title="Mark linked order as paid">💰 Paid</button>` : ''}
-            ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-resv="${r.id}" title="Permanently delete">🗑</button>` : ''}
+            <div class="row-menu-wrap">
+              <button class="btn ghost sm" data-menu-btn title="More actions" aria-haspopup="true">⋯</button>
+              <div class="row-menu">
+                <button class="btn ghost sm" data-resv-view="${r.id}" title="View details">👁️ View details</button>
+                ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-resv-edit="${r.id}" title="Edit reservation (change of mind)">✏️ Edit</button>` : ''}
+                ${r.status !== 'CANCELLED' && r.status !== 'COMPLETED' ? `<button class="btn ghost sm" data-resv-move="${r.id}">📅 Reschedule</button>` : ''}
+                ${r.status !== 'CANCELLED' ? `<button class="btn danger sm" data-resv-cancel="${r.id}">✕ Cancel</button>` : ''}
+                ${r.order && NEXT_STATUS[r.order.status] ? `<button class="btn ghost sm" data-resv-adv="${r.order_id}" data-resv-next="${NEXT_STATUS[r.order.status]}" title="Advance linked order to ${NEXT_STATUS[r.order.status]}">→ Order: ${NEXT_STATUS[r.order.status]}</button>` : ''}
+                ${r.order && r.order.payment_status !== 'PAID' && r.order.status !== 'CANCELLED' ? `<button class="btn ghost sm" data-resv-paid="${r.order_id}" title="Mark linked order as paid">💰 Order Paid</button>` : ''}
+                ${ROLE === 'ADMIN' ? `<button class="btn danger sm" data-del-resv="${r.id}" title="Permanently delete">🗑 Delete</button>` : ''}
+              </div>
+            </div>
           </div></td>
         </tr>`).join('') || '<tr><td colspan="7" class="muted">No reservations for this date.</td></tr>'}
       </tbody></table></div>`;
@@ -1671,7 +1681,7 @@ views.menu = async (main) => {
         <td><div class="row-actions">
           <button class="btn ghost sm" data-edit="${p.id}">Edit</button>
           <button class="btn ghost sm" data-variants="${p.id}">Prices</button>
-          <button class="btn danger sm" data-deact="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
+          <button class="btn ghost sm" data-deact="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
         </div></td>
       </tr>`).join('') : '<tr><td colspan="6" class="muted">No products match your filters.</td></tr>';
   };
@@ -1686,7 +1696,7 @@ views.menu = async (main) => {
         <td>${c.active ? '<span class="badge b-CONFIRMED">Active</span>' : '<span class="badge b-CANCELLED">Hidden</span>'}</td>
         <td><div class="row-actions">
           <button class="btn ghost sm" data-cat-edit="${c.id}">Rename</button>
-          <button class="btn danger sm" data-cat-toggle="${c.id}">${c.active ? 'Hide' : 'Show'}</button>
+          <button class="btn ghost sm" data-cat-toggle="${c.id}">${c.active ? 'Hide' : 'Show'}</button>
           <button class="btn danger sm" data-cat-delete="${c.id}">Delete</button>
         </div></td>
       </tr>`).join('') : '<tr><td colspan="5" class="muted">No categories.</td></tr>';
@@ -1905,7 +1915,7 @@ views.foodpacks = async (main) => {
             <td>${fp.active ? '<span class="badge b-CONFIRMED">Available</span>' : '<span class="badge b-COMPLETED">Inactive</span>'}</td>
             <td><div class="row-actions">
               <button class="btn ghost sm" data-fp-edit="${fp.id}">Edit</button>
-              <button class="btn danger sm" data-fp-toggle="${fp.id}">${fp.active ? 'Disable' : 'Enable'}</button>
+              <button class="btn ghost sm" data-fp-toggle="${fp.id}">${fp.active ? 'Disable' : 'Enable'}</button>
             </div></td>
           </tr>`).join('') || '<tr><td colspan="6" class="muted">No food packs yet.</td></tr>'}
         </tbody></table></div>
@@ -1977,7 +1987,7 @@ views.packages = async (main) => {
           </div>
           <div class="row-actions">
             <button class="btn ghost sm" data-pkg-edit="${p.id}">Edit</button>
-            <button class="btn danger sm" data-pkg-toggle="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
+            <button class="btn ghost sm" data-pkg-toggle="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
           </div>
         </div>
         <div style="margin-top:10px" class="muted">
@@ -2950,3 +2960,29 @@ views.images = async (main) => {
 ensurePushSW().then(() => {
   if (TOKEN) autoResubscribeIfKeyChanged().catch(() => {});
 }).catch(() => {});
+
+/* ---- Row actions "⋯" more-menu (Orders / Reservations) ----
+   The menu uses position:fixed (set by JS) so it escapes the
+   .table-wrap overflow clipping and stays inside the viewport on mobile. */
+const closeRowMenus = () => document.querySelectorAll('.row-menu.open').forEach((m) => m.classList.remove('open'));
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-menu-btn]');
+  if (!btn) { closeRowMenus(); return; }
+  e.preventDefault();
+  const menu = btn.parentElement.querySelector('.row-menu');
+  if (!menu) return;
+  const wasOpen = menu.classList.contains('open');
+  closeRowMenus();
+  if (wasOpen) return;
+  menu.classList.add('open');
+  const r = btn.getBoundingClientRect();
+  const w = menu.offsetWidth;
+  let left = r.right - w;                    // align right edge with the ⋯ button
+  left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+  menu.style.left = left + 'px';
+  // open upward when there isn't room below (common for the last table rows)
+  const h = menu.offsetHeight;
+  menu.style.top = (r.bottom + h + 12 > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6) + 'px';
+});
+document.addEventListener('scroll', closeRowMenus, true);
+window.addEventListener('resize', closeRowMenus);

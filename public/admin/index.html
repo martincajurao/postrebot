@@ -95,6 +95,23 @@
   .btn.ok { background: var(--ok); }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+  /* ---- row actions: primary button + "⋯" more menu ---- */
+  .row-actions.menu { align-items: center; }
+  .row-menu-wrap { position: relative; display: inline-block; }
+  .row-menu { display: none; position: fixed; z-index: 60; min-width: 170px; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px; }
+  .row-menu.open { display: flex; flex-direction: column; gap: 2px; }
+  .row-menu .btn.sm { width: 100%; text-align: left; white-space: nowrap; }
+  .row-menu .btn.sm:not(.ok):not(.danger):not(.ghost) { background: var(--brand); color: #fff; }
+  .row-menu .btn.ok { background: var(--ok); }
+  .row-menu .btn.danger { background: var(--bad); }
+  .row-menu .btn.ghost { background: #eef0f2; color: var(--ink); }
+  .row-menu .btn.sm:hover { filter: brightness(.94); }
+  @media (max-width: 760px) {
+    .row-actions.menu { gap: 4px; }
+    .row-menu { min-width: 180px; max-width: calc(100vw - 16px); }
+  }
+
   /* button busy/loader state */
   .btn .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.45);
     border-top-color: #fff; border-radius: 50%; margin-right: 6px; vertical-align: -2px;
