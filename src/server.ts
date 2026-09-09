@@ -151,6 +151,41 @@ app.listen(PORT, async () => {
       console.log(`[boot] registering persistent menu for: ${base}`);
       const menuOk = await setPersistentMenu(base);
       console.log(`[boot] setPersistentMenu resolved: ${menuOk}`);
+
+      // Keep the persistent menu ALWAYS active: re-assert it on a recurring
+      // timer so a one-off Meta/network hiccup at boot (or a later API-side
+      // remove) can never silently drop the ☰ popup until the next deploy.
+      const refreshMs = Math.max(5 * 60 * 1000, Number(process.env.PERSISTENT_MENU_REFRESH_MS || 6 * 60 * 60 * 1000));
+      const registerMenu = async (backoffMs = refreshMs) => {
+        try {
+          const ok = await setPersistentMenu(base);
+          if (!ok && backoffMs < refreshMs) {
+            // Registration failed — retry with exponential backoff (2, 4, 8 … min,
+            // capped at the regular refresh cadence) so a bad boot never leaves
+            // the ☰ popup missing for hours.
+            const next = Math.min(refreshMs, backoffMs * 2);
+            console.log(`[menu keep-alive] failed – retrying in ${Math.round(next / 60000)}min`);
+            setTimeout(() => registerMenu(next), next);
+          } else {
+            console.log(`[menu keep-alive] re-registered persistent menu: ${ok}`);
+          }
+        } catch (e: any) {
+          console.error(`[menu keep-alive] refresh failed:`, e?.message || e);
+          const next = Math.min(refreshMs, backoffMs * 2);
+          setTimeout(() => registerMenu(next), next);
+        }
+      };
+      // Re-assert on a fixed cadence so the ☰ popup is ALWAYS active even if
+      // Meta removes it server-side or a boot-time POST was lost.
+      setInterval(() => registerMenu(), refreshMs);
+      // If the initial registration above failed, retry fast (2 min) instead
+      // of waiting out the whole refresh cycle.
+      if (!menuOk) {
+        console.log('[boot] initial persistent menu registration failed — fast-retry in 2min');
+        setTimeout(() => registerMenu(2 * 60 * 1000), 2 * 60 * 1000);
+      } else {
+        console.log(`[boot] persistent menu keep-alive every ${Math.round(refreshMs / 60000)}min`);
+      }
     } catch (e: any) {
       console.error(`[boot] Messenger webview registration failed:`, e?.message || e);
     }
