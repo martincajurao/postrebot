@@ -172,7 +172,7 @@ Total:${totalStr}`;
   const wazeMatch = String(order.address || '').match(/https?:\/\/[^\s]*waze\.com[^\s]*/);
   const wazeUrl = wazeMatch ? wazeMatch[0] : '';
 
-  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo}${wazeUrl ? `\n\n🗺️ Navigate (Waze): ${wazeUrl}` : ''};;;WAZE=${encodeURIComponent(wazeUrl)}`;
+  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo}${wazeUrl ? `\n\n🗺️ Tap to navigate — opens the Waze app, destined to the customer's exact pin:\n${wazeUrl}` : ''};;;WAZE=${encodeURIComponent(wazeUrl)}`;
 }
 
 function renderOrderItems(orderItems) {
