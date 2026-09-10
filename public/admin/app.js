@@ -131,6 +131,24 @@ function clearAppBadge() {
   }
 }
 
+/** Strip the appended Waze navigation lines (and any stray coordinate lines)
+ *  from an order address so admin order cards show only the customer's plain
+ *  address. The links still live in the DB and the booking modal. */
+function cleanAddressForCard(address) {
+  const addr = String(address || '');
+  if (addr.indexOf('waze://') === -1 && addr.indexOf('waze.com') === -1) return addr;
+  return addr
+    .split(/\n/)
+    .filter((line) => {
+      const l = line.trim();
+      if (!l) return false;
+      if (/^📍|^Navigate|Navigate \(opens Waze|Fallback \(browser\)/i.test(l)) return false;
+      if (/waze:\/\//.test(l) || /waze\.com/.test(l)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
 /** Generate formatted booking details for copy-paste to riders/delivery. */
 async function generateBookingDetails(orderId) {
   const order = await api(`/orders/${orderId}`);
@@ -165,16 +183,20 @@ ${orderLines.join('\n')}
 Df ${df}
 Total:${totalStr}`;
 
-  const deliveryTo = order.order_type === 'delivery' ? `Delivery to;\n${order.address || 'Pickup'}` : 'Pickup order';
-
-  // Waze links already appear inside the address block (appended to
-  // order.address at order time) — extract them ONLY as modal-button metadata
-  // here, so the rider's copy text doesn't show the same links twice.
+  // The waze:// app link (appended to order.address at order time) is shown in
+  // the rider's copy text; it's ALSO extracted as modal-button metadata here.
+  // Old orders may carry an https waze fallback — that's kept out of the copy
+  // text and used ONLY to power the modal's "Open in Waze" button fallback.
   const addr = String(order.address || '');
   const appMatch = addr.match(/waze:\/\/[^\s]*/);
   const httpsMatch = addr.match(/https?:\/\/[^\s]*waze\.com[^\s]*/);
   const wazeApp = appMatch ? appMatch[0] : '';
   const wazeUrl = httpsMatch ? httpsMatch[0] : '';
+
+  // Address block for the rider: plain address + single waze:// app link.
+  const cleanAddr = cleanAddressForCard(order.address);
+  const riderAddr = wazeApp ? `${cleanAddr}\n📍 Navigate (opens Waze app): ${wazeApp}` : cleanAddr;
+  const deliveryTo = order.order_type === 'delivery' ? `Delivery to;\n${riderAddr || 'Pickup'}` : 'Pickup order';
 
   return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo};;;WAZE=${encodeURIComponent(JSON.stringify({ app: wazeApp, https: wazeUrl }))}`;
 }
@@ -1150,7 +1172,7 @@ views.orders = async (main) => {
           </div>
           <div class="oc-cust">
             <span class="oc-line">👤 ${esc(o.customer_name || '—')} <span class="muted">${esc(o.phone || '')}</span></span>
-            <span class="oc-line">${o.order_type === 'delivery' ? '🚚 ' + esc(o.address || '') : '🏬 Pickup'}</span>
+            <span class="oc-line">${o.order_type === 'delivery' ? '🚚 ' + esc(cleanAddressForCard(o.address)) : '🏬 Pickup'}</span>
             ${o.fulfillment_date ? `<span class="oc-line">📅 ${esc(o.fulfillment_date)} <span class="muted">${esc(o.time_slot || '')}</span></span>` : ''}
             <span class="oc-line"><span class="badge b-${esc(o.payment_status)}">${esc(o.payment_status)}</span>${o.payment_method ? ` <span class="muted">${esc(o.payment_method)}</span>` : ''}</span>
           </div>

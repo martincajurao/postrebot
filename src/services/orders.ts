@@ -132,14 +132,12 @@ export async function createOrderFromCart(
     if (origin) {
       const calc = computeDeliveryFee(origin.lat, origin.lng, lat, lng);
       deliveryFee = calc.fee;
-      // Attach the Waze links to the delivery address so the rider can navigate
+      // Attach the Waze link to the delivery address so the rider can navigate
       // with one tap straight from the admin order view. The custom scheme
-      // (waze://) opens the APP directly even from inside Messenger's webview;
-      // the https link is the fallback for phones without Waze installed.
+      // (waze://) opens the APP directly — even from inside Messenger's webview.
       const wazeApp = buildWazeAppUrl(lat, lng);
-      const waze = buildWazeUrl(lat, lng);
       const base = (details.address || '').trim();
-      const navLines = `📍 Navigate (opens Waze app): ${wazeApp}\n📍 Fallback (browser): ${waze}`;
+      const navLines = `📍 Navigate (opens Waze app): ${wazeApp}`;
       addressWithWaze = base
         ? (base.includes('waze://') ? base : `${base}\n${navLines}`)
         : navLines;

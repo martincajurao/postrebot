@@ -2711,6 +2711,38 @@ let pendingCoords = null;
 let pinSource = null;
 
 /** Drop/move the pin and remember the chosen point. */
+/** Smoothly zoom the map into the pinned coordinates. Works around the two
+ *  classic Leaflet-in-modal pitfalls: (1) the container hasn't settled when
+ *  the modal just opened (setView silently no-ops) — invalidateSize first and
+ *  fly on the next frame; (2) the map may not exist yet at all (GPS won the
+ *  race against Leaflet loading) — pin when it becomes available. */
+function zoomMapToPin(coords, zoom, smooth, fromGps) {
+  if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) return;
+  if (!mapAvailable() || !locMap) {
+    // Map not ready yet (e.g. GPS won the race against Leaflet loading) —
+    // keep the coords pending; the gate already covers the no-map fallback.
+    pendingCoords = { lat: coords.lat, lng: coords.lng };
+    pinSource = fromGps ? 'gps' : 'pin';
+    updateLocConfirmState();
+    return;
+  }
+  setMapPin(coords, !!fromGps);
+  // Next frame(s): invalidateSize so the container is measured, then fly/set.
+  const doFly = () => {
+    if (!locMap) return;
+    try {
+      locMap.invalidateSize();
+      const target = [coords.lat, coords.lng];
+      if (smooth && typeof locMap.flyTo === 'function') locMap.flyTo(target, zoom, { duration: 0.6 });
+      else locMap.setView(target, zoom);
+    } catch (e) {
+      console.warn('[webview] map zoom failed:', e && e.message);
+      try { locMap.setView([coords.lat, coords.lng], zoom); } catch { /* ignore */ }
+    }
+  };
+  requestAnimationFrame(() => setTimeout(doFly, 60));
+}
+
 function setMapPin(latlng, fromGps) {
   pendingCoords = { lat: latlng.lat, lng: latlng.lng };
   pinSource = fromGps ? 'gps' : 'pin';
@@ -2792,14 +2824,7 @@ function useCurrentLocation() {
       if (settled) return; // custom timeout already fired — abandon
       clearTimeout(safetyNet);
       const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      if (mapAvailable()) {
-        setMapPin(coords, true);
-        locMap.setView([coords.lat, coords.lng], 16);
-      } else {
-        pendingCoords = coords;
-        pinSource = 'gps';
-        updateLocConfirmState();
-      }
+      zoomMapToPin(coords, 16, true, true);
       // Reverse-geocode with its own short timeout so a hung Geocoder can't
       // trap the customer either. If it fails, keep the pin and let them type.
       try {
@@ -2832,14 +2857,7 @@ function useCurrentLocation() {
         resetBtn();
         if (ip) {
           const coords = { lat: ip.lat, lng: ip.lng };
-          if (mapAvailable()) {
-            setMapPin(coords, false);
-            locMap.setView([coords.lat, coords.lng], 14);
-          } else {
-            pendingCoords = coords;
-            pinSource = 'gps';
-            updateLocConfirmState();
-          }
+          zoomMapToPin(coords, 14, true, false);
           // Best-effort reverse geocode of the approximate point.
           Promise.race([
             reverseGeocode(coords.lat, coords.lng),
@@ -2933,14 +2951,7 @@ async function geocodeAddress(query) {
 function selectSearchResult(result) {
   if (!result || !result.lat || !result.lng) return;
   const coords = { lat: result.lat, lng: result.lng };
-  if (mapAvailable()) {
-    setMapPin(coords, false);
-    locMap.setView([coords.lat, coords.lng], 16);
-  } else {
-    pendingCoords = coords;
-    pinSource = 'pin';
-    updateLocConfirmState();
-  }
+  zoomMapToPin(coords, 16, true, false);
   const addrEl = $id('loc-address');
   if (addrEl) {
     addrEl.value = result.label;
