@@ -422,11 +422,14 @@ r.post('/checkout', async (req, res) => {
     res.json({ ok: true, order_id: order.orderId, order_number: order.orderNumber, total: order.total });
 
     // Update customer info and send notification after response (non-blocking)
-    if (phone || address || name) {
+    const dLat = Number(delivery_lat) || undefined;
+    const dLng = Number(delivery_lng) || undefined;
+    if (phone || address || name || (dLat && dLng)) {
       const updates: Record<string, any> = {};
       if (phone) updates.phone = phone;
       if (address) updates.address = address;
       if (name) updates.name = name;
+      if (dLat && dLng) { updates.delivery_lat = dLat; updates.delivery_lng = dLng; }
       new Promise((resolve) => { resolve(supa().from('customers').update(updates).eq('id', custId)); }).catch(() => {});
     }
 

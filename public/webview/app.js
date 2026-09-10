@@ -2034,12 +2034,12 @@ async function placeOrder() {
     return out;
   });
 
-  // Delivery-fee groundwork: attach the confirmed location's coordinates so
-  // the server can compute a distance-based fee (fee engine comes later —
-  // the server currently ignores these fields, which is harmless).
+  // Attach the confirmed location's coordinates so the server can compute the
+  // distance-based delivery fee AND generate the rider's Waze link. The keys
+  // MUST match the server's expected `delivery_lat` / `delivery_lng`.
   const savedLoc = getSavedLocation();
   const orderCoords = (savedLoc && savedLoc.lat != null && savedLoc.lng != null)
-    ? { lat: savedLoc.lat, lng: savedLoc.lng }
+    ? { delivery_lat: savedLoc.lat, delivery_lng: savedLoc.lng }
     : {};
 
   let result;

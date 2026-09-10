@@ -1,6 +1,29 @@
 import 'dotenv/config';
+import { createOrderFromCart } from '../src/services/orders';
 import { supa } from '../src/db/supabase';
 
-supa().from('orders').select('id,order_number,order_type,address,created_at').order('id', { ascending: false }).limit(5)
-  .then((r) => { console.log(JSON.stringify(r.data, null, 1)); process.exit(0); })
-  .catch((e) => { console.error(e.message); process.exit(1); });
+(async () => {
+  const r = await createOrderFromCart('wv_testcoords', {
+    customer_id: 1,
+    order_type: 'delivery',
+    address: 'Test St. 123',
+    phone: '09170000001',
+    delivery_lat: 12.105,
+    delivery_lng: 124.62,
+  }, [
+    { product_id: 103, quantity: 1, variant_size: 'M' },
+  ]);
+  const { data } = await supa()
+    .from('orders')
+    .select('order_number, address, delivery_fee, total')
+    .eq('id', r.orderId)
+    .maybeSingle();
+  console.log(JSON.stringify(data, null, 2));
+  await supa().from('order_items').delete().eq('order_id', r.orderId);
+  await supa().from('orders').delete().eq('id', r.orderId);
+  process.exit(0);
+})().catch((e) => {
+  console.error('ERR', e.message);
+  process.exit(1);
+});
+
