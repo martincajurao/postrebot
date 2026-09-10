@@ -563,23 +563,39 @@ async function loadOrders() {
 function renderCategories() {
   // Category rail removed — customers now land on the packages-first home.
   renderCategorySections();
-  // Wire up the packages promo banner at the top of the home.
-  const promo = $id('cat-packages-promo');
-  if (promo) {
-    const sub = $id('packages-promo-sub');
-    if (sub) sub.textContent = packages.length > 0
-      ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' — save more!'
-      : 'Save more when you order combos';
-    promo.style.display = packages.length > 0 ? 'block' : 'none';
-  }
-  const pp = $id('promo-packages');
-  if (pp) pp.textContent = packages.length > 0
-    ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' available'
-    : 'No packages right now';
+  renderBestValueCarousel();
   const pf = $id('promo-foodpacks');
   if (pf) pf.textContent = foodPacks.length > 0
     ? foodPacks.length + ' pack' + (foodPacks.length === 1 ? '' : 's') + ' available'
     : 'No food packs right now';
+}
+
+/** Render the Best Value packages carousel at the top of the home menu. */
+function renderBestValueCarousel() {
+  const section = $id('best-value-section');
+  const carousel = $id('best-value-carousel');
+  if (!section || !carousel) return;
+  if (!packages || packages.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  carousel.innerHTML = packages.map((pkg) => {
+    const img = imageHtml(pkg.photo_url, pkg.name);
+    const desc = pkg.description ? `<div class="pkg-desc">${esc(pkg.description)}</div>` : '';
+    const price = packageCardPrice(pkg, cardSizes['package-' + pkg.id]);
+    return `<div class="pkg-card" onclick="showPackageDetail(${pkg.id})">
+      ${img}
+      <div class="pkg-info">
+        <div class="pkg-name">${esc(pkg.name)}</div>
+        ${desc}
+        <div class="pkg-price-row">
+          <span class="pkg-price">${price}</span>
+          <button class="pkg-add-btn" onclick="addToCartPackageQuick(${pkg.id}, event)">+ Add</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ---------- Products ----------
