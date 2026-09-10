@@ -14,6 +14,7 @@ import { sendPushToAdmins } from '../services/push';
 import { sendText } from '../messenger/send';
 import { packageDefaults } from '../services/pricing';
 import { getStoreInfo } from '../services/store-info';
+import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey } from '../services/branches';
 
 const r = Router();
 
@@ -98,11 +99,18 @@ r.get('/products', async (req, res) => {
     const { data: products, error } = await query;
     if (error) return res.status(500).json({ error: error.message });
 
+    // Optional ?branch= filter: rows with no branches (NULL/[]) are universal
+    // and always match; rows are kept only when they include the branch.
+    const branch = typeof req.query.branch === 'string' ? req.query.branch : undefined;
+
     // Expose both variants and product_variants for backward and forward compatibility
-    const formatted = (products || []).map((p: any) => ({
-      ...p,
-      variants: p.product_variants || [],
-    }));
+    const formatted = (products || [])
+      .filter((p: any) => availableAtBranch(p, branch))
+      .map((p: any) => ({
+        ...p,
+        variants: p.product_variants || [],
+        branches: parseBranches(p.branches),
+      }));
     res.json(formatted);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -127,7 +135,7 @@ r.get('/products/:id', async (req, res) => {
   }
 });
 
-r.get('/packages', async (_req, res) => {
+r.get('/packages', async (req, res) => {
   try {
     const { data: packages, error } = await supa()
       .from('packages')
@@ -136,7 +144,12 @@ r.get('/packages', async (_req, res) => {
       .order('id');
     if (error) return res.status(500).json({ error: error.message });
 
-    const formatted = (packages || []).map((pkg: any) => {
+    // Optional ?branch= filter — packages with no branch restriction are universal.
+    const branch = typeof req.query.branch === 'string' ? req.query.branch : undefined;
+
+    const formatted = (packages || [])
+      .filter((pkg: any) => availableAtBranch(pkg, branch))
+      .map((pkg: any) => {
       const rawSlots = pkg.package_slots || [];
       const slots = rawSlots
         .sort((a: any, b: any) => (a.slot_number || 0) - (b.slot_number || 0))
@@ -157,6 +170,7 @@ r.get('/packages', async (_req, res) => {
         });
       return {
         ...pkg,
+        branches: parseBranches(pkg.branches),
         slots,
         package_slots: slots,
       };
@@ -205,11 +219,15 @@ r.get('/packages/:id', async (req, res) => {
   }
 });
 
-r.get('/food-packs', async (_req, res) => {
+r.get('/food-packs', async (req, res) => {
   try {
     const { data, error } = await supa().from('food_packs').select('*').eq('active', 1).order('sort_order');
     if (error) return res.status(500).json({ error: error.message });
-    res.json(data || []);
+    const branch = typeof req.query.branch === 'string' ? req.query.branch : undefined;
+    const formatted = (data || [])
+      .filter((fp: any) => availableAtBranch(fp, branch))
+      .map((fp: any) => ({ ...fp, branches: parseBranches(fp.branches) }));
+    res.json(formatted);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -522,6 +540,35 @@ r.get('/enabled', async (_req, res) => {
   } catch {
     // If table doesn't exist or any error, default to enabled
     res.json({ enabled: true });
+  }
+});
+
+// ---- Branches (location availability) ----
+
+/** Branch list + GPS centers, used by the webview to pick the customer's
+ *  branch from their GPS position. */
+r.get('/branches', async (_req, res) => {
+  try {
+    const catalog = await getBranchCatalog();
+    res.json({ branches: catalog });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Which branch serves a given coordinate. lat/lng should be passed as query
+ *  params; returns { branch: 'naga' | 'samar' | null }. */
+r.get('/branches/nearest', async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ error: 'Valid lat and lng are required' });
+    }
+    const catalog = await getBranchCatalog();
+    res.json({ branch: nearestBranchKey(lat, lng, catalog) });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

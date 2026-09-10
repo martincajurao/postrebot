@@ -10,6 +10,8 @@
     "postinstall": "npm run build",
     "test": "tsx -r dotenv/config test-webview-crud.ts",
     "test:webview": "tsx -r dotenv/config test-webview-crud.ts",
+    "backup": "node scripts/backup-db.mjs",
+    "test:branches": "tsx scripts/smoke-branches.ts",
     "gen:vapid": "tsx src/services/gen-vapid.ts"
   },
   "dependencies": {

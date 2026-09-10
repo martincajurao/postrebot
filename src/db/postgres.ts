@@ -350,4 +350,28 @@ async function seedDefaults(): Promise<void> {
       )
       WHERE order_package_items.order_item_id = oi.id AND order_package_items.product_id IS NULL`);
   }
+
+  // v11: Branches (location) availability. products/packages store a 'branches'
+  // TEXT column holding a JSON array of branch keys ('["naga","samar"]');
+  // NULL / empty means the item is available at every branch. The branch list
+  // itself lives in app_settings['branches'] and defaults to naga, samar.
+  const branchColsProd = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['products'])).map((c: any) => c.column_name);
+  if (!branchColsProd.includes('branches')) {
+    await query('ALTER TABLE products ADD COLUMN branches TEXT;');
+  }
+  const branchColsPkg = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['packages'])).map((c: any) => c.column_name);
+  if (!branchColsPkg.includes('branches')) {
+    await query('ALTER TABLE packages ADD COLUMN branches TEXT;');
+  }
+  const branchColsFp = (await many<any>('SELECT column_name FROM information_schema.columns WHERE table_name = $1', ['food_packs'])).map((c: any) => c.column_name);
+  if (!branchColsFp.includes('branches')) {
+    await query('ALTER TABLE food_packs ADD COLUMN branches TEXT;');
+  }
+  // Seed the default branch list so /api/admin/branches & package/menu editors
+  // can render checkboxes even before an admin saves their own list.
+  await run(`
+    INSERT INTO app_settings (key, value, updated_at)
+    SELECT 'branches', '["naga","samar"]', now()::text
+    WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'branches')
+  `);
 }

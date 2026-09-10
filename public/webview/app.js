@@ -57,6 +57,17 @@ let categories = [];
 let products = [];
 let packages = [];
 let foodPacks = [];
+// Full, branch-unfiltered catalogs — the display lists above are filtered to
+// the customer's branch (activeBranch). Kept separate so changing branches
+// (or re-opening the gate) never needs a re-fetch.
+let allProducts = [];
+let allPackages = [];
+let allFoodPacks = [];
+// Branches & the customer's detected branch (lowercase key, e.g. 'naga').
+// Loaded from /api/webview/branches; activeBranch comes from the GPS/pin
+// confirmed in the location gate (nearest branch center).
+let branchCatalog = [];
+let activeBranch = null;
 let cart = { items: [], totals: { subtotal: 0, delivery: 0, discount: 0, total: 0, breakdown: [] } };
 let orders = [];
 let config = { payment: {}, contact: {} };
@@ -317,21 +328,22 @@ async function loadCategories() {
 async function loadProducts() {
   try {
     const data = await api('/products');
-    products = Array.isArray(data) ? data : [];
+    allProducts = Array.isArray(data) ? data : [];
   } catch (e) {
     console.warn('[webview] /products via API failed:', e && e.message);
     const client = getSupabaseClient();
-    if (!client) { products = []; }
+    if (!client) { allProducts = []; }
     else {
       try {
         const { data } = await client.from('products')
           .select('*, product_variants(*)')
           .eq('active', 1)
           .order('category_id, sort_order');
-        products = (data || []).map((p) => ({ ...p, variants: p.product_variants || [] }));
-      } catch { products = []; }
+        allProducts = (data || []).map((p) => ({ ...p, variants: p.product_variants || [] }));
+      } catch { allProducts = []; }
     }
   }
+  products = allProducts; // replaced later by applyBranchFilter()
 }
 
 /** Normalize package payloads so every package has `slots` with `options` (name + photo). */
@@ -355,39 +367,102 @@ function normalizePackages(list) {
 async function loadPackages() {
   try {
     const data = await api('/packages');
-    packages = normalizePackages(Array.isArray(data) ? data : []);
+    allPackages = normalizePackages(Array.isArray(data) ? data : []);
   } catch (e) {
     console.warn('[webview] /packages via API failed:', e && e.message);
     const client = getSupabaseClient();
-    if (!client) { packages = []; }
+    if (!client) { allPackages = []; }
     else {
       try {
         const { data } = await client.from('packages')
           .select('*, package_slots:package_slots(*, package_options:package_options(*, products(name, photo_url)))')
           .eq('active', 1)
           .order('id');
-        packages = normalizePackages(data || []);
-      } catch { packages = []; }
+        allPackages = normalizePackages(data || []);
+      } catch { allPackages = []; }
     }
   }
+  packages = allPackages; // replaced later by applyBranchFilter()
 }
 
 async function loadFoodPacks() {
   try {
     const data = await api('/food-packs');
-    foodPacks = Array.isArray(data) ? data : [];
+    allFoodPacks = Array.isArray(data) ? data : [];
   } catch (e) {
     console.warn('[webview] /food-packs via API failed:', e && e.message);
     const client = getSupabaseClient();
-    if (!client) { foodPacks = []; }
+    if (!client) { allFoodPacks = []; }
     else {
       try {
         const { data } = await client.from('food_packs').select('*').eq('active', 1).order('sort_order');
-        foodPacks = data || [];
-      } catch { foodPacks = []; }
+        allFoodPacks = data || [];
+      } catch { allFoodPacks = []; }
     }
   }
+  foodPacks = allFoodPacks; // replaced later by applyBranchFilter()
 }
+// ---------- Branch filtering (GPS-detected) ----------
+// The customer's branch is detected from the delivery location they confirm in
+// the location gate (device GPS or map pin → nearest branch center via
+// /api/webview/branches/nearest). Once known, the menu only shows products,
+// packages and food packs available at that branch. Items with an empty
+// branches list are available everywhere.
+
+/** Client-side mirror of availableAtBranch() — item.branches may arrive as an
+ *  array (REST) or a JSON/comma string (direct Supabase fallback). */
+function clientAvailableAtBranch(item, branch) {
+  if (!branch) return true;
+  let list = item && item.branches;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { list = list.split(','); }
+  }
+  if (!Array.isArray(list) || list.length === 0) return true; // empty = all branches
+  return list.map((b) => String(b).trim().toLowerCase()).includes(branch);
+}
+
+/** Apply the active branch to the display catalogs and re-render what's on screen. */
+function applyBranchFilter() {
+  const b = activeBranch;
+  products = b ? allProducts.filter((p) => clientAvailableAtBranch(p, b)) : allProducts;
+  packages = b ? allPackages.filter((p) => clientAvailableAtBranch(p, b)) : allPackages;
+  foodPacks = b ? allFoodPacks.filter((f) => clientAvailableAtBranch(f, b)) : allFoodPacks;
+  console.log('[webview] branch filter applied →', b, {
+    products: products.length, packages: packages.length, foodPacks: foodPacks.length,
+  });
+  // Re-render whatever is currently visible so the change is immediate.
+  renderCategories();
+  if (currentView === 'products' && currentCategoryId) showProducts(currentCategoryId);
+  else if (currentView === 'packages') showPackages();
+  else if (currentView === 'foodpacks') showFoodPacks();
+}
+
+/** Ask the server which branch serves these coordinates, switch to it and
+ *  filter the menu. Returns the branch key (or null when it can't be resolved). */
+async function detectBranchFromCoords(lat, lng) {
+  try {
+    const data = await api('/branches/nearest?lat=' + encodeURIComponent(lat) + '&lng=' + encodeURIComponent(lng));
+    const branch = data && data.branch ? String(data.branch).toLowerCase() : null;
+    if (branch && branch !== activeBranch) {
+      activeBranch = branch;
+      storageSet('webview_branch_' + sessionId, branch);
+      applyBranchFilter();
+    }
+    return branch;
+  } catch (e) {
+    console.warn('[webview] /branches/nearest failed — showing all items:', e && e.message);
+    return null;
+  }
+}
+
+/** Branch banner text for the home header (null when no branch is active). */
+function activeBranchName() {
+  if (!activeBranch) return null;
+  const entry = (branchCatalog || []).find((b) => b.key === activeBranch);
+  return entry ? entry.name : activeBranch.charAt(0).toUpperCase() + activeBranch.slice(1);
+}
+
+
 
 // ---------- Local cart (no DB round-trips) ----------
 // The cart lives entirely in the webview (in-memory + localStorage) so adding
@@ -2565,7 +2640,7 @@ function updateLocConfirmState() {
 }
 
 /** Confirm button — validate and persist the delivery location, then unlock home. */
-function confirmLocation() {
+async function confirmLocation() {
   hideLocError();
   const address = (($id('loc-address') && $id('loc-address').value) || '').trim();
   if (address.length < 5) {
@@ -2593,10 +2668,18 @@ function confirmLocation() {
   //      recover coordinates and compute a distance-based fee.
   // For now the location is stored as-is and the checkout delivery line stays
   // "To be decided" until the fee logic is wired up.
+  const confirmedLat = pendingCoords ? pendingCoords.lat : null;
+  const confirmedLng = pendingCoords ? pendingCoords.lng : null;
   pendingCoords = null;
   pinSource = null;
   hideLocationGate();
   showToast('📍 Location saved!');
+  // Detect which branch serves this location (GPS / map pin only — manual
+  // addresses without coordinates fall back to the last-known branch, if any).
+  if (Number.isFinite(confirmedLat) && Number.isFinite(confirmedLng)) {
+    const branch = await detectBranchFromCoords(confirmedLat, confirmedLng);
+    if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
+  }
 }
 
 // ---------- Init ----------
@@ -2691,11 +2774,29 @@ async function init() {
   recalcCartTotals();
   storageSet(LOCAL_CART_KEY(), JSON.stringify(cart));
   updateCartBadge();
+
+  // Branch (GPS-based menu filtering): load the branch catalog, then restore
+  // the last-known branch and re-detect it from the saved delivery location's
+  // coordinates — all BEFORE the first render so the menu starts filtered.
+  try {
+    const bData = await api('/branches');
+    if (bData && Array.isArray(bData.branches)) branchCatalog = bData.branches;
+  } catch (e) {
+    console.warn('[webview] /branches failed — branch filter still works from item data:', e && e.message);
+  }
+  activeBranch = storageGet('webview_branch_' + sessionId) || null;
+  const savedLoc = getSavedLocation();
+  if (savedLoc && Number.isFinite(savedLoc.lat) && Number.isFinite(savedLoc.lng)) {
+    await detectBranchFromCoords(savedLoc.lat, savedLoc.lng);
+  }
+  applyBranchFilter();
+
   console.log('[webview] init complete →', {
     categories: categories.length,
     products: products.length,
     packages: packages.length,
     foodPacks: foodPacks.length,
+    branch: activeBranch,
     cartItems: cart.items.length,
     orders: orders.length,
     sessionId,

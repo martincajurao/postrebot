@@ -11,6 +11,7 @@ import {
 } from '../services/reservations';
 import { choiceUpgrade, computeCartTotals, packageDefaults, priceProduct } from '../services/pricing';
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
+import { getBranches, saveBranches, parseBranches, serializeBranches, getBranchCoords, saveBranchCoords } from '../services/branches';
 import { notifyOrderStatus, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
 const r = Router();
@@ -112,12 +113,16 @@ r.get('/products', async (_req, res) => {
   ]);
   const products = prodRows.data || [];
   const variants = varRows.data || [];
-  res.json(products.map((p: any) => ({ ...p, variants: variants.filter((v: any) => v.product_id === p.id) })));
+  res.json(products.map((p: any) => ({
+    ...p,
+    variants: variants.filter((v: any) => v.product_id === p.id),
+    branches: parseBranches(p.branches),
+  })));
 });
 r.post('/products', async (req, res) => {
-  const { category_id, name, description, photo_url, variants = [] } = req.body;
+  const { category_id, name, description, photo_url, variants = [], branches } = req.body;
   const { data: prodRow, error: prodErr } = await supa().from('products')
-    .insert({ category_id, name, description: description ?? null, photo_url: photo_url ?? null })
+    .insert({ category_id, name, description: description ?? null, photo_url: photo_url ?? null, branches: serializeBranches(branches) })
     .select('id').single();
   if (prodErr) return res.status(400).json({ error: prodErr.message });
   const pid = Number(prodRow.id);
@@ -129,7 +134,7 @@ r.post('/products', async (req, res) => {
   res.json({ id: pid });
 });
 r.put('/products/:id', async (req, res) => {
-  const { name, description, photo_url, category_id, active, unavailable } = req.body;
+  const { name, description, photo_url, category_id, active, unavailable, branches } = req.body;
   const upd: Record<string, any> = {};
   if (name != null) upd.name = name;
   if (description != null) upd.description = description;
@@ -137,6 +142,7 @@ r.put('/products/:id', async (req, res) => {
   if (category_id != null) upd.category_id = category_id;
   if (active != null) upd.active = active;
   if (unavailable != null) upd.unavailable = unavailable;
+  if (branches != null) upd.branches = serializeBranches(branches);
   if (Object.keys(upd).length > 0) await supa().from('products').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
@@ -193,6 +199,7 @@ r.get('/packages', async (_req, res) => {
   const opts = (options || []).map((o: any) => ({ ...o, product_name: o.products?.name ?? null, products: undefined }));
   res.json(packages.map((p: any) => ({
     ...p,
+    branches: parseBranches(p.branches),
     slots: slots.filter((s: any) => s.package_id === p.id).map((s: any) => ({
       ...s,
       options: opts.filter((o: any) => o.slot_id === s.id),
@@ -200,15 +207,15 @@ r.get('/packages', async (_req, res) => {
   })));
 });
 r.post('/packages', async (req, res) => {
-  const { name, description, photo_url, base_price, selections, discount = 0, is_fixed = 0, is_custom = 0 } = req.body;
+  const { name, description, photo_url, base_price, selections, discount = 0, is_fixed = 0, is_custom = 0, branches } = req.body;
   const { data, error } = await supa().from('packages')
-    .insert({ name, description: description ?? null, photo_url: photo_url ?? null, base_price, selections, discount, is_fixed, is_custom })
+    .insert({ name, description: description ?? null, photo_url: photo_url ?? null, base_price, selections, discount, is_fixed, is_custom, branches: serializeBranches(branches) })
     .select('id').single();
   if (error) return res.status(400).json({ error: error.message });
   res.json({ id: Number(data.id) });
 });
 r.put('/packages/:id', async (req, res) => {
-  const { name, description, photo_url, base_price, selections, active, discount, is_fixed, is_custom } = req.body;
+  const { name, description, photo_url, base_price, selections, active, discount, is_fixed, is_custom, branches } = req.body;
   const upd: Record<string, any> = {};
   if (name != null) upd.name = name;
   if (description != null) upd.description = description;
@@ -219,6 +226,7 @@ r.put('/packages/:id', async (req, res) => {
   if (discount != null) upd.discount = discount;
   if (is_fixed != null) upd.is_fixed = is_fixed;
   if (is_custom != null) upd.is_custom = is_custom;
+  if (branches != null) upd.branches = serializeBranches(branches);
   if (Object.keys(upd).length > 0) await supa().from('packages').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
@@ -300,19 +308,19 @@ r.delete('/options/:id', async (req, res) => {
 // ---- Food Packs (simple fixed-price bundles) ----
 r.get('/food-packs', async (_req, res) => {
   const { data } = await supa().from('food_packs').select('*').order('sort_order, id');
-  res.json(data || []);
+  res.json((data || []).map((fp: any) => ({ ...fp, branches: parseBranches(fp.branches) })));
 });
 r.post('/food-packs', async (req, res) => {
-  const { name, description, photo_url, price, serves, sort_order = 0, active = 1 } = req.body;
+  const { name, description, photo_url, price, serves, sort_order = 0, active = 1, branches } = req.body;
   if (!name || price == null) return res.status(400).json({ error: 'name and price are required' });
   const { data, error } = await supa().from('food_packs')
-    .insert({ name, description: description ?? null, photo_url: photo_url ?? null, price, serves: serves ?? null, sort_order, active })
+    .insert({ name, description: description ?? null, photo_url: photo_url ?? null, price, serves: serves ?? null, sort_order, active, branches: serializeBranches(branches) })
     .select('id').single();
   if (error) return res.status(400).json({ error: error.message });
   res.json({ id: Number(data.id) });
 });
 r.put('/food-packs/:id', async (req, res) => {
-  const { name, description, photo_url, price, serves, sort_order, active } = req.body;
+  const { name, description, photo_url, price, serves, sort_order, active, branches } = req.body;
   const upd: Record<string, any> = {};
   if (name != null) upd.name = name;
   if (description != null) upd.description = description;
@@ -321,6 +329,7 @@ r.put('/food-packs/:id', async (req, res) => {
   if (serves != null) upd.serves = serves;
   if (sort_order != null) upd.sort_order = sort_order;
   if (active != null) upd.active = active;
+  if (branches != null) upd.branches = serializeBranches(branches);
   if (Object.keys(upd).length > 0) await supa().from('food_packs').update(upd).eq('id', req.params.id);
   res.json({ ok: true });
 });
@@ -1324,6 +1333,27 @@ r.put('/settings/:key', async (req, res) => {
     await supa().from('app_settings').insert({ key, value: String(value), updated_at: now });
   }
   res.json({ ok: true });
+});
+
+// ---- Branches / Locations (availability list used by Menu & Packages) ----
+
+r.get('/branches', async (_req, res) => {
+  const branches = await getBranches();
+  const coords = await getBranchCoords();
+  res.json({ branches, coords });
+});
+
+r.put('/branches', async (req, res) => {
+  try {
+    const branches = await saveBranches(req.body?.branches);
+    if (req.body?.coords != null) {
+      await saveBranchCoords(req.body.coords);
+    }
+    const coords = await getBranchCoords();
+    res.json({ ok: true, branches, coords });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default r;

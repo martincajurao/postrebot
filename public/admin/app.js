@@ -33,6 +33,35 @@ async function api(path, opts = {}) {
 }
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const peso = (n) => '₱' + Number(n || 0).toLocaleString('en-PH');
+// ---------- Branches / Locations (availability) ----------
+// Mirrors src/services/branches.ts. The active list loads from /api/admin/branches.
+let BRANCHES = ['naga', 'samar'];
+const branchTitle = (b) => (b.length === 1 ? b.toUpperCase() : b.charAt(0).toUpperCase() + b.slice(1));
+/** Checkbox group for "available at branches". All-checked === available everywhere. */
+function branchChecks(idPrefix, selected = []) {
+  if (!BRANCHES.length) return '<p class="muted">No branches configured — add them in Settings → Branches / Locations.</p>';
+  const set = new Set((selected || []).map((b) => String(b).toLowerCase()));
+  return `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+    ${BRANCHES.map((b) => {
+      const key = String(b).toLowerCase();
+      return `<label style="display:flex;align-items:center;gap:6px;font-size:13px;background:#f6f7f9;border:1px solid #e2e5e8;border-radius:8px;padding:6px 10px;cursor:pointer">
+        <input type="checkbox" data-branch data-group="${idPrefix}" value="${esc(key)}" style="width:auto" ${set.size === 0 || set.has(key) ? 'checked' : ''}> ${esc(branchTitle(key))}</label>`;
+    }).join('')}
+  </div><p class="muted" style="font-size:12px;margin-top:4px">Leave all checked to offer it at every branch — uncheck a branch to hide it there.</p>`;
+}
+/** Read a branch checkbox group. null = all branches; otherwise the array of branch keys. */
+function branchValues(group) {
+  const boxes = Array.from(document.querySelectorAll(`[data-branch][data-group="${group}"]`));
+  if (!boxes.length) return null;
+  const checked = boxes.filter((c) => c.checked).map((c) => c.value);
+  return (checked.length === 0 || checked.length === BRANCHES.length) ? null : checked;
+}
+/** Badges shown in list views: the branches an item IS available at, or "All branches". */
+function branchBadges(item) {
+  const list = item?.branches || [];
+  if (!list.length) return '<span class="muted">All branches</span>';
+  return list.map((b) => `<span class="badge b-CONFIRMED">${esc(b)}</span>`).join(' ');
+}
 function toast(msg, err = false) {
   const t = document.createElement('div');
   t.className = 'toast' + (err ? ' err' : '');
@@ -1677,7 +1706,8 @@ views.reservations = async (main) => {
 
 /* ================= MENU ================= */
 views.menu = async (main) => {
-  const [products, cats] = await Promise.all([api('/products'), api('/categories')]);
+  const [products, cats, branchData] = await Promise.all([api('/products'), api('/categories'), api('/branches')]);
+  if (branchData?.branches?.length) BRANCHES = branchData.branches;
   const activeTab = sessionStorage.getItem('menuTab') || 'products';
 
   const renderProducts = () => {
@@ -1698,12 +1728,13 @@ views.menu = async (main) => {
         <td>${esc((cats.find((c) => c.id === p.category_id) || {}).name || '—')}</td>
         <td>${(p.variants || []).map((v) => `${esc(v.size)} ${peso(v.price)}`).join(' • ') || '<span class="muted">none</span>'}</td>
         <td>${p.unavailable ? '<span class="badge b-CANCELLED">Unavailable</span>' : (p.active ? '<span class="badge b-CONFIRMED">Available</span>' : '<span class="badge b-COMPLETED">Inactive</span>')}</td>
+        <td>${branchBadges(p)}</td>
         <td><div class="row-actions">
           <button class="btn ghost sm" data-edit="${p.id}">Edit</button>
           <button class="btn ghost sm" data-variants="${p.id}">Prices</button>
           <button class="btn ghost sm" data-deact="${p.id}">${p.active ? 'Disable' : 'Enable'}</button>
         </div></td>
-      </tr>`).join('') : '<tr><td colspan="6" class="muted">No products match your filters.</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="7" class="muted">No products match your filters.</td></tr>';
   };
 
   const renderCategories = () => {
@@ -1739,7 +1770,7 @@ views.menu = async (main) => {
           </div>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Photo</th><th>Product</th><th>Category</th><th>Variants (M/L)</th><th>Availability</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Photo</th><th>Product</th><th>Category</th><th>Variants (M/L)</th><th>Availability</th><th>Branches</th><th>Actions</th></tr></thead>
           <tbody id="prod-tbody"></tbody>
         </table></div>
       </div>
@@ -1786,6 +1817,7 @@ views.menu = async (main) => {
     </div>
     ${photoField('pf-photo', p?.photo_url)}
     <div class="field"><label>Mark unavailable?</label><select id="pf-un"><option value="0">No</option><option value="1" ${p?.unavailable ? 'selected' : ''}>Yes</option></select></div>
+    <div class="field"><label>Available at branches</label>${branchChecks('pf-br', p?.branches || [])}</div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
     <button class="btn" id="pf-save">Save</button></div>`);
   };
@@ -1819,6 +1851,7 @@ views.menu = async (main) => {
         description: document.getElementById('pf-desc').value,
         photo_url: photo_url || null,
         unavailable: Number(document.getElementById('pf-un').value),
+        branches: branchValues('pf-br'),
       };
       if (p) {
         await api(`/products/${p.id}`, { method: 'PUT', body });
@@ -1991,7 +2024,8 @@ views.foodpacks = async (main) => {
 
 /* ================= PACKAGES ================= */
 views.packages = async (main) => {
-  const [packages, products, cats] = await Promise.all([api('/packages'), api('/products'), api('/categories')]);
+  const [packages, products, cats, branchData] = await Promise.all([api('/packages'), api('/products'), api('/categories'), api('/branches')]);
+  if (branchData?.branches?.length) BRANCHES = branchData.branches;
   main.innerHTML = `
     <h2 class="page-title">Packages</h2>
     <div class="card"><button class="btn sm" id="pkg-new">＋ Add Package</button></div>
@@ -2003,7 +2037,8 @@ views.packages = async (main) => {
             <div><b>${esc(p.name)}</b> — ${p.discount > 0 ? `<s class="muted">${peso(p.base_price)}</s> ${peso(p.base_price - p.discount)} <span class="badge b-CONFIRMED">Save ${peso(p.discount)}</span>` : peso(p.base_price)}, choose ${p.selections} dishes
             ${p.is_fixed ? ' <span class="badge b-COMPLETED">fixed</span>' : ''}
             ${p.is_custom ? ' <span class="badge b-CONFIRMED">custom</span>' : ''}
-            ${p.active ? '' : ' <span class="badge b-CANCELLED">inactive</span>'}</div>
+            ${p.active ? '' : ' <span class="badge b-CANCELLED">inactive</span>'}
+            <div style="margin-top:4px">${branchBadges(p)}</div></div>
           </div>
           <div class="row-actions">
             <button class="btn ghost sm" data-pkg-edit="${p.id}">Edit</button>
@@ -2031,7 +2066,7 @@ views.packages = async (main) => {
     </div>`;
   /** Full package editor: profile + photo + fixed flag + all slots, saved together. */
   function openPackageEditor(p, draft = null) {
-    const info = draft?.info || { name: p.name, description: p.description || '', base_price: p.base_price, discount: p.discount || 0, selections: p.selections, photo_url: p.photo_url || '', is_fixed: !!p.is_fixed };
+    const info = draft?.info || { name: p.name, description: p.description || '', base_price: p.base_price, discount: p.discount || 0, selections: p.selections, photo_url: p.photo_url || '', is_fixed: !!p.is_fixed, branches: p.branches || [] };
     const slots = draft?.slots || slotRowsOf(p, info.selections);
     // Base price is derived: sum of each slot's default dish price (cheapest variant).
     const minPrice = (pid) => {
@@ -2055,6 +2090,7 @@ views.packages = async (main) => {
       ${photoField('pn-photo', info.photo_url)}
       <div class="field"><label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink)">
         <input type="checkbox" id="pn-fixed" style="width:auto" ${info.is_fixed ? 'checked' : ''}> Fixed package (dishes pre-set — customers cannot change them)</label></div>
+      <div class="field"><label>Available at branches</label>${branchChecks('pn-br', info.branches || [])}</div>
       ${p.is_custom ? '<p class="muted">Custom package: every slot accepts <b>all menu dishes</b> automatically. Pick the dishes customers can choose (★ pre-selects the default).</p>' : ''}
       <h3 style="margin:6px 0 4px">Slots &amp; dish options</h3>
       <p class="muted" style="margin:0 0 10px">Pricing is automatic: a dish pricier than the slot's default adds the menu-price difference, and size L adds the L−M variant difference.</p>
@@ -2127,6 +2163,7 @@ views.packages = async (main) => {
       selections: Number(document.getElementById('pn-sel').value),
       photo_url: document.getElementById('pn-photo').value,
       is_fixed: document.getElementById('pn-fixed').checked ? 1 : 0,
+      branches: branchValues('pn-br'),
     });
     const readSlots = (count) => {
       const modalEl = document.getElementById('modal');
@@ -2601,9 +2638,10 @@ async function renderPushCard() {
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 views.settings = async (main) => {
-  const [hours, blocked, slots, storeInfo] = await Promise.all([
-    api('/business-hours'), api('/blocked-dates'), api('/time-slots'), api('/store-info'),
+  const [hours, blocked, slots, storeInfo, branchData] = await Promise.all([
+    api('/business-hours'), api('/blocked-dates'), api('/time-slots'), api('/store-info'), api('/branches'),
   ]);
+  if (branchData?.branches?.length) BRANCHES = branchData.branches;
   const activeTab = sessionStorage.getItem('settingsTab') || 'notifications';
   main.innerHTML = `
     <h2 class="page-title">Settings</h2>
@@ -2675,6 +2713,12 @@ views.settings = async (main) => {
       <div class="field"><label>Business hours (short line)</label><input id="si-hours" value="${esc(storeInfo.contact_hours || '')}"></div>
       <button class="btn" id="si-save">Save changes</button>
       <p class="muted" style="font-size:12px;margin-top:8px">Shown to customers in the Messenger bot (payment instructions + Contact Us) and on the web ordering page — changes go live immediately.</p>
+    </div>
+    <div class="card"><h3>📍 Branches / Locations</h3>
+      <div class="field"><label>Branch list (comma separated, e.g. <code>naga, samar</code>)</label>
+        <input id="br-list" value="${esc(BRANCHES.join(', '))}"></div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Used by <b>Menu → Products</b> and <b>Packages</b> so you can make an item available at specific branches only. Items with no branch restriction stay available everywhere. Renaming a branch does <b>not</b> update items that already have restrictions — edit those items to re-select the new branch name.</p>
+      <button class="btn" id="br-save">Save branches</button>
     </div>
     </div>`;
 
@@ -2782,6 +2826,14 @@ views.settings = async (main) => {
       contact_hours: document.getElementById('si-hours').value,
     } });
     toast('Payment & contact details saved — live for customers');
+  }));
+
+  // ---- 📍 Branches / Locations ----
+  main.querySelector('#br-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const res = await api('/branches', { method: 'PUT', body: { branches: document.getElementById('br-list').value } });
+    BRANCHES = (res.branches || BRANCHES).map((b) => String(b).toLowerCase());
+    document.getElementById('br-list').value = BRANCHES.join(', ');
+    toast('Branches saved — Menu & Packages now use this list');
   }));
 };
 

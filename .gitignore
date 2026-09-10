@@ -11,3 +11,4 @@ data/*.db.backup*
 data/admin-test.db*
 data/verify.db*
 data/image-test.db*
+data/backups/

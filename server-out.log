@@ -1,0 +1,17 @@
+[supabase] URL: https://npftxbstixrhuiaqpmap.supabase.co | SERVICE_KEY: set (sb_secret…, 41 chars) | BUCKET: postre
+Postre server listening on http://localhost:3000 (db: supabase)
+Web ordering URL: https://postrebot.onrender.com/webview
+[boot] BASE_URL=https://postrebot.onrender.com | RENDER_EXTERNAL_URL=(not set) | resolved base=https://postrebot.onrender.com | PAGE_ACCESS_TOKEN=set
+[boot] base is HTTPS — ensuring whitelist for: https://postrebot.onrender.com
+[whitelist] checking origin: https://postrebot.onrender.com (force=false)
+[fetchWhitelistedDomains] GET https://graph.facebook.com/v22.0/me/messenger_profile?fields=whitelisted_domains&access_token=***
+[fetchWhitelistedDomains] status=200 body={"data":[{"whitelisted_domains":["https://postrebot.onrender.com/"]}]}
+[whitelist] Meta whitelist: [https://postrebot.onrender.com]
+[boot] whitelistWebviewDomain resolved: true
+[boot] registering persistent menu for: https://postrebot.onrender.com
+[whitelist] checking origin: https://postrebot.onrender.com (force=false)
+[whitelist] cache hit — already whitelisted: https://postrebot.onrender.com
+[setPersistentMenu] Meta currently has: [postback|❓ How to Order|MENU_HOWTO, postback|📞 Contact Us|MENU_CONTACT, web_url|🛒 Browse Our Menu]
+[setPersistentMenu] persistent menu already up to date — no change needed.
+[boot] setPersistentMenu resolved: true
+[boot] persistent menu keep-alive every 30min
