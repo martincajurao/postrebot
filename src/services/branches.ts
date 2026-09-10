@@ -9,7 +9,7 @@
  */
 import { supa } from '../db/supabase';
 
-export const DEFAULT_BRANCHES: string[] = ['naga', 'samar'];
+export const DEFAULT_BRANCHES: string[] = ['naga', 'calbayog'];
 
 /** Normalize any stored shape (array, JSON string, comma list, empty) into branch keys. */
 export function parseBranches(v: any): string[] {
@@ -77,7 +77,7 @@ export interface BranchCatalogEntry { key: string; name: string; lat: number | n
 
 export const DEFAULT_BRANCH_COORDS: Record<string, { lat: number; lng: number }> = {
   naga: { lat: 13.6218, lng: 123.1948 },   // Naga City, Camarines Sur
-  samar: { lat: 12.067, lng: 124.583 },    // Calbayog, Samar
+  calbayog: { lat: 12.067, lng: 124.583 }, // Calbayog City, Samar
 };
 const COORDS_KEY = 'branch_coords';
 

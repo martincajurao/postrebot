@@ -35,7 +35,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const peso = (n) => '₱' + Number(n || 0).toLocaleString('en-PH');
 // ---------- Branches / Locations (availability) ----------
 // Mirrors src/services/branches.ts. The active list loads from /api/admin/branches.
-let BRANCHES = ['naga', 'samar'];
+let BRANCHES = ['naga', 'calbayog'];
 const branchTitle = (b) => (b.length === 1 ? b.toUpperCase() : b.charAt(0).toUpperCase() + b.slice(1));
 /** Checkbox group for "available at branches". All-checked === available everywhere. */
 function branchChecks(idPrefix, selected = []) {
