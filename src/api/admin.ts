@@ -11,6 +11,7 @@ import {
 } from '../services/reservations';
 import { choiceUpgrade, computeCartTotals, packageDefaults, priceProduct } from '../services/pricing';
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
+import { getServiceContent, SERVICE_CONTENT_KEYS, invalidateServiceCache } from '../services/service-content';
 import { getBranches, saveBranches, parseBranches, serializeBranches, getBranchCoords, saveBranchCoords } from '../services/branches';
 import { notifyOrderStatus, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
@@ -1307,6 +1308,32 @@ r.put('/store-info', async (req, res) => {
       else await supa().from('app_settings').insert({ key, value, updated_at: now });
     }
     invalidateStoreInfoCache();
+    res.json({ ok: true, updated: updates });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Service Content (catering messages, etc.) ----
+// Stored in app_settings (editable live in Admin → Services);
+// Cached in-process for 60s, invalidated on save.
+r.get('/service-content', async (_req, res) => {
+  try {
+    res.json(await getServiceContent());
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+r.put('/service-content', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const updates = SERVICE_CONTENT_KEYS.filter((k) => typeof body[k] === 'string');
+    if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
+    const now = new Date().toISOString();
+    for (const key of updates) {
+      const value = String(body[key]).slice(0, 5000); // larger limit for message content
+      const { data: existing } = await supa().from('app_settings').select('key').eq('key', key).maybeSingle();
+      if (existing) await supa().from('app_settings').update({ value, updated_at: now }).eq('key', key);
+      else await supa().from('app_settings').insert({ key, value, updated_at: now });
+    }
+    invalidateServiceCache();
     res.json({ ok: true, updated: updates });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

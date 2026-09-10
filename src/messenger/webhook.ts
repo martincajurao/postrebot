@@ -74,7 +74,9 @@ function envBaseUrl(): string {
   return raw;
 }
 const ENV_BASE_URL = envBaseUrl();
+export { ENV_BASE_URL };
 let requestBaseUrl = '';
+export { requestBaseUrl };
 
 /** Public URL for the webview ordering page (BASE_URL or request origin + /webview) */
 function webviewUrl(): string {

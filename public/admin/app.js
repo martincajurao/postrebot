@@ -361,6 +361,7 @@ const NAV = [
   { view: 'admins', icon: '🛡️', label: 'Admins', bottom: 'Admins', role: 'ADMIN' },
   { view: 'delivery', icon: '🚚', label: 'Delivery', bottom: 'Deliv.' },
   { view: 'settings', icon: '⚙️', label: 'Settings', bottom: 'Settings' },
+  { view: 'services', icon: '🧁', label: 'Services', bottom: 'Services', role: 'ADMIN' },
   { view: 'images', icon: '🖼️', label: 'Images', bottom: 'Images', role: 'ADMIN' },
 ];
 
@@ -2961,7 +2962,105 @@ views.admins = async (main) => {
   }));
 };
 
-/* ================= IMAGES (Supabase Storage CRUD) ================= */
+
+/* ================= SERVICES VIEW ================= */
+views.services = async (main) => {
+  const [content, uploads] = await Promise.all([
+    api('/service-content').catch(() => ({ catering_intro_text: '', catering_packages_text: '', catering_custom_text: '', catering_quote_text: '' })),
+    api('/uploads-list').catch(() => []),
+  ]);
+  const activeTab = sessionStorage.getItem('servicesTab') || 'content';
+  main.innerHTML = `
+    <h2 class="page-title">Services</h2>
+    <p class="muted" style="margin-bottom:14px">Manage catering messages and upload catering images.</p>
+    <div class="tabs" id="services-tabs">
+      <button class="tab-btn${activeTab === 'content' ? ' active' : ''}" data-tab="content">✏️ Content</button>
+      <button class="tab-btn${activeTab === 'images' ? ' active' : ''}" data-tab="images">🖼️ Images</button>
+    </div>
+    <div class="tab-pane${activeTab === 'content' ? ' active' : ''}" data-pane="content">
+      <div class="card"><h3 style="margin-bottom:8px">🧁 Catering Intro Message</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Sent when customer asks about catering.</p>
+        <textarea id="sc-intro" rows="8" style="width:100%;min-height:120px;font-family:inherit;padding:12px">${esc(content.catering_intro_text || '')}</textarea>
+      </div>
+      <div class="card"><h3 style="margin-bottom:8px">📦 Packages Message</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Shown when customer replies "packages".</p>
+        <textarea id="sc-packages" rows="6" style="width:100%;min-height:100px;font-family:inherit;padding:12px">${esc(content.catering_packages_text || '')}</textarea>
+      </div>
+      <div class="card"><h3 style="margin-bottom:8px">🎯 Custom Order Message</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Shown when customer replies "custom".</p>
+        <textarea id="sc-custom" rows="6" style="width:100%;min-height:100px;font-family:inherit;padding:12px">${esc(content.catering_custom_text || '')}</textarea>
+      </div>
+      <div class="card"><h3 style="margin-bottom:8px">💰 Quote Request Message</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Shown when customer replies "quote".</p>
+        <textarea id="sc-quote" rows="6" style="width:100%;min-height:100px;font-family:inherit;padding:12px">${esc(content.catering_quote_text || '')}</textarea>
+      </div>
+      <div style="margin-top:16px;display:flex;gap:8px">
+        <button class="btn" id="sc-save">Save All Changes</button>
+        <button class="btn ghost" id="sc-preview">Preview</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Changes go live immediately.</p>
+    </div>
+    <div class="tab-pane${activeTab === 'images' ? ' active' : ''}" data-pane="images">
+      <div class="card"><h3 style="margin-bottom:8px">⬆️ Upload Catering Images</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Upload images for the catering carousel.</p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="file" id="sc-img-file" accept="image/*" style="flex:1;min-width:180px">
+          <button class="btn sm" id="sc-img-upload">Upload</button>
+        </div>
+      </div>
+      <div class="card"><h3 style="margin-bottom:8px">📦 Bulk Upload</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Select multiple images at once.</p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="file" id="sc-img-batch" accept="image/*" multiple style="flex:1;min-width:180px">
+          <button class="btn sm" id="sc-img-batch-upload">Upload All</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:8px">🖼️ Uploaded Images (${uploads.length})</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px" id="sc-img-grid"></div>
+      </div>
+    </div>
+  `;
+  main.querySelectorAll('[data-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      sessionStorage.setItem('servicesTab', btn.dataset.tab);
+      navigate('services');
+    });
+  });
+  main.querySelector('#sc-save').addEventListener('click', async () => {
+    try {
+      await api('/service-content', { method: 'PUT', body: {
+        catering_intro_text: document.getElementById('sc-intro').value,
+        catering_packages_text: document.getElementById('sc-packages').value,
+        catering_custom_text: document.getElementById('sc-custom').value,
+        catering_quote_text: document.getElementById('sc-quote').value,
+      }});
+      toast('Service content saved!');
+      navigate('services');
+    } catch (err) { toast(err.message, true); }
+  });
+  main.querySelector('#sc-preview').addEventListener('click', () => {
+    toast('Open the bot in Messenger and type "catering" to preview', false);
+  });
+  main.querySelector('#sc-img-upload').addEventListener('click', async () => {
+    const file = main.querySelector('#sc-img-file').files[0];
+    if (!file) return toast('Choose a file first', true);
+    try { await uploadImage(file); toast('Image uploaded!'); navigate('services'); }
+    catch (err) { toast(err.message, true); }
+  });
+  main.querySelector('#sc-img-batch-upload').addEventListener('click', async () => {
+    const files = main.querySelector('#sc-img-batch').files;
+    if (!files || files.length === 0) return toast('Choose files first', true);
+    let uploaded = 0, failed = 0;
+    for (let i = 0; i < files.length; i++) {
+      try { await uploadImage(files[i]); uploaded++; } catch { failed++; }
+    }
+    toast(`Uploaded ${uploaded}, failed ${failed}`);
+    if (uploaded > 0) setTimeout(() => navigate('services'), 1500);
+  });
+};
+
+/* ================= SERVICES (Catering Content & Images) ================= */
 views.images = async (main) => {
   let files = [];
   try { files = await api('/uploads-list'); }

@@ -2,6 +2,8 @@
 import { supa } from '../db/supabase';
 import { getReservationByOrderId } from '../services/reservations';
 import { getOrderItems } from '../services/orders';
+import { getServiceContent } from '../services/service-content';
+import { ENV_BASE_URL, requestBaseUrl } from './webhook';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
 
@@ -680,15 +682,21 @@ export async function sendRatingRequest(psid: string, orderNumber: string, order
 
 /** Send catering menu with details and image carousel */
 export async function sendCateringMenu(psid: string): Promise<void> {
-  const cateringText = `🧁 CATERING SERVICES\n\nWe offer catering for events, parties, and special occasions!\n\n✔️ Customizable food packages\n✔️ Delivery or pickup available\n✔️ Bulk orders welcome\n\nInterested in our catering packages? Reply with:\n• "packages" - to see available packages\n• "custom" - to request a custom catering order\n• "quote" - for a price estimate`;
+  // Get the editable catering content from service-content
+  const content = await getServiceContent();
 
-  await sendText(psid, cateringText);
+  await sendText(psid, content.catering_intro_text);
 
-  // Send a carousel with catering options
+  // Build image URLs from admin folder
+  const baseUrl = ENV_BASE_URL || requestBaseUrl;
+  const adminImageUrl = baseUrl ? `${baseUrl}/admin/icon-512.svg` : '';
+
+  // Send a carousel with catering options using admin images
   const cateringElements = [
     {
       title: '📦 Food Pack Packages',
       subtitle: 'Pre-configured packages for your event',
+      image_url: adminImageUrl || undefined,
       buttons: [
         { title: 'View Packages', payload: 'CATERING_PACKAGES' },
       ],
@@ -696,6 +704,7 @@ export async function sendCateringMenu(psid: string): Promise<void> {
     {
       title: '🎯 Custom Orders',
       subtitle: 'Tailor-made catering for your needs',
+      image_url: adminImageUrl || undefined,
       buttons: [
         { title: 'Request Custom', payload: 'CATERING_CUSTOM' },
       ],
@@ -703,6 +712,7 @@ export async function sendCateringMenu(psid: string): Promise<void> {
     {
       title: '💰 Price Quote',
       subtitle: 'Get an estimate for your event',
+      image_url: adminImageUrl || undefined,
       buttons: [
         { title: 'Get Quote', payload: 'CATERING_QUOTE' },
       ],
