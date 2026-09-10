@@ -382,16 +382,17 @@ async function seedDefaults(): Promise<void> {
   if (!custCols.includes('delivery_lat')) await query('ALTER TABLE customers ADD COLUMN delivery_lat DOUBLE PRECISION;');
   if (!custCols.includes('delivery_lng')) await query('ALTER TABLE customers ADD COLUMN delivery_lng DOUBLE PRECISION;');
 
-  // Backfill: attach the customer's saved delivery pin + Waze link to recent
+  // Backfill: attach the customer's saved delivery pin + Waze links to recent
   // delivery orders that don't have one yet (idempotent — skips linked ones).
   await run(`
     UPDATE orders o
-    SET address = COALESCE(o.address, 'Delivery') || E'\\n📍 Navigate: https://waze.com/ul?ll=' ||
+    SET address = COALESCE(o.address, 'Delivery') || E'\\n📍 Navigate (opens Waze app): waze://?ll=' ||
+        c.delivery_lat::text || ',' || c.delivery_lng::text || E'&navigate=yes\\n📍 Fallback (browser): https://waze.com/ul?ll=' ||
         c.delivery_lat::text || ',' || c.delivery_lng::text || '&navigate=yes'
     FROM customers c
     WHERE o.customer_id = c.id
       AND o.order_type = 'delivery'
       AND c.delivery_lat IS NOT NULL AND c.delivery_lng IS NOT NULL
-      AND o.address NOT LIKE '%waze.com%'
+      AND o.address NOT LIKE '%waze%'
   `);
 }

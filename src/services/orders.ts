@@ -2,7 +2,7 @@
 import { computeCartTotals, choiceUpgrade, normalizeChoices, priceFoodPack, pricePackage, priceProduct } from './pricing';
 import { clearCart, getCart } from './cart';
 import { syncReservationFromOrder } from './reservations';
-import { buildWazeUrl, computeDeliveryFee, getBranchCatalog, getBranchCoords, nearestBranchKey } from './branches';
+import { buildWazeAppUrl, buildWazeUrl, computeDeliveryFee, getBranchCatalog, getBranchCoords, nearestBranchKey } from './branches';
 
 /**
  * Resolve a webview client-side cart into priced order items.
@@ -132,13 +132,17 @@ export async function createOrderFromCart(
     if (origin) {
       const calc = computeDeliveryFee(origin.lat, origin.lng, lat, lng);
       deliveryFee = calc.fee;
-      // Attach the Waze link to the delivery address so the rider can navigate
-      // with one tap straight from the admin order view.
+      // Attach the Waze links to the delivery address so the rider can navigate
+      // with one tap straight from the admin order view. The custom scheme
+      // (waze://) opens the APP directly even from inside Messenger's webview;
+      // the https link is the fallback for phones without Waze installed.
+      const wazeApp = buildWazeAppUrl(lat, lng);
       const waze = buildWazeUrl(lat, lng);
       const base = (details.address || '').trim();
+      const navLines = `📍 Navigate (opens Waze app): ${wazeApp}\n📍 Fallback (browser): ${waze}`;
       addressWithWaze = base
-        ? (base.includes('waze.com') ? base : `${base}\n📍 Navigate: ${waze}`)
-        : `📍 Navigate: ${waze}`;
+        ? (base.includes('waze://') ? base : `${base}\n${navLines}`)
+        : navLines;
     }
   }
   // (Without coordinates the legacy behavior applies: admin enters the actual

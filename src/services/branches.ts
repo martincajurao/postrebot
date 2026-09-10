@@ -181,3 +181,12 @@ export function computeDeliveryFee(fromLat: number, fromLng: number, toLat: numb
 export function buildWazeUrl(lat: number, lng: number): string {
   return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
 }
+
+/** Waze APP deep link (custom scheme). Custom-scheme links are NOT intercepted
+ *  by in-app webviews (Messenger etc.) the way https universal links are —
+ *  they always hand off to the Waze app directly. Dead link if Waze isn't
+ *  installed, which is why every place that shows it also shows the https
+ *  fallback from buildWazeUrl(). */
+export function buildWazeAppUrl(lat: number, lng: number): string {
+  return `waze://?ll=${lat},${lng}&navigate=yes`;
+}

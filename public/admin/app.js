@@ -167,12 +167,16 @@ Total:${totalStr}`;
 
   const deliveryTo = order.order_type === 'delivery' ? `Delivery to;\n${order.address || 'Pickup'}` : 'Pickup order';
 
-  // Extract the Waze navigation link (appended to the address at order time)
-  // so the rider gets a dedicated line + the modal gets an "Open in Waze" button.
-  const wazeMatch = String(order.address || '').match(/https?:\/\/[^\s]*waze\.com[^\s]*/);
-  const wazeUrl = wazeMatch ? wazeMatch[0] : '';
+  // Waze links already appear inside the address block (appended to
+  // order.address at order time) — extract them ONLY as modal-button metadata
+  // here, so the rider's copy text doesn't show the same links twice.
+  const addr = String(order.address || '');
+  const appMatch = addr.match(/waze:\/\/[^\s]*/);
+  const httpsMatch = addr.match(/https?:\/\/[^\s]*waze\.com[^\s]*/);
+  const wazeApp = appMatch ? appMatch[0] : '';
+  const wazeUrl = httpsMatch ? httpsMatch[0] : '';
 
-  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo}${wazeUrl ? `\n\n🗺️ Tap to navigate — opens the Waze app, destined to the customer's exact pin:\n${wazeUrl}` : ''};;;WAZE=${encodeURIComponent(wazeUrl)}`;
+  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo};;;WAZE=${encodeURIComponent(JSON.stringify({ app: wazeApp, https: wazeUrl }))}`;
 }
 
 function renderOrderItems(orderItems) {
@@ -1206,16 +1210,36 @@ views.orders = async (main) => {
     }));
   }));
 
+/** One-tap Waze navigation: try the waze:// custom scheme first (hands off to
+ *  the Waze APP directly, even from inside Messenger's webview); if the page
+ *  is still visible ~1.2s later the app didn't open (not installed / desktop)
+ *  so fall back to the https link in a new tab. */
+function openWaze(appUrl, httpsUrl) {
+  if (!appUrl && !httpsUrl) return;
+  if (!appUrl) { window.open(httpsUrl, '_blank'); return; }
+  const startedAt = Date.now();
+  window.location.href = appUrl;
+  setTimeout(() => {
+    if (Date.now() - startedAt < 2200 && httpsUrl) window.open(httpsUrl, '_blank');
+  }, 1200);
+}
+window.openWaze = openWaze; // inline onclick handlers need it on the global scope
+
   main.querySelectorAll('[data-edit-order]').forEach((b) => b.addEventListener('click', () => openOrderEditor(Number(b.dataset.editOrder))));
   main.querySelectorAll('[data-booking]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     const text = await generateBookingDetails(Number(b.dataset.booking));
     // Split off the embedded Waze metadata (not meant for the rider's copy text).
-    const wazeUrl = (() => { const m = text.match(/;;;WAZE=(.*)$/); return m ? decodeURIComponent(m[1]) : ''; })();
+    const wazeMeta = (() => {
+      const m = text.match(/;;;WAZE=(.*)$/);
+      if (!m) return { app: '', https: '' };
+      try { return JSON.parse(decodeURIComponent(m[1])); } catch { return { app: '', https: '' }; }
+    })();
     const riderText = text.replace(/;;;WAZE=.*$/, '');
+    const hasWaze = wazeMeta.app || wazeMeta.https;
     modal(`<h3>📋 Booking Details</h3>
       <p class="muted">Copy and send to your rider or delivery driver.</p>
       <textarea id="booking-text" style="width:100%;height:300px;font-family:monospace;font-size:13px" readonly>${esc(riderText)}</textarea>
-      ${wazeUrl ? `<button class="btn" style="width:100%;margin-top:8px;background:#33ccff" onclick="window.open('${wazeUrl}','_blank')">🗺️ Open in Waze — Navigate to Customer</button>` : ''}
+      ${hasWaze ? `<button class="btn" style="width:100%;margin-top:8px;background:#33ccff" onclick="openWaze('${wazeMeta.app}','${wazeMeta.https}')">🗺️ Open in Waze — Navigate to Customer</button>` : ''}
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button>
       <button class="btn" id="booking-copy">📋 Copy to Clipboard</button></div>`);
     document.getElementById('booking-copy').addEventListener('click', () => {
