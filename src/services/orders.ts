@@ -2,6 +2,7 @@
 import { computeCartTotals, choiceUpgrade, normalizeChoices, priceFoodPack, pricePackage, priceProduct } from './pricing';
 import { clearCart, getCart } from './cart';
 import { syncReservationFromOrder } from './reservations';
+import { buildWazeUrl, computeDeliveryFee, getBranchCatalog, getBranchCoords, nearestBranchKey } from './branches';
 
 /**
  * Resolve a webview client-side cart into priced order items.
@@ -110,13 +111,38 @@ export async function createOrderFromCart(
     payment_method?: string;
     phone?: string;
     notes?: string;
+    /** Customer's confirmed delivery pin (from the webview location gate). */
+    delivery_lat?: number;
+    delivery_lng?: number;
   },
   clientItems?: any[]
 ) {
+  // Delivery fee: distance-based (₱50 base + ₱1 per 100 m) computed from the
+  // nearest store origin to the customer's confirmed pin. Without coords the
+  // fee stays 0 and the admin still sets the fare manually at confirmation.
+  const hasCoords = Number.isFinite(details.delivery_lat) && Number.isFinite(details.delivery_lng);
   let deliveryFee = 0;
-  // Delivery fee is intentionally NOT auto-charged at order time — the admin enters
-  // the actual fare when confirming the order (POST /orders/:id/confirm). This way
-  // the customer is not billed a pre-set estimate before the order is reviewed.
+  let addressWithWaze = details.address ?? null;
+  if (details.order_type === 'delivery' && hasCoords) {
+    const lat = Number(details.delivery_lat);
+    const lng = Number(details.delivery_lng);
+    const origins = await getBranchCoords();
+    const branchKey = nearestBranchKey(lat, lng, await getBranchCatalog());
+    const origin = origins[branchKey || ''] || Object.values(origins)[0];
+    if (origin) {
+      const calc = computeDeliveryFee(origin.lat, origin.lng, lat, lng);
+      deliveryFee = calc.fee;
+      // Attach the Waze link to the delivery address so the rider can navigate
+      // with one tap straight from the admin order view.
+      const waze = buildWazeUrl(lat, lng);
+      const base = (details.address || '').trim();
+      addressWithWaze = base
+        ? (base.includes('waze.com') ? base : `${base}\n📍 Navigate: ${waze}`)
+        : `📍 Navigate: ${waze}`;
+    }
+  }
+  // (Without coordinates the legacy behavior applies: admin enters the actual
+  // fare when confirming the order.)
 
   // Two cart sources:
   //  - clientItems: the webview's local cart (items only; every line is re-priced
@@ -126,6 +152,9 @@ export async function createOrderFromCart(
   const items = usingClientCart ? await resolveClientCartItems(clientItems) : await getCart(psid);
   if (items.length === 0) throw new Error('Cart is empty');
   const totals = usingClientCart ? totalsFromResolvedItems(items) : await computeCartTotals(items, deliveryFee);
+  // Client-cart totals exclude the fee (totalsFromResolvedItems only sums lines);
+  // fold the computed delivery fee into the stored grand total either way.
+  if (usingClientCart && deliveryFee > 0) totals.total += deliveryFee;
 
   const db = supa();
   const orderNumber = await nextOrderNumber();
@@ -133,7 +162,7 @@ export async function createOrderFromCart(
     order_number: orderNumber,
     customer_id: details.customer_id,
     order_type: details.order_type,
-    address: details.address ?? null,
+    address: addressWithWaze,
     delivery_fee: deliveryFee,
     subtotal: totals.subtotal,
     total: totals.total,

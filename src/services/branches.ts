@@ -76,8 +76,8 @@ export function availableAtBranch(item: any, branch?: string): boolean {
 export interface BranchCatalogEntry { key: string; name: string; lat: number | null; lng: number | null; }
 
 export const DEFAULT_BRANCH_COORDS: Record<string, { lat: number; lng: number }> = {
-  naga: { lat: 13.6218, lng: 123.1948 },   // Naga City, Camarines Sur
-  calbayog: { lat: 12.067, lng: 124.583 }, // Calbayog City, Samar
+  naga: { lat: 13.660509, lng: 123.176748 },   // Store — Naga
+  calbayog: { lat: 12.072692, lng: 124.610228 }, // Store — Calbayog (Samar)
 };
 const COORDS_KEY = 'branch_coords';
 
@@ -149,4 +149,35 @@ export function nearestBranchKey(lat: number, lng: number, catalog: BranchCatalo
     if (d < best) { best = d; bestKey = c.key; }
   }
   return bestKey;
+}
+
+// ---------- Delivery fee engine ----------
+// ₱50 base + ₱1 per 100 m from the store (branch origin) to the customer's pin.
+export const DELIVERY_BASE_FEE = 50;
+export const DELIVERY_FEE_PER_100M = 1;
+
+/** Great-circle distance between two points in meters. */
+export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** Distance-based delivery fee: ₱50 base + ₱1 per 100 m (each partial 100 m rounds up). */
+export function computeDeliveryFee(fromLat: number, fromLng: number, toLat: number, toLng: number): {
+  fee: number; distanceMeters: number; distanceKm: number;
+} {
+  const distanceMeters = haversineMeters(fromLat, fromLng, toLat, toLng);
+  const fee = DELIVERY_BASE_FEE + Math.ceil(distanceMeters / 100) * DELIVERY_FEE_PER_100M;
+  return { fee, distanceMeters: Math.round(distanceMeters), distanceKm: Math.round(distanceMeters / 100) / 10 };
+}
+
+/** Waze deep link so the rider can one-tap navigate to the drop-off pin. */
+export function buildWazeUrl(lat: number, lng: number): string {
+  return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
 }

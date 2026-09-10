@@ -399,11 +399,11 @@ r.delete('/cart/items', handleClearCart);
 r.post('/checkout', async (req, res) => {
   const sessionId = getSessionId(req);
   if (!sessionId) return res.status(400).json({ error: 'No session' });
-  const { order_type, address, phone, payment_method, fulfillment_date, time_slot, name, notes, items } = req.body;
+  const { order_type, address, phone, payment_method, fulfillment_date, time_slot, name, notes, items, delivery_lat, delivery_lng } = req.body;
 
   try {
     const custId = await getOrCreateCustomer(sessionId, name, phone, address);
-    
+
     // Create order first (most critical)
     const order = await createOrderFromCart(sessionId, {
       customer_id: custId,
@@ -414,6 +414,8 @@ r.post('/checkout', async (req, res) => {
       time_slot,
       payment_method,
       notes,
+      delivery_lat: Number(delivery_lat) || undefined,
+      delivery_lng: Number(delivery_lng) || undefined,
     }, Array.isArray(items) ? items : undefined);
 
     // Respond to client immediately

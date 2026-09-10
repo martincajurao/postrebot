@@ -1901,18 +1901,66 @@ function startCheckout() {
       <label>Notes (optional)</label>
       <textarea id="notes" placeholder="Landmarks, delivery instructions…"></textarea>
     </div>
-    <div class="total-row grand" style="margin:12px 0"><span>Order Total</span><span class="value">${formatMoney(cart.totals.total)}</span></div>
+    <div class="form-group" id="delivery-fee-group" style="display:none">
+      <div class="total-row"><span>🛵 Delivery Fee</span><span class="value" id="delivery-fee-val">—</span></div>
+    </div>
+    <div class="total-row grand" style="margin:12px 0"><span>Order Total</span><span class="value" id="co-total-val">${formatMoney(cart.totals.total)}</span></div>
     <button class="btn btn-primary btn-checkout" id="place-order-btn" onclick="placeOrder()">Place Order</button>
   `;
 
   $id('order-type').addEventListener('change', function () {
     $id('address-group').style.display = this.value === 'delivery' ? 'block' : 'none';
+    updateDeliveryFeeRow();
   });
   $id('fulfill-date').addEventListener('change', function () { loadTimeSlots(this.value); });
 
   const today = new Date().toISOString().split('T')[0];
   $id('fulfill-date').setAttribute('min', today);
+  updateDeliveryFeeRow();
   showView('view-checkout');
+}
+
+// ---------- Delivery fee estimate (client mirror of the server engine) ----------
+// ₱50 base + ₱1 per 100 m from the nearest store origin to the confirmed pin.
+function estimateDeliveryFee() {
+  const loc = getSavedLocation();
+  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return null;
+  let best = null, bestD = Infinity;
+  for (const b of branchCatalog || []) {
+    if (!Number.isFinite(b.lat) || !Number.isFinite(b.lng)) continue;
+    const dLat = b.lat - loc.lat;
+    const dLng = (b.lng - loc.lng) * Math.cos((loc.lat * Math.PI) / 180);
+    const d = dLat * dLat + dLng * dLng;
+    if (d < bestD) { bestD = d; best = b; }
+  }
+  if (!best) return null;
+  const dx = (best.lng - loc.lng) * 111320 * Math.cos((loc.lat * Math.PI) / 180);
+  const dy = (best.lat - loc.lat) * 110574;
+  const meters = Math.sqrt(dx * dx + dy * dy);
+  return { fee: 50 + Math.ceil(meters / 100), km: Math.round(meters / 100) / 10 };
+}
+
+/** Show/hide the delivery-fee row and refresh the grand total in checkout. */
+function updateDeliveryFeeRow() {
+  const group = $id('delivery-fee-group');
+  const val = $id('delivery-fee-val');
+  const total = $id('co-total-val');
+  if (!group || !val || !total) return;
+  const type = $id('order-type') ? $id('order-type').value : 'delivery';
+  if (type !== 'delivery') {
+    group.style.display = 'none';
+    total.textContent = formatMoney(cart.totals.total);
+    return;
+  }
+  const est = estimateDeliveryFee();
+  group.style.display = '';
+  if (est) {
+    val.textContent = formatMoney(est.fee) + ' (est. ' + est.km + ' km)';
+    total.textContent = formatMoney(cart.totals.total + est.fee);
+  } else {
+    val.textContent = 'Set location first';
+    total.textContent = formatMoney(cart.totals.total);
+  }
 }
 
 function selectPayment(method, el) {
