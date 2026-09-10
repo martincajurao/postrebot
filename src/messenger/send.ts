@@ -680,44 +680,48 @@ export async function sendRatingRequest(psid: string, orderNumber: string, order
   ]);
 }
 
-/** Send catering menu with details and image carousel */
+/** Send catering menu - displays images for viewing only (no buttons) */
 export async function sendCateringMenu(psid: string): Promise<void> {
   // Get the editable catering content from service-content
   const content = await getServiceContent();
 
   await sendText(psid, content.catering_intro_text);
 
-  // Build image URLs from admin folder
-  const baseUrl = ENV_BASE_URL || requestBaseUrl;
-  const adminImageUrl = baseUrl ? `${baseUrl}/admin/icon-512.svg` : '';
+  // Fetch uploaded catering images from Supabase Storage
+  let cateringImages: string[] = [];
+  try {
+    const { data, error } = await supa()
+      .from('uploads')
+      .select('url')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (!error && data) {
+      cateringImages = data.map((item: any) => item.url).filter(Boolean);
+    }
+  } catch (e) {
+    console.warn('[sendCateringMenu] Could not fetch uploaded images:', e);
+  }
 
-  // Send a carousel with catering options using admin images
-  const cateringElements = [
-    {
-      title: '📦 Food Pack Packages',
-      subtitle: 'Pre-configured packages for your event',
-      image_url: adminImageUrl || undefined,
-      buttons: [
-        { title: 'View Packages', payload: 'CATERING_PACKAGES' },
-      ],
-    },
-    {
-      title: '🎯 Custom Orders',
-      subtitle: 'Tailor-made catering for your needs',
-      image_url: adminImageUrl || undefined,
-      buttons: [
-        { title: 'Request Custom', payload: 'CATERING_CUSTOM' },
-      ],
-    },
-    {
-      title: '💰 Price Quote',
-      subtitle: 'Get an estimate for your event',
-      image_url: adminImageUrl || undefined,
-      buttons: [
-        { title: 'Get Quote', payload: 'CATERING_QUOTE' },
-      ],
-    },
-  ];
+  // If no uploaded images, fall back to admin icon
+  const baseUrl = ENV_BASE_URL || requestBaseUrl;
+  const defaultImageUrl = baseUrl ? `${baseUrl}/admin/icon-512.svg` : '';
+
+  // Build carousel elements with images only (no buttons)
+  const cateringElements = cateringImages.length > 0
+    ? cateringImages.map((url, index) => ({
+        title: index === 0 ? '🧁 Our Catering' : `Catering Image ${index + 1}`,
+        subtitle: index === 0 ? 'Beautiful food for your events' : '',
+        image_url: url,
+        // No buttons - just for viewing
+      }))
+    : [
+        {
+          title: '🧁 Catering Services',
+          subtitle: 'We offer delicious catering for your events!',
+          image_url: defaultImageUrl || undefined,
+          // No buttons - just for viewing
+        },
+      ];
 
   await sendCarousel(psid, cateringElements);
 }
