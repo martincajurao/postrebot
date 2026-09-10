@@ -167,7 +167,12 @@ Total:${totalStr}`;
 
   const deliveryTo = order.order_type === 'delivery' ? `Delivery to;\n${order.address || 'Pickup'}` : 'Pickup order';
 
-  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo}`;
+  // Extract the Waze navigation link (appended to the address at order time)
+  // so the rider gets a dedicated line + the modal gets an "Open in Waze" button.
+  const wazeMatch = String(order.address || '').match(/https?:\/\/[^\s]*waze\.com[^\s]*/);
+  const wazeUrl = wazeMatch ? wazeMatch[0] : '';
+
+  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo}${wazeUrl ? `\n\n🗺️ Navigate (Waze): ${wazeUrl}` : ''};;;WAZE=${encodeURIComponent(wazeUrl)}`;
 }
 
 function renderOrderItems(orderItems) {
@@ -1204,9 +1209,13 @@ views.orders = async (main) => {
   main.querySelectorAll('[data-edit-order]').forEach((b) => b.addEventListener('click', () => openOrderEditor(Number(b.dataset.editOrder))));
   main.querySelectorAll('[data-booking]').forEach((b) => b.addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     const text = await generateBookingDetails(Number(b.dataset.booking));
+    // Split off the embedded Waze metadata (not meant for the rider's copy text).
+    const wazeUrl = (() => { const m = text.match(/;;;WAZE=(.*)$/); return m ? decodeURIComponent(m[1]) : ''; })();
+    const riderText = text.replace(/;;;WAZE=.*$/, '');
     modal(`<h3>📋 Booking Details</h3>
       <p class="muted">Copy and send to your rider or delivery driver.</p>
-      <textarea id="booking-text" style="width:100%;height:300px;font-family:monospace;font-size:13px" readonly>${esc(text)}</textarea>
+      <textarea id="booking-text" style="width:100%;height:300px;font-family:monospace;font-size:13px" readonly>${esc(riderText)}</textarea>
+      ${wazeUrl ? `<button class="btn" style="width:100%;margin-top:8px;background:#33ccff" onclick="window.open('${wazeUrl}','_blank')">🗺️ Open in Waze — Navigate to Customer</button>` : ''}
       <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button>
       <button class="btn" id="booking-copy">📋 Copy to Clipboard</button></div>`);
     document.getElementById('booking-copy').addEventListener('click', () => {
