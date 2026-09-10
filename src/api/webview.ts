@@ -541,7 +541,6 @@ r.get('/config', async (_req, res) => {
       address: v.contact_address,
       hours: v.contact_hours,
     },
-    mapsApiKey: process.env.GOOGLE_MAPS_API_KEY || '',
   });
 });
 

@@ -60,7 +60,6 @@ let foodPacks = [];
 let cart = { items: [], totals: { subtotal: 0, delivery: 0, discount: 0, total: 0, breakdown: [] } };
 let orders = [];
 let config = { payment: {}, contact: {} };
-let serverMapsApiKey = '';
 let isInsideMessenger = false;
 let currentView = 'categories';
 let currentCategoryId = null;
@@ -538,8 +537,6 @@ async function loadConfig() {
     const data = await api('/config');
     if (data && data.payment) config.payment = data.payment;
     if (data && data.contact) config.contact = data.contact;
-    // Capture the Google Maps API key sent by the server (from env GOOGLE_MAPS_API_KEY).
-    if (data && data.mapsApiKey) serverMapsApiKey = String(data.mapsApiKey);
   } catch (e) {
     console.warn('[webview] /config failed:', e && e.message);
   }
@@ -2120,47 +2117,35 @@ const LOCATION_KEY = () => 'webview_location_' + sessionId;
 // Store's home area — centers the map and acts as the delivery-fee origin later.
 const STORE_LOCATION = { lat: 13.6218, lng: 123.1948, label: 'Naga City' };
 
-// --- Google Maps + Places + Geocoder ---
-// The API key arrives from the server (env GOOGLE_MAPS_API_KEY) via /config.
-// We load the JS API dynamically so the page works even when no key is set
-// (location gate falls back to address-only mode).
-let googleMap = null;
-let googleMarker = null;
-let googleGeocoder = null;
-let googlePlacesService = null;
-let googleAutocomplete = null;
-let googleMapInitFailed = false;
-let googleMapReady = false;
+// --- Leaflet + OpenStreetMap + Nominatim ---
+// Map pin picker uses Leaflet with free OpenStreetMap tiles (no API key).
+// Address search + reverse geocoding use the free Nominatim service.
+// Routing/distance for the future delivery fee will use OSRM.
+// Leaflet is loaded dynamically so a blocked CDN degrades to address-only.
+let locMap = null;
+let locMarker = null;
+let mapInitFailed = false;
 
-/** Dynamically load the Google Maps JavaScript API (Places library). */
-function loadGoogleMaps() {
+/** Leaflet is included statically in index.html. This waits until it is
+ *  available (or times out → graceful address-only fallback). */
+function loadLeaflet() {
   return new Promise((resolve) => {
-    if (window.google && window.google.maps) {
-      resolve(true);
-      return;
-    }
-    if (!serverMapsApiKey) {
-      console.warn('[webview] no Google Maps API key — falling back to address-only mode');
-      googleMapInitFailed = true;
-      resolve(false);
-      return;
-    }
-    window.__googleMapsInit = () => { googleMapReady = true; resolve(true); };
-    const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${serverMapsApiKey}&libraries=places&callback=__googleMapsInit`;
-    s.onerror = () => {
-      console.warn('[webview] Google Maps failed to load — falling back to address-only mode');
-      googleMapInitFailed = true;
-      resolve(false);
-    };
-    document.head.appendChild(s);
-    // 8s timeout for the script to load.
-    setTimeout(() => {
-      if (!googleMapReady && !googleMapInitFailed) {
-        googleMapInitFailed = true;
-        resolve(false);
+    if (typeof L !== 'undefined' && L.map) { resolve(true); return; }
+    const started = Date.now();
+    const poll = () => {
+      if (typeof L !== 'undefined' && L.map) {
+        resolve(true);
+        return;
       }
-    }, 8000);
+      if (Date.now() - started > 8000) {
+        console.warn('[webview] Leaflet not available — falling back to address-only mode');
+        mapInitFailed = true;
+        resolve(false);
+        return;
+      }
+      setTimeout(poll, 100);
+    };
+    poll();
   });
 }
 
@@ -2176,11 +2161,11 @@ function saveLocation(loc) {
   try { storageSet(LOCATION_KEY(), JSON.stringify(loc)); } catch { /* non-fatal */ }
 }
 
-/** True when Google Maps loaded and the map was initialized successfully.
+/** True when Leaflet loaded and the map was initialized successfully.
  * When false, the customer can still confirm with address-only — delivery fee
  * will fall back to a default/zone rate instead of a distance-based one. */
 function mapAvailable() {
-  return window.google && window.google.maps && !!googleMap && !googleMapInitFailed;
+  return typeof L !== 'undefined' && !!locMap && !mapInitFailed;
 }
 
 /** Show the mandatory location modal. Always shown on every webview open so
@@ -2208,16 +2193,15 @@ function showLocationGate() {
   const wrap = document.querySelector('.loc-map-wrap');
   if (wrap) wrap.style.display = '';
 
-  // Load Google Maps dynamically (no-op if already loaded or no key).
-  // Once loaded, initialize the map. If loading fails, fall back to address-only.
-  loadGoogleMaps().then((ok) => {
-    if (ok && mapAvailable()) {
-      initGoogleMap();
+  // Load Leaflet dynamically (no-op if already loaded). Once ready, initialize
+  // the map. If loading fails, fall back to address-only.
+  loadLeaflet().then((ok) => {
+    if (ok) {
+      initLeafletMap(); // creates locMap; its catch hides the map + shows the fallback
       // Restore the saved pin so returning customers see their spot.
-      if (saved && saved.lat != null && saved.lng != null && googleMap) {
+      if (saved && saved.lat != null && saved.lng != null && locMap) {
         setMapPin({ lat: saved.lat, lng: saved.lng }, false);
-        googleMap.setCenter({ lat: saved.lat, lng: saved.lng });
-        googleMap.setZoom(15);
+        locMap.setView([saved.lat, saved.lng], 15);
       }
     } else {
       if (wrap) wrap.style.display = 'none';
@@ -2231,52 +2215,45 @@ function showLocationGate() {
     addrEl.dataset.locBound = '1';
     addrEl.addEventListener('input', updateLocConfirmState);
   }
-  // Wire up Google Places autocomplete on the search box.
+  // Wire up Nominatim address search on the search box.
   const searchEl = $id('loc-search');
   if (searchEl && !searchEl.dataset.locBound) {
     searchEl.dataset.locBound = '1';
-    initPlacesAutocomplete();
+    initSearchAutocomplete();
   }
   updateLocConfirmState();
 }
 
-/** Create the Google Maps map once, after the modal is visible. */
-function initGoogleMap() {
-  if (googleMap) {
-    // Re-opened — trigger a resize to recalculate dimensions.
-    setTimeout(() => {
-      if (window.google && googleMap) {
-        google.maps.event.trigger(googleMap, 'resize');
-      }
-    }, 150);
+/** Create the Leaflet map once, after the modal is visible. */
+function initLeafletMap() {
+  if (locMap) {
+    // Re-opened — Leaflet needs a size recalculation.
+    setTimeout(() => { if (locMap) locMap.invalidateSize(); }, 150);
     return;
   }
   try {
     const mapEl = $id('loc-map');
-    if (!mapEl || !window.google) throw new Error('Google Maps not available');
+    if (!mapEl || typeof L === 'undefined') throw new Error('Leaflet not available');
 
-    googleMap = new google.maps.Map(mapEl, {
-      center: { lat: STORE_LOCATION.lat, lng: STORE_LOCATION.lng },
-      zoom: 14,
-      disableDefaultUI: true,
-      zoomControl: true,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: false,
-      gestureHandling: 'cooperative',
-    });
-
-    googleGeocoder = new google.maps.Geocoder();
+    locMap = L.map('loc-map', { scrollWheelZoom: false, zoomControl: true })
+      .setView([STORE_LOCATION.lat, STORE_LOCATION.lng], 14);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(locMap);
 
     // Tap anywhere to drop/move the pin.
-    googleMap.addListener('click', (e) => {
-      setMapPin({ lat: e.latLng.lat(), lng: e.latLng.lng() }, false);
+    locMap.on('click', (e) => {
+      setMapPin({ lat: e.latlng.lat, lng: e.latlng.lng }, false);
     });
+    // Re-measure once the container has settled so tiles + pin render correctly
+    // even when the sheet was opened from a previously-hidden state.
+    setTimeout(() => { if (locMap) locMap.invalidateSize(); }, 80);
   } catch (e) {
-    console.warn('[webview] Google Maps init failed, falling back to address-only:', e && e.message);
-    googleMap = null;
-    googleMarker = null;
-    googleMapInitFailed = true;
+    console.warn('[webview] Leaflet init failed, falling back to address-only:', e && e.message);
+    locMap = null;
+    locMarker = null;
+    mapInitFailed = true;
     const wrap = document.querySelector('.loc-map-wrap');
     if (wrap) wrap.style.display = 'none';
     showLocError('Map unavailable — please enter your address manually below.');
@@ -2316,20 +2293,18 @@ function setMapPin(latlng, fromGps) {
   pendingCoords = { lat: latlng.lat, lng: latlng.lng };
   pinSource = fromGps ? 'gps' : 'pin';
   if (mapAvailable()) {
-    if (!googleMarker) {
-      googleMarker = new google.maps.Marker({
-        position: { lat: latlng.lat, lng: latlng.lng },
-        map: googleMap,
+    if (!locMarker) {
+      locMarker = L.marker([latlng.lat, latlng.lng], {
         draggable: true,
-        title: 'Delivery location',
-      });
+        icon: L.divIcon({ className: 'loc-pin', html: '📍', iconSize: [32, 32], iconAnchor: [16, 30] }),
+      }).addTo(locMap);
       // Dragging fine-tunes the point (same handling as a fresh tap).
-      googleMarker.addListener('dragend', () => {
-        const pos = googleMarker.getPosition();
-        setMapPin({ lat: pos.lat(), lng: pos.lng() }, false);
+      locMarker.on('dragend', () => {
+        const p = locMarker.getLatLng();
+        setMapPin({ lat: p.lat, lng: p.lng }, false);
       });
     } else {
-      googleMarker.setPosition({ lat: latlng.lat, lng: latlng.lng });
+      locMarker.setLatLng([latlng.lat, latlng.lng]);
     }
   }
   hideLocError();
@@ -2397,8 +2372,7 @@ function useCurrentLocation() {
       const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       if (mapAvailable()) {
         setMapPin(coords, true);
-        googleMap.setCenter({ lat: coords.lat, lng: coords.lng });
-        googleMap.setZoom(16);
+        locMap.setView([coords.lat, coords.lng], 16);
       } else {
         pendingCoords = coords;
         pinSource = 'gps';
@@ -2457,8 +2431,7 @@ function useCurrentLocation() {
 /** Pan the map to the store and nudge the customer to tap their spot. */
 function focusMap() {
   if (mapAvailable()) {
-    googleMap.setCenter({ lat: STORE_LOCATION.lat, lng: STORE_LOCATION.lng });
-    googleMap.setZoom(14);
+    locMap.setView([STORE_LOCATION.lat, STORE_LOCATION.lng], 14);
   }
   // Scroll the map into view inside the sheet so it's obvious what to do next.
   const mapEl = $id('loc-map');
@@ -2467,39 +2440,38 @@ function focusMap() {
   }
 }
 
-/** Reverse-geocode coordinates into a readable address (Google Geocoder). */
+/** Reverse-geocode coordinates into a readable address (OpenStreetMap Nominatim). */
 async function reverseGeocode(lat, lng) {
-  if (!googleGeocoder) throw new Error('Geocoder not available');
-  return new Promise((resolve, reject) => {
-    googleGeocoder.geocode({ location: { lat, lng } }, (results, status) => {
-      if (status === 'OK' && results && results[0]) {
-        resolve(results[0].formatted_address);
-      } else {
-        reject(new Error('Geocode failed: ' + status));
-      }
-    });
-  });
+  const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1'
+    + '&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error('reverse geocode HTTP ' + res.status);
+  const data = await res.json();
+  const a = data.address || {};
+  const parts = [
+    a.house_number, a.road,
+    a.neighbourhood || a.suburb || a.quarter,
+    a.barangay || a.village || a.city_district,
+    a.city || a.municipality || a.town,
+    a.province,
+  ].filter(Boolean);
+  const text = parts.join(', ');
+  if (!text) throw new Error('reverse geocode returned no address');
+  return text;
 }
 
-/** Forward-geocode an address string into coordinates (Google Geocoder). */
+/** Forward-geocode an address into coordinate candidates (Nominatim search). */
 async function geocodeAddress(query) {
-  if (!googleGeocoder) throw new Error('Geocoder not available');
-  return new Promise((resolve, reject) => {
-    googleGeocoder.geocode({ address: query }, (results, status) => {
-      if (status === 'OK' && results && results[0]) {
-        const loc = results[0].geometry.location;
-        resolve([{
-          label: results[0].formatted_address,
-          lat: loc.lat(),
-          lng: loc.lng(),
-        }]);
-      } else if (status === 'ZERO_RESULTS') {
-        resolve([]);
-      } else {
-        reject(new Error('Geocode failed: ' + status));
-      }
-    });
-  });
+  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&addressdetails=1&q='
+    + encodeURIComponent(query);
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error('search HTTP ' + res.status);
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []).map((r) => ({
+    label: r.display_name || r.name || '',
+    lat: Number(r.lat),
+    lng: Number(r.lon),
+  })).filter((r) => r.lat && r.lng);
 }
 
 /** Drop the pin from a search result, fill the address, and pan the map. */
@@ -2508,8 +2480,7 @@ function selectSearchResult(result) {
   const coords = { lat: result.lat, lng: result.lng };
   if (mapAvailable()) {
     setMapPin(coords, false);
-    googleMap.setCenter({ lat: coords.lat, lng: coords.lng });
-    googleMap.setZoom(16);
+    locMap.setView([coords.lat, coords.lng], 16);
   } else {
     pendingCoords = coords;
     pinSource = 'pin';
@@ -2523,34 +2494,57 @@ function selectSearchResult(result) {
   hideLocError();
 }
 
-// (Google Places Autocomplete manages its own suggestion dropdown)
-
-/** Wire up Google Places Autocomplete on the search input. The Places widget
- *  attaches its own suggestion dropdown — we just listen for place changes. */
-function initPlacesAutocomplete() {
+/** Wire up Nominatim address search on the search input with a custom dropdown.
+ *  Debounced keystrokes hit the free Nominatim search API; picking a result
+ *  drops the pin, fills the address and pans the map. */
+function initSearchAutocomplete() {
   const input = $id('loc-search');
-  if (!input || !window.google || !google.maps || !google.maps.places) return;
-  try {
-    googleAutocomplete = new google.maps.places.Autocomplete(input, {
-      types: ['geocode', 'establishment'],
-      fields: ['formatted_address', 'geometry', 'name'],
+  if (!input) return;
+  const wrap = document.querySelector('.loc-search-wrap');
+  if (!wrap) return;
+  let timer = null;
+  let dropdown = null;
+
+  const close = () => { if (dropdown) { dropdown.remove(); dropdown = null; } };
+
+  const render = (results) => {
+    close();
+    if (!results || !results.length) return;
+    dropdown = document.createElement('div');
+    dropdown.className = 'loc-search-dropdown';
+    results.forEach((r) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'loc-search-item';
+      item.textContent = r.label;
+      item.addEventListener('click', () => {
+        selectSearchResult(r);
+        input.value = r.label;
+        close();
+        input.blur();
+      });
+      dropdown.appendChild(item);
     });
-    // Bias suggestions toward the store's city so local results rank higher.
-    const bounds = new google.maps.LatLngBounds(
-      { lat: STORE_LOCATION.lat - 0.15, lng: STORE_LOCATION.lng - 0.15 },
-      { lat: STORE_LOCATION.lat + 0.15, lng: STORE_LOCATION.lng + 0.15 },
-    );
-    googleAutocomplete.setBoundsBias(bounds);
-    googleAutocomplete.addListener('place_changed', () => {
-      const place = googleAutocomplete.getPlace();
-      if (!place || !place.geometry || !place.geometry.location) return;
-      const coords = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
-      const label = place.formatted_address || place.name || '';
-      selectSearchResult({ label, ...coords });
-    });
-  } catch (e) {
-    console.warn('[webview] Places Autocomplete init failed:', e && e.message);
-  }
+    wrap.appendChild(dropdown);
+  };
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (q.length < 3) { close(); return; }
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      geocodeAddress(q)
+        .then(render)
+        .catch(() => close());
+    }, 350);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!wrap.contains(e.target)) close();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close();
+  });
 }
 
 /** Live guidance under the map: exactly what's still missing before confirming. */
@@ -2595,7 +2589,7 @@ function confirmLocation() {
   // lat/lng are null. The future delivery-fee engine should handle this by:
   //   1. Using a default/flat delivery fee, or
   //   2. Parsing the address (barangay, city) for zone-based pricing, or
-  //   3. Geocoding the address server-side (Google Maps / OpenStreetMap) to
+  //   3. Geocoding the address server-side (Nominatim / OpenStreetMap) to
   //      recover coordinates and compute a distance-based fee.
   // For now the location is stored as-is and the checkout delivery line stays
   // "To be decided" until the fee logic is wired up.

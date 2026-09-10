@@ -2333,7 +2333,7 @@ img.img-skel {
   margin-top: 16px;
 }
 
-/* --- Map pin picker (Google Maps) --- */
+/* --- Map pin picker (Leaflet / OpenStreetMap) --- */
 .loc-map-wrap {
   margin: 10px 0 4px;
   position: relative;
@@ -2354,33 +2354,46 @@ img.img-skel {
   border-radius: 10px;
 }
 
-/* Google Places dropdown */
-.pac-container {
-  border-radius: 12px;
+/* Nominatim address-search dropdown (custom) */
+.loc-search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 6000;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
   border: 1px solid #e9ecef;
+  border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  font-family: inherit;
-  margin-top: 4px;
-  z-index: 6000 !important;
 }
 
-.pac-item {
+.loc-search-item {
+  display: block;
+  width: 100%;
+  text-align: left;
   padding: 10px 14px;
-  cursor: pointer;
+  border: none;
+  background: transparent;
+  font-family: inherit;
   font-size: 0.85rem;
   line-height: 1.35;
+  color: #2d3436;
+  cursor: pointer;
 }
 
-.pac-item:hover,
-.pac-item-selected {
+.loc-search-item + .loc-search-item {
+  border-top: 1px solid #f1f2f3;
+}
+
+.loc-search-item:hover,
+.loc-search-item:focus {
   background: #fef5f4;
+  outline: none;
 }
 
-.pac-icon {
-  margin-top: 4px;
-}
-
-/* --- Google Places address search --- */
+/* --- Nominatim address search --- */
 .loc-search-wrap {
   position: relative;
   margin: 10px 0;
@@ -2402,10 +2415,6 @@ img.img-skel {
   border-color: #e74c3c;
   box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.12);
   background: #fff;
-}
-
-/* (Google Places Autocomplete manages its own suggestion dropdown) */
-  margin-top: 2px;
 }
 
 .loc-search-status {
