@@ -491,6 +491,14 @@ function detectBranchFromDeviceGps() {
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        // Same accuracy gate as the location modal: a coarse cell fix can be
+        // wrong by hundreds of km (Magarao → Manila) — trust IP over it.
+        const acc = Number(pos.coords.accuracy);
+        if (Number.isFinite(acc) && acc > 3000) {
+          console.warn('[webview] startup GPS fix too inaccurate (' + acc + 'm) — IP fallback');
+          viaIp();
+          return;
+        }
         const lat = Number(pos.coords.latitude);
         const lng = Number(pos.coords.longitude);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) { viaIp(); return; }
@@ -502,7 +510,7 @@ function detectBranchFromDeviceGps() {
           .catch(() => viaIp());
       },
       () => viaIp(), // denied/unavailable/timeout → IP fallback
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
     );
 
     // Android safety net: some WebViews never call either callback. If nothing
@@ -2822,6 +2830,17 @@ function useCurrentLocation() {
     async (pos) => {
       onGpsDone();
       if (settled) return; // custom timeout already fired — abandon
+      // Accuracy gate: without enableHighAccuracy Android returns a coarse
+      // cell-tower fix that can be WRONG BY HUNDREDS OF KM (Magarao → Manila).
+      // If the device admits the fix is worse than 3 km, treat it as a failure
+      // (retry path below falls through to the IP locate fallback, which is
+      // city-level and more trustworthy than a bad cell fix).
+      const acc = Number(pos.coords.accuracy);
+      if (Number.isFinite(acc) && acc > 3000) {
+        console.warn('[webview] GPS fix too inaccurate (' + acc + 'm) — treating as failure');
+        handleError(new Error('inaccurate-fix:' + acc));
+        return;
+      }
       clearTimeout(safetyNet);
       const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       zoomMapToPin(coords, 16, true, true);
@@ -2843,7 +2862,14 @@ function useCurrentLocation() {
       }
       resetBtn();
     },
-    (err) => {
+    (err) => handleError(err),
+    { enableHighAccuracy: true, timeout: GPS_TIMEOUT_MS, maximumAge: 0 },
+  );
+
+  // Shared failure path: GPS denied/blocked/timeout/inaccurate → fall back to
+  // an IP-based approximate position so the customer still gets a pin instead
+  // of having to tap the map manually.
+  function handleError(err) {
       onGpsDone();
       if (settled) return; // custom timeout already fired — abandon
       clearTimeout(safetyNet);
@@ -2884,9 +2910,7 @@ function useCurrentLocation() {
         }
         focusMap();
       });
-    },
-    { enableHighAccuracy: false, timeout: GPS_TIMEOUT_MS, maximumAge: 60000 },
-  );
+  } // end handleError
 
   // Custom short timeout: if native GPS hasn't responded in GPS_TIMEOUT_MS,
   // fire this BEFORE the browser's own timeout so the customer recovers faster.

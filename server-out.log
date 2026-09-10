@@ -20,3 +20,8 @@ Web ordering URL: https://postrebot.onrender.com/webview
 [setPersistentMenu] Meta currently has: [postback|❓ How to Order|MENU_HOWTO, postback|📞 Contact Us|MENU_CONTACT, web_url|🛒 Browse Our Menu]
 [setPersistentMenu] persistent menu already up to date — no change needed.
 [menu keep-alive] re-registered persistent menu: true
+[whitelist] checking origin: https://postrebot.onrender.com (force=false)
+[whitelist] cache hit — already whitelisted: https://postrebot.onrender.com
+[setPersistentMenu] Meta currently has: [postback|❓ How to Order|MENU_HOWTO, postback|📞 Contact Us|MENU_CONTACT, web_url|🛒 Browse Our Menu]
+[setPersistentMenu] persistent menu already up to date — no change needed.
+[menu keep-alive] re-registered persistent menu: true

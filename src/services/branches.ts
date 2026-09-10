@@ -152,7 +152,12 @@ export function nearestBranchKey(lat: number, lng: number, catalog: BranchCatalo
 }
 
 // ---------- Delivery fee engine ----------
-// ₱50 base + ₱1 per 100 m from the store (branch origin) to the customer's pin.
+// Tiered, distance-based from the store (branch origin) to the customer's pin:
+//   ≤ 800 m    → FREE (₱0)
+//   800 m–2 km → ₱50 fixed
+//   > 2 km     → ₱50 + ₱1 per 100 m (each partial 100 m rounds up)
+export const DELIVERY_FREE_RADIUS_M = 800;
+export const DELIVERY_FIXED_RADIUS_M = 2000;
 export const DELIVERY_BASE_FEE = 50;
 export const DELIVERY_FEE_PER_100M = 1;
 
@@ -168,12 +173,20 @@ export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: 
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Distance-based delivery fee: ₱50 base + ₱1 per 100 m (each partial 100 m rounds up). */
+/** Tiered distance-based delivery fee:
+ *  ≤ 800 m → ₱0 · 800 m–2 km → ₱50 fixed · > 2 km → ₱50 + ₱1/100 m. */
 export function computeDeliveryFee(fromLat: number, fromLng: number, toLat: number, toLng: number): {
   fee: number; distanceMeters: number; distanceKm: number;
 } {
   const distanceMeters = haversineMeters(fromLat, fromLng, toLat, toLng);
-  const fee = DELIVERY_BASE_FEE + Math.ceil(distanceMeters / 100) * DELIVERY_FEE_PER_100M;
+  let fee: number;
+  if (distanceMeters <= DELIVERY_FREE_RADIUS_M) {
+    fee = 0;
+  } else if (distanceMeters <= DELIVERY_FIXED_RADIUS_M) {
+    fee = DELIVERY_BASE_FEE;
+  } else {
+    fee = DELIVERY_BASE_FEE + Math.ceil(distanceMeters / 100) * DELIVERY_FEE_PER_100M;
+  }
   return { fee, distanceMeters: Math.round(distanceMeters), distanceKm: Math.round(distanceMeters / 100) / 10 };
 }
 
