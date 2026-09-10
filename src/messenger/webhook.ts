@@ -1216,8 +1216,13 @@ async function handleText(psid: string, text: string) {
       }
     }
     default:
+      // Catering keyword shortcut — send catering details + image carousel.
+      if (/\b(cater(ing)?|catering)\b/i.test(text)) {
+        await sendCateringMenu(psid);
+      }
       // Direct shortcut for webview if customer mentions ordering online or webview
       if (/\b(order\s+online|web\s*store|webview|open\s+store)\b/i.test(text)) {
+
         return handlePayload(psid, 'WEBVIEW');
       }
       // Handle greetings - show welcome message with webview button
