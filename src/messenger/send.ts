@@ -677,3 +677,37 @@ export async function sendRatingRequest(psid: string, orderNumber: string, order
     { title: '⭐⭐⭐⭐⭐', payload: `RATE:${orderId}:5` },
   ]);
 }
+
+/** Send catering menu with details and image carousel */
+export async function sendCateringMenu(psid: string): Promise<void> {
+  const cateringText = `🧁 CATERING SERVICES\n\nWe offer catering for events, parties, and special occasions!\n\n✔️ Customizable food packages\n✔️ Delivery or pickup available\n✔️ Bulk orders welcome\n\nInterested in our catering packages? Reply with:\n• "packages" - to see available packages\n• "custom" - to request a custom catering order\n• "quote" - for a price estimate`;
+
+  await sendText(psid, cateringText);
+
+  // Send a carousel with catering options
+  const cateringElements = [
+    {
+      title: '📦 Food Pack Packages',
+      subtitle: 'Pre-configured packages for your event',
+      buttons: [
+        { title: 'View Packages', payload: 'CATERING_PACKAGES' },
+      ],
+    },
+    {
+      title: '🎯 Custom Orders',
+      subtitle: 'Tailor-made catering for your needs',
+      buttons: [
+        { title: 'Request Custom', payload: 'CATERING_CUSTOM' },
+      ],
+    },
+    {
+      title: '💰 Price Quote',
+      subtitle: 'Get an estimate for your event',
+      buttons: [
+        { title: 'Get Quote', payload: 'CATERING_QUOTE' },
+      ],
+    },
+  ];
+
+  await sendCarousel(psid, cateringElements);
+}
