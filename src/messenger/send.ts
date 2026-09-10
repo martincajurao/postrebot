@@ -3,6 +3,7 @@ import { supa } from '../db/supabase';
 import { getReservationByOrderId } from '../services/reservations';
 import { getOrderItems } from '../services/orders';
 import { getServiceContent } from '../services/service-content';
+import { listImages } from '../api/supabase-storage';
 import { ENV_BASE_URL, requestBaseUrl } from './webhook';
 
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN || '';
@@ -687,17 +688,15 @@ export async function sendCateringMenu(psid: string): Promise<void> {
 
   await sendText(psid, content.catering_intro_text);
 
-  // Fetch uploaded catering images from Supabase Storage
+  // Fetch uploaded catering images from Supabase Storage bucket
   let cateringImages: string[] = [];
   try {
-    const { data, error } = await supa()
-      .from('uploads')
-      .select('url')
-      .order('created_at', { ascending: false })
-      .limit(10);
-    if (!error && data) {
-      cateringImages = data.map((item: any) => item.url).filter(Boolean);
-    }
+    const images = await listImages();
+    // Get the most recent 10 images
+    cateringImages = images
+      .slice(0, 10)
+      .map((img) => img.url)
+      .filter(Boolean);
   } catch (e) {
     console.warn('[sendCateringMenu] Could not fetch uploaded images:', e);
   }
