@@ -1,3 +1,12 @@
 [push] VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are NOT set — web push notifications DISABLED.
 [push] Fix: run `npm run gen:vapid`, then add the keys to the server environment (Render → Environment) and restart.
 [db] migration warning (non-fatal): DATABASE_URL must be set (Supabase Postgres connection string)
+[setPersistentMenu] read current menu failed: fetch failed
+[setPersistentMenu] clear error: fetch failed
+[setPersistentMenu] read current menu failed: fetch failed
+[setPersistentMenu] Meta error: code=100, type=OAuthException, message=(#100) param persistent_menu[0][call_to_actions] must be non-empty., subcode=undefined
+[messenger] persistent menu failed (400): {"error":{"message":"(#100) param persistent_menu[0][call_to_actions] must be non-empty.","type":"OAuthException","code":100,"fbtrace_id":"AaqyG8uPWPjwhabcFd4a4FG"}}
+[setPersistentMenu] read current menu failed: fetch failed
+[setPersistentMenu] clear error: fetch failed
+[setPersistentMenu] read current menu failed: fetch failed
+[setPersistentMenu] clear error: fetch failed
