@@ -63,6 +63,16 @@
           </div>
         </div>
       </div>
+      <!-- Delivery location bar — shows the confirmed address; tap to change
+           it (re-opens the location gate with saved locations). -->
+      <button type="button" class="loc-bar" id="loc-bar" onclick="changeDeliveryLocation()" aria-label="Change delivery location">
+        <span class="loc-bar-icon">📍</span>
+        <span class="loc-bar-text">
+          <span class="loc-bar-label" id="loc-bar-label">Deliver to</span>
+          <span class="loc-bar-address" id="loc-bar-address">Set your delivery location</span>
+        </span>
+        <span class="loc-bar-caret">▾</span>
+      </button>
       <div class="contact-strip" id="contact-strip">
         <div class="contact-divider"></div>
         <a class="contact-item" id="contact-phone" href="#">
@@ -308,12 +318,19 @@
         <div class="loc-gate-handle"></div>
         <div class="loc-gate-icon">📍</div>
         <h2 id="loc-gate-title">Where should we deliver?</h2>
-        <p class="loc-gate-sub">Set your location so your order reaches the right place. You only need to do this once.</p>
+        <p class="loc-gate-sub">Set your location so your order reaches the right place. Or pick one of your saved locations below.</p>
 
         <button type="button" class="loc-gps-btn" id="loc-gps-btn" onclick="useCurrentLocation()">
           <span class="loc-gps-icon">🧭</span>
           <span id="loc-gps-label">Use my current location</span>
         </button>
+
+        <!-- Saved locations — previously confirmed addresses. Tap one to use it
+             right away (no re-typing). Managed by renderSavedLocations(). -->
+        <div id="loc-saved" class="loc-saved hidden">
+          <p class="loc-saved-title">Saved locations</p>
+          <div id="loc-saved-list" class="loc-saved-list"></div>
+        </div>
 
         <div class="loc-search-wrap">
           <input type="text" id="loc-search" placeholder="&#128269; Search your address or place..." autocomplete="off" />
@@ -345,6 +362,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260909-5"></script>
+  <script src="app.js?v=20260910-2"></script>
 </body>
 </html>

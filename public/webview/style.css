@@ -47,6 +47,28 @@ body {
   top: 0;
   z-index: 100;
   box-shadow: 0 4px 24px rgba(192, 57, 43, 0.35);
+  /* Auto-hide on scroll down, return on scroll up (JS toggles .header-hidden /
+     .header-scrolled). Transition covers transform; safe-area padding is
+     animated via the inner wrapper so the header never peeks when hidden. */
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+
+/* Scrolled state: compact (drop the top breathing room, tighten shadow). */
+.header.header-scrolled {
+  padding-top: calc(6px + env(safe-area-inset-top, 0px));
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
+}
+
+/* Hidden state: slid out of view. 140px clearance covers safe-area + bar
+   heights on every supported device so no red edge remains visible. */
+.header.header-hidden {
+  transform: translateY(-140px);
+}
+
+/* Respect users who prefer reduced motion — snap instead of slide. */
+@media (prefers-reduced-motion: reduce) {
+  .header { transition: none; }
 }
 
 @keyframes gradient-shift {
@@ -2266,6 +2288,93 @@ img.img-skel {
   line-height: 1.45;
   margin-bottom: 18px;
 }
+
+/* ---- Header delivery-location bar ---- */
+.loc-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 14px;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.14);
+  color: #fff;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.loc-bar:active { background: rgba(0, 0, 0, 0.24); }
+.loc-bar-icon { font-size: 0.95rem; flex: none; }
+.loc-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.loc-bar-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+}
+.loc-bar-address {
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loc-bar-caret { flex: none; font-size: 0.7rem; opacity: 0.8; }
+.loc-bar.has-location .loc-bar-icon { filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5)); }
+
+/* ---- Saved locations (multi-address) ---- */
+.loc-saved { margin-top: 0.9rem; }
+.loc-saved-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a8a8a;
+}
+.loc-saved-list { display: flex; flex-direction: column; gap: 0.45rem; }
+.loc-saved-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #eee2df;
+  border-radius: 12px;
+  background: #faf7f6;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.loc-saved-chip:active { background: #fdeeea; border-color: #f3c9c1; }
+.loc-saved-icon { font-size: 1rem; line-height: 1; flex: none; }
+.loc-saved-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.loc-saved-text strong {
+  font-size: 0.88rem;
+  color: #2d2d2d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loc-saved-text small {
+  font-size: 0.75rem;
+  color: #8a8a8a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loc-saved-del {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: #b9b0ad;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.loc-saved-del:active { color: #d9534f; background: #fdeeea; }
 
 .loc-gps-btn {
   width: 100%;

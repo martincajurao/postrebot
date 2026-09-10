@@ -462,6 +462,55 @@ function activeBranchName() {
   return entry ? entry.name : activeBranch.charAt(0).toUpperCase() + activeBranch.slice(1);
 }
 
+/** Detect the branch straight from the device GPS (no location gate needed).
+ *  Used at first load so the menu is filtered to the customer's branch BEFORE
+ *  they confirm their delivery address. Never blocks the menu: resolves to the
+ *  branch key (or null) and applies the filter when detection succeeds.
+ *  On Android (Messenger/Chrome WebView) the geolocation prompt is frequently
+ *  suppressed or hangs forever — so we race GPS against an IP-based fallback. */
+function detectBranchFromDeviceGps() {
+  return new Promise((resolve) => {
+    const hasGeo = typeof navigator !== 'undefined' && navigator.geolocation && navigator.geolocation.getCurrentPosition;
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
+
+    // Fallback path: IP-approximate position → nearest branch.
+    const viaIp = () => {
+      ipLocate().then((ip) => {
+        if (!ip) { finish(null); return; }
+        detectBranchFromCoords(ip.lat, ip.lng)
+          .then((branch) => {
+            if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu (approximate)');
+            finish(branch);
+          })
+          .catch(() => finish(null));
+      });
+    };
+
+    if (!hasGeo) { viaIp(); return; }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude);
+        const lng = Number(pos.coords.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) { viaIp(); return; }
+        detectBranchFromCoords(lat, lng)
+          .then((branch) => {
+            if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
+            finish(branch);
+          })
+          .catch(() => viaIp());
+      },
+      () => viaIp(), // denied/unavailable/timeout → IP fallback
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 },
+    );
+
+    // Android safety net: some WebViews never call either callback. If nothing
+    // has settled after 10s, go straight to the IP fallback.
+    setTimeout(() => { if (!settled) viaIp(); }, 10000);
+  });
+}
+
 
 
 // ---------- Local cart (no DB round-trips) ----------
@@ -2232,8 +2281,224 @@ function getSavedLocation() {
   } catch { return null; }
 }
 
+// ---------- Saved locations (multiple addresses per customer) ----------
+// Every confirmed location is kept in a per-session list so returning
+// customers can re-select one with a single tap instead of re-entering it.
+// The single LOCATION_KEY entry stays in sync as "the location in use".
+const LOCATIONS_KEY = () => 'webview_locations_' + sessionId;
+const MAX_SAVED_LOCATIONS = 10;
+
+function getSavedLocations() {
+  try {
+    const list = JSON.parse(storageGet(LOCATIONS_KEY()) || '[]');
+    return Array.isArray(list) ? list.filter((l) => l && l.address) : [];
+  } catch { return []; }
+}
+
+/** Stable signature so re-confirming the same spot updates instead of duplicating. */
+function locationSignature(loc) {
+  const lat = Number.isFinite(loc.lat) ? loc.lat.toFixed(5) : '';
+  const lng = Number.isFinite(loc.lng) ? loc.lng.toFixed(5) : '';
+  return (lat + ',' + lng + '|' + String(loc.address || '').trim().toLowerCase()).slice(0, 160);
+}
+
 function saveLocation(loc) {
+  // "In use" location — kept for branch detection, checkout, pin restore.
   try { storageSet(LOCATION_KEY(), JSON.stringify(loc)); } catch { /* non-fatal */ }
+  // Append/update in the saved-locations list.
+  try {
+    const list = getSavedLocations();
+    const sig = locationSignature(loc);
+    const existingIdx = list.findIndex((l) => locationSignature(l) === sig);
+    const entry = {
+      id: existingIdx >= 0 ? list[existingIdx].id : 'loc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      address: loc.address,
+      landmark: loc.landmark || null,
+      lat: Number.isFinite(loc.lat) ? loc.lat : null,
+      lng: Number.isFinite(loc.lng) ? loc.lng : null,
+      source: loc.source || 'manual',
+      label: loc.label || (existingIdx >= 0 ? list[existingIdx].label : null) || null,
+      savedAt: new Date().toISOString(),
+      lastUsedAt: new Date().toISOString(),
+    };
+    if (existingIdx >= 0) list[existingIdx] = entry; else list.unshift(entry);
+    // Most-recently-used first, capped so storage can't grow unbounded.
+    list.sort((a, b) => String(b.lastUsedAt || '').localeCompare(String(a.lastUsedAt || '')));
+    storageSet(LOCATIONS_KEY(), JSON.stringify(list.slice(0, MAX_SAVED_LOCATIONS)));
+  } catch { /* non-fatal */ }
+}
+
+/** Persist a label for a saved location ("Home", "Office", …). */
+function renameSavedLocation(id, label) {
+  try {
+    const list = getSavedLocations();
+    const entry = list.find((l) => l.id === id);
+    if (entry) {
+      entry.label = (label || '').trim() || null;
+      storageSet(LOCATIONS_KEY(), JSON.stringify(list));
+      renderSavedLocations();
+    }
+  } catch { /* non-fatal */ }
+}
+
+/** Remove a saved address from the list (does not affect the in-use location). */
+function removeSavedLocation(id) {
+  try {
+    storageSet(LOCATIONS_KEY(), JSON.stringify(getSavedLocations().filter((l) => l.id !== id)));
+    renderSavedLocations();
+    showToast('🗑️ Saved location removed');
+  } catch { /* non-fatal */ }
+}
+
+/** Render the saved-location chips inside the gate. Tap = use immediately. */
+function renderSavedLocations() {
+  const wrap = $id('loc-saved');
+  const listEl = $id('loc-saved-list');
+  if (!wrap || !listEl) return;
+  const list = getSavedLocations();
+  if (!list.length) { wrap.classList.add('hidden'); listEl.innerHTML = ''; return; }
+  wrap.classList.remove('hidden');
+  listEl.innerHTML = list.map((l) => {
+    const title = esc(l.label || l.address);
+    const sub = l.label ? esc(l.address) : '';
+    return `<div class="loc-saved-chip" onclick="useSavedLocation('${esc(l.id)}')">
+      <span class="loc-saved-icon">📍</span>
+      <span class="loc-saved-text"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</span>
+      <button type="button" class="loc-saved-del" aria-label="Remove" onclick="event.stopPropagation(); removeSavedLocation('${esc(l.id)}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+// ---------- Header auto-hide on scroll ----------
+// Standard mobile pattern: scrolling down hides the sticky header (more content
+// space); scrolling up (or reaching the top) slides it back in. A small
+// threshold prevents jitter from tiny finger movements / momentum scroll.
+let headerLastY = 0;
+let headerHideTick = false;
+
+function setHeaderHidden(hidden) {
+  const h = $id('site-header');
+  if (!h) return;
+  h.classList.toggle('header-hidden', !!hidden);
+}
+
+function initHeaderAutoHide() {
+  const h = $id('site-header');
+  if (!h) return;
+  window.addEventListener('scroll', () => {
+    if (headerHideTick) return; // throttle to one check per frame
+    headerHideTick = true;
+    requestAnimationFrame(() => {
+      headerHideTick = false;
+      const y = window.scrollY || window.pageYOffset || 0;
+      const delta = y - headerLastY;
+      const THRESHOLD = 12; // px of deliberate scrolling before reacting
+
+      // Near the top → always show (so the brand/location bar stays visible).
+      if (y < 60) {
+        setHeaderHidden(false);
+        h.classList.remove('header-scrolled');
+      } else {
+        h.classList.add('header-scrolled');
+        // Only act on deliberate movement past the threshold.
+        if (Math.abs(delta) > THRESHOLD) {
+          setHeaderHidden(delta > 0); // down → hide, up → show
+          headerLastY = y;
+        }
+      }
+    });
+  }, { passive: true });
+}
+
+// The header must always be visible under overlays (location gate, cart view,
+// lightboxes) — showLocationGate/hideLocationGate call this to force it back.
+function forceHeaderVisible() {
+  setHeaderHidden(false);
+  headerLastY = window.scrollY || 0;
+}
+
+// ---------- Header delivery-location bar ----------
+/** Short display text for the header bar: label if set, else a trimmed address. */
+function locationDisplayText(loc) {
+  if (!loc || !loc.address) return null;
+  if (loc.label) return loc.label;
+  const a = String(loc.address).trim();
+  return a.length > 42 ? a.slice(0, 42).trimEnd() + '…' : a;
+}
+
+/** Reflect the active delivery location in the header bar. */
+function updateLocationBar() {
+  const bar = $id('loc-bar');
+  const addrEl = $id('loc-bar-address');
+  const labelEl = $id('loc-bar-label');
+  if (!bar || !addrEl) return;
+  const loc = getSavedLocation();
+  const text = locationDisplayText(loc);
+  if (text) {
+    addrEl.textContent = text;
+    if (labelEl) labelEl.textContent = 'Deliver to';
+    bar.classList.add('has-location');
+  } else {
+    addrEl.textContent = 'Set your delivery location';
+    if (labelEl) labelEl.textContent = 'No location yet';
+    bar.classList.remove('has-location');
+  }
+}
+
+/** Change delivery location — re-opens the location gate (which now shows the
+ *  customer's saved addresses for one-tap switching, plus GPS/map/manual entry
+ *  for a brand-new address). Works from anywhere in the app. */
+function changeDeliveryLocation() {
+  showLocationGate();
+}
+
+/** Tap a saved address → apply it and confirm right away (unlock the menu). */
+async function useSavedLocation(id) {
+  const loc = getSavedLocations().find((l) => l.id === id);
+  if (!loc) return;
+  saveLocation(loc); // bumps lastUsedAt + sets it as the in-use location
+  pendingCoords = (Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) ? { lat: loc.lat, lng: loc.lng } : null;
+  pinSource = pendingCoords ? (loc.source === 'gps' ? 'gps' : 'pin') : null;
+  hideLocError();
+  // Mirror confirmLocation()'s post-save work without re-validating fields.
+  const confirmedLat = pendingCoords ? pendingCoords.lat : null;
+  const confirmedLng = pendingCoords ? pendingCoords.lng : null;
+  pendingCoords = null;
+  pinSource = null;
+  hideLocationGate();
+  updateLocationBar();
+  showToast('📍 Delivering to ' + (loc.label ? loc.label : 'your saved location'));
+  if (Number.isFinite(confirmedLat) && Number.isFinite(confirmedLng)) {
+    const branch = await detectBranchFromCoords(confirmedLat, confirmedLng);
+    if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
+  }
+}
+
+
+/** Approximate the customer's position from their IP address (free ipwho.is
+ *  service, no key). City-level accuracy — enough to pick the nearest branch
+ *  when device GPS is unavailable (common in Messenger's in-app browser and
+ *  Android WebView where the geolocation prompt is often blocked). */
+function ipLocate() {
+  return new Promise((resolve) => {
+    const finish = (v) => resolve(v);
+    try {
+      fetch('https://ipwho.is/', { cache: 'no-store' })
+        .then((r) => r.json())
+        .then((d) => {
+          const lat = Number(d && d.latitude);
+          const lng = Number(d && d.longitude);
+          if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+            finish({ lat, lng, city: (d.city && String(d.city)) || null, source: 'ip' });
+          } else {
+            finish(null);
+          }
+        })
+        .catch(() => finish(null));
+      // Hard cap so a hung request can't block the gate.
+      setTimeout(() => finish(null), 6000);
+    } catch { finish(null); }
+  });
 }
 
 /** True when Leaflet loaded and the map was initialized successfully.
@@ -2262,6 +2527,9 @@ function showLocationGate() {
   if (saved && saved.address && !$id('loc-address').value) {
     $id('loc-address').value = saved.address;
   }
+  // Returning customer → show their saved addresses for one-tap selection.
+  renderSavedLocations();
+  forceHeaderVisible(); // never let the header hide while the gate is open
   gate.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
 
@@ -2339,6 +2607,7 @@ function initLeafletMap() {
 function hideLocationGate() {
   const gate = $id('location-gate');
   if (gate) gate.classList.add('hidden');
+  forceHeaderVisible(); // header returns after choosing/changing a location
   const mainContent = $id('main-content');
   if (mainContent) mainContent.classList.remove('hidden');
   document.body.style.overflow = '';
@@ -2475,17 +2744,50 @@ function useCurrentLocation() {
       onGpsDone();
       if (settled) return; // custom timeout already fired — abandon
       clearTimeout(safetyNet);
-      resetBtn();
+      btn.disabled = true;
+      label.textContent = 'Finding approximate location…';
       console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
-      if (err && err.code === 1) {
-        showLocError('Location permission was denied — tap your spot on the map below instead.');
-      } else if (err && err.code === 3) {
-        showLocError('Getting your location timed out — try again or tap the map below.');
-      } else {
-        showLocError('Could not get your location — tap your spot on the map below instead.');
-      }
-      // Recover gracefully: pan to store and let them tap the map.
-      focusMap();
+      // GPS unavailable (denied/blocked/timeout — common on phones inside
+      // Messenger) → fall back to an IP-based approximate position so the
+      // customer still gets a pin instead of having to tap the map manually.
+      ipLocate().then((ip) => {
+        resetBtn();
+        if (ip) {
+          const coords = { lat: ip.lat, lng: ip.lng };
+          if (mapAvailable()) {
+            setMapPin(coords, false);
+            locMap.setView([coords.lat, coords.lng], 14);
+          } else {
+            pendingCoords = coords;
+            pinSource = 'gps';
+            updateLocConfirmState();
+          }
+          // Best-effort reverse geocode of the approximate point.
+          Promise.race([
+            reverseGeocode(coords.lat, coords.lng),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('geocode-timeout')), 5000)),
+          ]).then((address) => {
+            if (settled) return;
+            $id('loc-address').value = address;
+            updateLocConfirmState();
+            showToast('📍 Approximate location found (from your network) — please check it');
+          }).catch(() => {
+            if (settled) return;
+            showLocError('Set an approximate pin from your network — please complete your exact address below.');
+            $id('loc-address').focus();
+          });
+          return;
+        }
+        // IP lookup failed too → last resort: map tap / manual address.
+        if (err && err.code === 1) {
+          showLocError('Location permission was denied — tap your spot on the map below instead.');
+        } else if (err && err.code === 3) {
+          showLocError('Getting your location timed out — try again or tap the map below.');
+        } else {
+          showLocError('Could not get your location — tap your spot on the map below instead.');
+        }
+        focusMap();
+      });
     },
     { enableHighAccuracy: false, timeout: GPS_TIMEOUT_MS, maximumAge: 60000 },
   );
@@ -2673,6 +2975,7 @@ async function confirmLocation() {
   pendingCoords = null;
   pinSource = null;
   hideLocationGate();
+  updateLocationBar();
   showToast('📍 Location saved!');
   // Detect which branch serves this location (GPS / map pin only — manual
   // addresses without coordinates fall back to the last-known branch, if any).
@@ -2787,9 +3090,18 @@ async function init() {
   activeBranch = storageGet('webview_branch_' + sessionId) || null;
   const savedLoc = getSavedLocation();
   if (savedLoc && Number.isFinite(savedLoc.lat) && Number.isFinite(savedLoc.lng)) {
+    // Returning customer with a confirmed location → re-detect from its coords.
     await detectBranchFromCoords(savedLoc.lat, savedLoc.lng);
+  } else if (!activeBranch) {
+    // First load (or no usable saved coords) → ask the device GPS directly so
+    // the menu is filtered to the right branch from the very first paint.
+    // Non-blocking fallback: if the customer denies/ignores the prompt, the
+    // unfiltered menu is shown and the location gate resolves the branch later.
+    await detectBranchFromDeviceGps();
   }
   applyBranchFilter();
+  updateLocationBar();
+  initHeaderAutoHide(); // hide-on-scroll-down / show-on-scroll-up
 
   console.log('[webview] init complete →', {
     categories: categories.length,
