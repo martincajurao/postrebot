@@ -564,6 +564,7 @@ function renderCategories() {
   // Category rail removed — customers now land on the packages-first home.
   renderCategorySections();
   renderBestValueCarousel();
+  renderByopSection();
   const pf = $id('promo-foodpacks');
   if (pf) pf.textContent = foodPacks.length > 0
     ? foodPacks.length + ' pack' + (foodPacks.length === 1 ? '' : 's') + ' available'
@@ -575,12 +576,15 @@ function renderBestValueCarousel() {
   const section = $id('best-value-section');
   const carousel = $id('best-value-carousel');
   if (!section || !carousel) return;
-  if (!packages || packages.length === 0) {
+  // Exclude the "Build Your Own" custom package — it gets its own dedicated
+  // section at the bottom of the home menu.
+  const fixed = packages.filter((pkg) => !pkg.is_custom);
+  if (fixed.length === 0) {
     section.style.display = 'none';
     return;
   }
   section.style.display = 'block';
-  carousel.innerHTML = packages.map((pkg) => {
+  carousel.innerHTML = fixed.map((pkg) => {
     const img = imageHtml(pkg.photo_url, pkg.name);
     const desc = pkg.description ? `<div class="pkg-desc">${esc(pkg.description)}</div>` : '';
     const price = packageCardPrice(pkg, cardSizes['package-' + pkg.id]);
@@ -596,6 +600,33 @@ function renderBestValueCarousel() {
       </div>
     </div>`;
   }).join('');
+}
+
+/** Render the "Build Your Own Package" section at the bottom of the home menu. */
+function renderByopSection() {
+  const section = $id('byop-home-section');
+  const card = $id('byop-home-card');
+  if (!section || !card) return;
+  const byop = packages.find((pkg) => pkg.is_custom);
+  if (!byop) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  const img = imageHtml(byop.photo_url, byop.name);
+  const price = packageCardPrice(byop, cardSizes['package-' + byop.id]);
+  card.innerHTML = `
+    <div class="byop-home-card-inner" onclick="showPackageDetail(${byop.id})">
+      ${img}
+      <div class="byop-home-info">
+        <div class="byop-home-name">${esc(byop.name)}</div>
+        ${byop.description ? `<div class="byop-home-desc">${esc(byop.description)}</div>` : ''}
+        <div class="byop-home-price-row">
+          <span class="byop-home-price">${price}</span>
+          <button class="byop-home-add-btn" onclick="addToCartPackageQuick(${byop.id}, event)">+ Add to Cart</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 // ---------- Products ----------
