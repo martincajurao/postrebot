@@ -2369,6 +2369,34 @@ function renderSavedLocations() {
   }).join('');
 }
 
+// Menu is revealed ONLY after the customer's branch is known — the catalogs
+// are fetched up front, but nothing is rendered until location data resolves
+// (saved coords, device GPS, or IP) or the customer confirms a location in the
+// gate. revealMenu() is idempotent (safe to call on every confirm).
+let menuRevealed = false;
+
+/** First-time reveal of the menu once the branch is known (or on explicit
+ *  confirm). Renders the filtered catalogs and unlocks the home view. */
+function revealMenu() {
+  if (menuRevealed) return;
+  const mainContent = $id('main-content');
+  const nav = $id('bottom-nav');
+  if (categories.length === 0) {
+    hideLoading();
+    if (mainContent) mainContent.classList.add('hidden');
+    if (nav) nav.style.display = 'none';
+    const errBox = $id('load-error');
+    if (errBox) errBox.classList.remove('hidden');
+    return;
+  }
+  hideLoading();
+  if (mainContent) mainContent.classList.remove('hidden');
+  if (nav) nav.style.display = '';
+  renderCategories();
+  showCategories();
+  menuRevealed = true;
+}
+
 // ---------- Header auto-hide on scroll ----------
 // Standard mobile pattern: scrolling down hides the sticky header (more content
 // space); scrolling up (or reaching the top) slides it back in. A small
@@ -2472,6 +2500,8 @@ async function useSavedLocation(id) {
     const branch = await detectBranchFromCoords(confirmedLat, confirmedLng);
     if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
   }
+  // A confirmed location exists → populate the (branch-filtered) menu.
+  revealMenu();
 }
 
 
@@ -2983,6 +3013,8 @@ async function confirmLocation() {
     const branch = await detectBranchFromCoords(confirmedLat, confirmedLng);
     if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
   }
+  // Location data now exists → safe to populate the (branch-filtered) menu.
+  revealMenu();
 }
 
 // ---------- Init ----------
@@ -3078,9 +3110,10 @@ async function init() {
   storageSet(LOCAL_CART_KEY(), JSON.stringify(cart));
   updateCartBadge();
 
-  // Branch (GPS-based menu filtering): load the branch catalog, then restore
-  // the last-known branch and re-detect it from the saved delivery location's
-  // coordinates — all BEFORE the first render so the menu starts filtered.
+  // Branch (GPS-based menu filtering): load the branch catalog, then resolve
+  // the customer's branch BEFORE rendering anything. The menu stays behind the
+  // loading overlay until we have location data — if the device can't provide
+  // it, the location gate takes over and revealMenu() fires on confirm.
   try {
     const bData = await api('/branches');
     if (bData && Array.isArray(bData.branches)) branchCatalog = bData.branches;
@@ -3093,13 +3126,12 @@ async function init() {
     // Returning customer with a confirmed location → re-detect from its coords.
     await detectBranchFromCoords(savedLoc.lat, savedLoc.lng);
   } else if (!activeBranch) {
-    // First load (or no usable saved coords) → ask the device GPS directly so
-    // the menu is filtered to the right branch from the very first paint.
-    // Non-blocking fallback: if the customer denies/ignores the prompt, the
-    // unfiltered menu is shown and the location gate resolves the branch later.
+    // First load (or no usable saved coords) → ask the device GPS directly,
+    // falling back to IP-based location. Never give up without a branch: if
+    // detection fails entirely, hold the menu and let the gate decide.
     await detectBranchFromDeviceGps();
   }
-  applyBranchFilter();
+
   updateLocationBar();
   initHeaderAutoHide(); // hide-on-scroll-down / show-on-scroll-up
 
@@ -3118,18 +3150,16 @@ async function init() {
   isInsideMessenger = await messengerDetection;
   hideLoading();
 
-  // No catalog data at all → show an actionable error instead of a blank menu.
-  if (categories.length === 0) {
-    if (mainContent) mainContent.classList.add('hidden');
-    if (nav) nav.style.display = 'none';
-    const errBox = $id('load-error');
-    if (errBox) errBox.classList.remove('hidden');
+  // No location/branch data at all → do NOT show an unfiltered menu. Keep the
+  // content hidden and open the location gate; confirming a location there
+  // re-detects the branch and calls revealMenu().
+  if (!activeBranch) {
+    showLocationGate('set');
     return;
   }
 
-  if (mainContent) mainContent.classList.remove('hidden');
-  renderCategories();
-  showCategories();
+  applyBranchFilter();
+  revealMenu();
 
   // Location gate: customers confirm their delivery location before using the app.
   // This runs on EVERY webview open (not just first run) so the customer always
