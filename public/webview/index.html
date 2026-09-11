@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260909-5">
+  <link rel="stylesheet" href="style.css?v=20260911-2">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -322,10 +322,30 @@
         <h2 id="loc-gate-title">Where should we deliver?</h2>
         <p class="loc-gate-sub">Set your location so your order reaches the right place. Or pick one of your saved locations below.</p>
 
-        <!-- Auto-detect status - shows "Finding your location..." while GPS runs -->
-        <div id="loc-autodetect" class="loc-autodetect">
+        <!-- GPS button — explicit "locate me" control for the robust locator.
+             Idle/locating/success states are managed by setGPSButtonState(). -->
+        <button type="button" class="loc-gps-btn" id="loc-gps-btn" onclick="useCurrentLocation()">
+          <span class="loc-gps-icon" id="loc-gps-icon">📍</span>
+          <span id="loc-gps-label">Use my current location</span>
+        </button>
+
+        <!-- Locate status bar: progress, success, accuracy readout (±m), retry, errors. -->
+        <div id="loc-autodetect" class="loc-autodetect hidden">
           <span class="loc-autodetect-icon">📍</span>
-          <span id="loc-autodetect-label">Finding your location…</span>
+          <span id="loc-autodetect-label" class="loc-autodetect-label">Finding your location…</span>
+          <span id="loc-accuracy" class="loc-accuracy-chip hidden"></span>
+          <button type="button" id="loc-retry-btn" class="loc-retry-btn hidden" onclick="useCurrentLocation()">↻ Retry</button>
+        </div>
+
+        <!-- Blocked-permission help: per-platform steps to re-enable GPS
+             (rendered by showPermissionHelp() from LocationService). -->
+        <div id="loc-perm-help" class="loc-perm-help hidden">
+          <div class="loc-perm-head">
+            <strong id="loc-perm-title">Enable location access</strong>
+            <button type="button" class="loc-perm-close" onclick="hidePermissionHelp()" aria-label="Dismiss">✕</button>
+          </div>
+          <ol id="loc-perm-steps" class="loc-perm-steps"></ol>
+          <p class="loc-perm-alt">In a hurry? Just tap your spot on the map below instead.</p>
         </div>
 
         <!-- Saved locations — previously confirmed addresses. Tap one to use it
@@ -341,6 +361,7 @@
 
         <div class="loc-map-wrap" id="loc-map-wrap">
           <div id="loc-map" aria-label="Tap the map to set your delivery location"></div>
+          <div id="loc-coords" class="loc-coords hidden" aria-live="polite"></div>
           <p class="loc-map-hint" id="loc-status">📍 Tap the map to drop your pin — or search above</p>
         </div>
 
@@ -365,6 +386,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260910-6"></script>
+  <script src="app.js?v=20260911-2"></script>
 </body>
 </html>

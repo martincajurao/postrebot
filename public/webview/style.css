@@ -2425,6 +2425,122 @@ img.img-skel {
   line-height: 1;
 }
 
+/* GPS button states — locating pulse + success confirmation */
+.loc-gps-btn.is-locating {
+  animation: loc-gps-pulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+.loc-gps-btn.is-success {
+  border-color: #bfe8cd;
+  background: #f0fdf4;
+}
+@keyframes loc-gps-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Locate status bar label + variants */
+.loc-autodetect-label {
+  flex: 1;
+  min-width: 0;
+}
+.loc-autodetect-error {
+  border-color: #f3b4ae;
+  background: #fdf1f0;
+  color: #a93226;
+}
+
+/* GPS fix accuracy readout ("±25 m") */
+.loc-accuracy-chip {
+  flex: none;
+  padding: 4px 9px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.loc-accuracy-chip.good { color: #166534; }
+.loc-accuracy-chip.coarse { color: #92400e; }
+.loc-accuracy-chip.hidden { display: none; }
+
+/* Chosen point coordinate readout (shown once a GPS fix / pin exists) */
+.loc-coords {
+  margin: 6px 0 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #166534;
+  font-variant-numeric: tabular-nums;
+}
+.loc-coords.hidden { display: none; }
+
+/* Inline retry affordance in the status bar */
+.loc-retry-btn {
+  flex: none;
+  padding: 6px 11px;
+  border: none;
+  border-radius: 9px;
+  background: #e74c3c;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.15s ease;
+}
+.loc-retry-btn:hover { filter: brightness(1.06); }
+.loc-retry-btn:active { transform: scale(0.95); }
+.loc-retry-btn.hidden { display: none; }
+
+/* Blocked-permission help panel (per-platform re-enable steps) */
+.loc-perm-help {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #f3b4ae;
+  border-radius: 12px;
+  background: #fdf4f3;
+  text-align: left;
+}
+.loc-perm-help.hidden { display: none; }
+.loc-perm-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.loc-perm-head strong {
+  flex: 1;
+  font-size: 0.88rem;
+  color: #a93226;
+}
+.loc-perm-close {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: #a93226;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.loc-perm-steps {
+  margin: 0;
+  padding-left: 20px;
+  color: #6d3f3a;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+.loc-perm-alt {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  color: #9b8f8d;
+}
+
 .loc-divider {
   display: flex;
   align-items: center;

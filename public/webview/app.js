@@ -2647,122 +2647,236 @@ function showLocationGate() {
   updateLocConfirmState();
 }
 
-/** Auto-detect customer location on modal open using GPS.
- * Simply try GPS - if it fails, show message and let user type/drop pin.
- * No permission API check - just attempt GPS directly since permission API
- * can be unreliable in WebVs (says granted but GPS fails). */
-async function autoDetectLocation() {
-  const statusEl = $id('loc-autodetect');
-  const labelEl = $id('loc-autodetect-label');
-  
-  console.log('[webview] ===== AUTO-DETECT START =====');
-  
-  // Show "Finding your location..." status
-  if (statusEl) statusEl.classList.remove('hidden');
-  if (labelEl) labelEl.textContent = 'Finding your location…';
-  
-  // Try GPS directly - simplest and most reliable approach
-  console.log('[webview] Attempting GPS...');
-  try {
-    const position = await LocationService.getGPSPosition();
-    
-    console.log('[webview] GPS position:', position);
-    
-    if (position && LocationService.isValidLocation(position)) {
-      // GPS success! Update state
-      locationPermissionState = 'granted';
-      pendingCoords = { lat: position.lat, lng: position.lng };
-      pinSource = 'gps';
-      
-      console.log('[webview] COORDINATES:', position.lat, position.lng);
-      console.log('[webview] ACCURACY:', position.accuracy, 'meters');
-      
-      // Drop pin on map
-      zoomMapToPin(position, 16, true, true);
-      
-      // Reverse geocode to fill address and search box
-      try {
-        const address = await reverseGeocode(position.lat, position.lng);
-        console.log('[webview] ADDRESS:', address);
-        const addrEl = $id('loc-address');
-        if (addrEl && !addrEl.value.trim()) {
-          addrEl.value = address;
-        }
-        // Also fill the search box so user can see/edit
-        const searchEl = $id('loc-search');
-        if (searchEl && !searchEl.value.trim()) {
-          searchEl.value = address;
-        }
-        if (labelEl) labelEl.textContent = '✓ Approximate location found - drag pin to adjust';
-      } catch (geocodeErr) {
-        console.log('[webview] Geocode failed:', geocodeErr.message);
-        // Geocoding failed - user can type manually
-        if (labelEl) labelEl.textContent = '✓ Location found — drag pin to adjust';
-      }
-      
-      // Update status
-      if (statusEl) statusEl.classList.add('loc-autodetect-success');
-      updateLocConfirmState();
-      
-      // Hide status after a moment
-      setTimeout(() => {
-        if (statusEl) statusEl.classList.add('hidden');
-      }, 2000);
-      
-      console.log('[webview] RESULT: GPS SUCCESS');
-      console.log('[webview] ===== AUTO-DETECT END =====');
-    }
-  } catch (err) {
-    // GPS failed - but coordinates might still arrive late
-    // Don't show error immediately - wait a moment for late coordinates
-    console.log('[webview] GPS initial error:', err.code, err.message);
-    
-    // Wait up to 3 seconds for late coordinates
-    let coordinatesArrived = false;
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 100));
-      if (pendingCoords && Number.isFinite(pendingCoords.lat)) {
-        coordinatesArrived = true;
-        break;
-      }
-    }
-    
-    if (coordinatesArrived) {
-      // Coordinates arrived late - show success
-      console.log('[webview] COORDINATES ARRIVED LATE:', pendingCoords);
-      locationPermissionState = 'granted';
-      if (labelEl) labelEl.textContent = '✓ Location found';
-      if (statusEl) statusEl.classList.add('loc-autodetect-success');
-      updateLocConfirmState();
-      setTimeout(() => {
-        if (statusEl) statusEl.classList.add('hidden');
-      }, 2000);
-      console.log('[webview] RESULT: GPS SUCCESS (LATE)');
-      console.log('[webview] ===== AUTO-DETECT END =====');
-      return;
-    }
-    
-    // No coordinates arrived - show error
-    locationPermissionState = LocationService.permissionState;
-    
-    if (labelEl) {
-      if (err.code === LocationService.ErrorCodes.PERMISSION_DENIED) {
-        labelEl.textContent = '📍 Location access denied — please type or tap the map';
-      } else if (err.code === LocationService.ErrorCodes.TIMEOUT) {
-        labelEl.textContent = '📍 Location timed out — please type or tap the map';
-      } else {
-        labelEl.textContent = '📍 Could not find location — please type or tap the map';
-      }
-    }
-    
-    // Keep status visible but styled as neutral/info
-    if (statusEl) statusEl.classList.add('loc-autodetect-neutral');
-    
-    console.log('[webview] RESULT: GPS FAILED -', err.code);
-    console.log('[webview] ===== AUTO-DETECT END =====');
+// ---------- Robust GPS locator ----------
+// One shared path for BOTH the automatic attempt when the gate opens and the
+// manual "Use my current location" button. Everything funnels through
+// LocationService.getCurrentPosition() (real GPS only — IP coordinates are
+// never used for delivery) and handles the full failure surface with
+// actionable UI: per-code status messaging, an inline retry button, per-
+// platform "how to enable location" steps, an accuracy readout and coarse-fix
+// warnings. The map pin + manual address entry remain the guaranteed
+// fallbacks (Messenger's in-app browser, plain-HTTP origins, no GPS hardware).
+
+// Fixes worse than this many meters are labelled "approximate" — the customer
+// must verify/drag the pin before confirming. Mirrors LocationService.CONFIG.
+const GPS_COARSE_METERS = (typeof LocationService !== 'undefined' && LocationService.CONFIG)
+  ? LocationService.CONFIG.MAX_ACCURACY_METERS : 3000;
+
+let gpsLocateBusy = false;
+let gpsBarHideTimer = null;
+
+/** Sync the GPS button's visual state: idle | locating | success. */
+function setGPSButtonState(state) {
+  const btn = $id('loc-gps-btn');
+  const label = $id('loc-gps-label');
+  const icon = $id('loc-gps-icon');
+  if (!btn) return;
+  btn.disabled = state === 'locating';
+  btn.classList.toggle('is-locating', state === 'locating');
+  btn.classList.toggle('is-success', state === 'success');
+  if (label) {
+    label.textContent = state === 'locating' ? 'Getting your location…'
+      : state === 'success' ? 'Locate me again'
+      : 'Use my current location';
+  }
+  if (icon) icon.textContent = state === 'locating' ? '⏳' : state === 'success' ? '✅' : '📍';
+}
+
+/** Locate status bar above the map. mode: '' | 'success' | 'neutral' | 'error'. */
+function setLocateBar(mode, text) {
+  const bar = $id('loc-autodetect');
+  const label = $id('loc-autodetect-label');
+  if (!bar || !label) return;
+  clearTimeout(gpsBarHideTimer);
+  bar.classList.remove('hidden', 'loc-autodetect-success', 'loc-autodetect-neutral', 'loc-autodetect-error');
+  if (mode) bar.classList.add('loc-autodetect-' + mode);
+  bar.dataset.mode = mode || '';
+  label.textContent = text;
+}
+
+/** Accuracy readout chip ("±25 m") — green when precise, amber when coarse. */
+function setAccuracyChip(accuracyMeters) {
+  const chip = $id('loc-accuracy');
+  if (!chip) return;
+  const acc = Number(accuracyMeters);
+  if (Number.isFinite(acc) && acc > 0) {
+    chip.textContent = '±' + Math.round(acc) + ' m';
+    chip.classList.toggle('good', acc <= 60);
+    chip.classList.toggle('coarse', acc > GPS_COARSE_METERS);
+    chip.classList.remove('hidden');
+  } else {
+    chip.classList.add('hidden');
   }
 }
 
+/** Format lat/lng for display — 5 decimals ≈ 1 m precision. */
+function formatCoords(lat, lng) {
+  return Number(lat).toFixed(5) + ', ' + Number(lng).toFixed(5);
+}
+
+/** Chosen point's coordinates under the map (set on a GPS fix / pin move). */
+function setCoordsDisplay(lat, lng) {
+  const el = $id('loc-coords');
+  if (!el) return;
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    el.textContent = '🧭 ' + formatCoords(lat, lng);
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+/** Inline retry affordance inside the status bar (shown after failures). */
+function setRetryVisible(visible) {
+  const btn = $id('loc-retry-btn');
+  if (btn) btn.classList.toggle('hidden', !visible);
+}
+/** Collapsible, per-platform "how to enable location" panel (Android/iOS/desktop). */
+function showPermissionHelp() {
+  const panel = $id('loc-perm-help');
+  if (!panel) return;
+  const title = $id('loc-perm-title');
+  const steps = $id('loc-perm-steps');
+  const guide = (typeof LocationService !== 'undefined' && LocationService.getPermissionGuidance)
+    ? LocationService.getPermissionGuidance() : null;
+  if (title && guide) title.textContent = guide.title;
+  if (steps && guide) steps.innerHTML = guide.steps.map((s) => '<li>' + esc(s) + '</li>').join('');
+  panel.classList.remove('hidden');
+}
+
+function hidePermissionHelp() {
+  const panel = $id('loc-perm-help');
+  if (panel) panel.classList.add('hidden');
+}
+
+/** Success path shared by the auto attempt and the button: remember the fix,
+ *  pin + zoom the map, show accuracy, then reverse-geocode (best-effort). */
+function applyGPSFix(position) {
+  locationPermissionState = 'granted';
+  pendingCoords = { lat: position.lat, lng: position.lng };
+  pinSource = 'gps';
+  const acc = Number(position.accuracy);
+  const isCoarse = Number.isFinite(acc) && acc > GPS_COARSE_METERS;
+
+  setGPSButtonState('success');
+  setRetryVisible(false);
+  setAccuracyChip(acc);
+  setCoordsDisplay(position.lat, position.lng);
+  setLocateBar('success', isCoarse
+    ? '✓ Approximate location found (' + formatCoords(position.lat, position.lng) + ') — drag the pin to fine-tune'
+    : '✓ Location found (' + formatCoords(position.lat, position.lng) + ') — check it and confirm');
+  // Let the success message sink in, then tuck the bar away.
+  gpsBarHideTimer = setTimeout(() => {
+    const bar = $id('loc-autodetect');
+    if (bar) bar.classList.add('hidden');
+  }, 2600);
+
+  // Drop/zoom the pin (works even while the map is still initializing).
+  zoomMapToPin(pendingCoords, 16, true, true);
+  updateLocConfirmState();
+  showToast(isCoarse
+    ? '📍 Approximate location found — please verify it on the map'
+    : '📍 Location found — check it and confirm');
+
+  // Name the fix: pre-fill address + search only if empty — never stomping on
+  // what the customer already typed.
+  reverseGeocode(position.lat, position.lng)
+    .then((address) => {
+      const addrEl = $id('loc-address');
+      if (addrEl && !addrEl.value.trim()) addrEl.value = address;
+      const searchEl = $id('loc-search');
+      if (searchEl && !searchEl.value.trim()) searchEl.value = address;
+      updateLocConfirmState();
+    })
+    .catch(() => {
+      setLocateBar('success', isCoarse
+        ? '✓ Position found — complete your address below'
+        : '✓ Location found — complete your address below');
+    });
+}
+
+/** Failure path: per-code messaging + recovery affordances. The map tap and
+ *  manual address entry remain available no matter what failed here. */
+function handleGPSFailure(err, viaAuto) {
+  const code = (err && err.code) || 'UNKNOWN_ERROR';
+  const E = LocationService.ErrorCodes;
+  locationPermissionState = code === E.PERMISSION_DENIED ? 'denied' : 'unavailable';
+  setGPSButtonState('idle');
+  setAccuracyChip(null);
+  updateLocConfirmState(); // re-sync (hides a stale coordinate readout on manual failures)
+
+  // Friendly, actionable status for each failure mode.
+  if (code === E.PERMISSION_DENIED) {
+    setLocateBar('error', '📍 Location access is blocked — enable it below, or tap your spot on the map');
+    // The quiet auto attempt just nudges; manual attempts get the full help.
+    if (!viaAuto) {
+      showPermissionHelp();
+      showLocError('Phone location is off or access is blocked. Enable Location Services and allow access, or tap the map below to set your location.');
+    }
+  } else if (code === E.TIMEOUT) {
+    setLocateBar('error', '📍 Getting your location timed out — try again, or tap the map below');
+  } else if (code === E.POSITION_UNAVAILABLE || code === E.GPS_DISABLED) {
+    setLocateBar('error', '📍 Could not get your position — check that phone location is ON, or tap the map');
+  } else if (code === E.API_UNSUPPORTED || code === E.SECURE_CONTEXT_REQUIRED) {
+    setLocateBar('error', "📍 Location isn't available here — tap your spot on the map below");
+  } else {
+    setLocateBar('error', '📍 ' + ((err && err.message) || 'Could not get your location — try again or tap the map below'));
+  }
+  // Every failure except "no GPS support at all" is worth one retry tap.
+  setRetryVisible(code !== E.API_UNSUPPORTED && code !== E.SECURE_CONTEXT_REQUIRED);
+  console.warn('[webview] locate failed —', code, err && err.message);
+  focusMap();
+}
+
+/** Locate the device. viaAuto = the quiet attempt on gate-open (no hard error
+ *  popups — the map/manual fallbacks are shown instead); manual runs surface
+ *  the full permission-help panel when access is blocked. */
+async function useCurrentLocation(viaAuto) {
+  hideLocError();
+  hidePermissionHelp();
+  setRetryVisible(false);
+  if (gpsLocateBusy) return; // one locator at a time
+
+  // On the automatic attempt keep a restored/saved pin — don't wipe what the
+  // returning customer already has while GPS takes its shot. Manual requests
+  // always start clean so a stale pin can't be confirmed by accident.
+  if (!viaAuto) {
+    pendingCoords = null;
+    pinSource = null;
+  }
+
+  if (!LocationService.isGeolocationSupported()) {
+    locationPermissionState = 'unavailable';
+    setLocateBar('error', "📍 Location isn't supported here — tap your spot on the map below");
+    focusMap();
+    return;
+  }
+
+  gpsLocateBusy = true;
+  setGPSButtonState('locating');
+  setLocateBar(null, viaAuto ? 'Finding your location…' : 'Getting your location…');
+
+  try {
+    const position = await LocationService.getCurrentPosition();
+    if (position && LocationService.isValidLocation(position)) {
+      applyGPSFix(position);
+    } else {
+      handleGPSFailure({
+        code: LocationService.ErrorCodes.POSITION_UNAVAILABLE,
+        message: 'Invalid coordinates received',
+      }, viaAuto);
+    }
+  } catch (err) {
+    handleGPSFailure(err, viaAuto);
+  } finally {
+    gpsLocateBusy = false;
+  }
+}
+
+/** Gate-open auto attempt — kept as a named wrapper for showLocationGate(). */
+function autoDetectLocation() {
+  useCurrentLocation(true);
+}
 /** Create the Leaflet map once, after the modal is visible. */
 function initLeafletMap() {
   if (locMap) {
@@ -2820,13 +2934,12 @@ function hideLocationGate() {
   document.body.style.overflow = '';
 }
 
-function showLocError(msg, showPopup = false) {
+function showLocError(msg) {
   const el = $id('loc-gate-error');
   if (el) {
     el.textContent = msg;
     el.classList.remove('hidden');
   }
-  if (showPopup) showLocationServicePopup(msg);
 }
 
 function hideLocError() {
@@ -2834,26 +2947,6 @@ function hideLocError() {
   if (el) el.classList.add('hidden');
 }
 
-function showLocationServicePopup(message) {
-  const popup = $id('location-service-alert');
-  const text = $id('loc-service-message');
-  if (!popup) return;
-  if (text) text.textContent = message || 'Turn on Location Services and allow location access to continue.';
-  popup.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-}
-
-function dismissLocationPopup() {
-  const popup = $id('location-service-alert');
-  if (popup) popup.classList.add('hidden');
-  // Keep the location gate locked even if the customer dismisses the alert.
-  document.body.style.overflow = 'hidden';
-}
-
-function enableLocationFromPopup() {
-  dismissLocationPopup();
-  requestLocationPermission();
-}
 
 // Coordinates of the chosen delivery point — set by the GPS button or by
 // dropping the pin on the map. Saved with the confirmed address and sent
@@ -2930,287 +3023,6 @@ function setMapPin(latlng, fromGps) {
       })
       .catch(() => { /* offline / rate-limited/timeout — address stays hand-typed */ });
   }
-}
-
-/** GPS button — locate the device, pin it on the map and reverse-geocode it.
- *  Uses LocationService for robust geolocation with automatic fallback to IP. */
-async function useCurrentLocation() {
-  hideLocError();
-  const btn = $id('loc-gps-btn');
-  const label = $id('loc-gps-label');
-  if (!btn || !label) return;
-
-  // Clear any previous pin before requesting a fresh location
-  pendingCoords = null;
-  pinSource = null;
-
-  // Check if geolocation is supported
-  if (!LocationService.isGeolocationSupported()) {
-    locationPermissionState = 'unavailable';
-    pendingCoords = null;
-    pinSource = null;
-    showLocError('Your browser does not support location services. Tap your spot on the map below instead.', true);
-    focusMap();
-    return;
-  }
-
-  // Update UI to show progress
-  btn.disabled = true;
-  label.textContent = 'Finding your location…';
-
-  try {
-    // Use GPS ONLY - no IP fallback for delivery location
-    const position = await LocationService.getCurrentPosition();
-    
-    // Update state - this is a real GPS location
-    locationPermissionState = 'granted';
-    pendingCoords = { lat: position.lat, lng: position.lng };
-    pinSource = 'gps';
-
-    // Reset button
-    btn.disabled = false;
-    label.textContent = 'Use my current location';
-
-    // Pin on map and reverse geocode
-    zoomMapToPin(position, 16, true, true);
-
-    // Show success toast
-    showToast('📍 Location found! You can adjust the pin if needed.');
-
-    // Reverse geocode to fill address
-    try {
-      const address = await reverseGeocode(position.lat, position.lng);
-      const addrEl = $id('loc-address');
-      if (addrEl && !addrEl.value.trim()) addrEl.value = address;
-    } catch {
-      // Geocoding failed - user can type manually
-    }
-
-    updateLocConfirmState();
-
-  } catch (err) {
-    // GPS failed - phone location is likely off or denied
-    locationPermissionState = LocationService.permissionState;
-    
-    btn.disabled = false;
-    label.textContent = '🔓 Enable Location';
-    btn.onclick = requestLocationPermission;
-
-    // Show specific error message based on error code
-    const errorCode = err.code || LocationService.ErrorCodes.UNKNOWN_ERROR;
-    
-    // Clear any pending coords since GPS failed
-    pendingCoords = null;
-    pinSource = null;
-    
-    if (errorCode === LocationService.ErrorCodes.PERMISSION_DENIED) {
-      showLocError('Phone location is OFF or access is blocked. Please enable Location Services on your phone, or tap the map below to set your location manually.', true);
-    } else if (errorCode === LocationService.ErrorCodes.TIMEOUT) {
-      showLocError('Getting your location timed out. Your phone location might be off. Please try again or tap your location on the map below.', true);
-    } else if (errorCode === ErrorCodes.API_UNSUPPORTED) {
-      showLocError('Your browser does not support location services. Tap your spot on the map below to set your location.', true);
-    } else {
-      showLocError(err.message || 'Could not get your location. Please check that phone location is ON, or tap the map below.', true);
-    }
-    
-    focusMap();
-  }
-}
-
-/** Request location permission and get the location */
-async function requestLocationPermission() {
-  hideLocError();
-  const btn = $id('loc-gps-btn');
-  const label = $id('loc-gps-label');
-  if (!btn || !label) return;
-
-  btn.disabled = true;
-  label.textContent = 'Waiting for permission…';
-
-  try {
-    // Request GPS position (no IP fallback - we want real permission)
-    const position = await LocationService.getGPSPosition();
-    
-    // Permission granted and GPS working!
-    locationPermissionState = 'granted';
-    btn.disabled = false;
-    label.textContent = 'Use my current location';
-    btn.onclick = useCurrentLocation;
-    
-    // Now use the position
-    pendingCoords = { lat: position.lat, lng: position.lng };
-    pinSource = 'gps';
-    zoomMapToPin(position, 16, true, true);
-    showToast('📍 Location found! You can adjust the pin if needed.');
-    
-    // Reverse geocode to fill address
-    try {
-      const address = await reverseGeocode(position.lat, position.lng);
-      const addrEl = $id('loc-address');
-      if (addrEl && !addrEl.value.trim()) addrEl.value = address;
-    } catch {
-      // Geocoding failed - user can type manually
-    }
-    
-    updateLocConfirmState();
-    
-  } catch (err) {
-    // Permission denied or GPS failed
-    locationPermissionState = LocationService.permissionState;
-    btn.disabled = false;
-    label.textContent = '🔓 Enable Location';
-    btn.onclick = requestLocationPermission;
-    
-    const errorCode = err.code || LocationService.ErrorCodes.UNKNOWN_ERROR;
-    
-    // Clear pending coords
-    pendingCoords = null;
-    pinSource = null;
-    
-    if (errorCode === LocationService.ErrorCodes.PERMISSION_DENIED) {
-      showLocError('Phone location is OFF. Please enable Location Services on your phone, or tap the map below to set your location manually.', true);
-    } else {
-      showLocError(err.message || 'Could not get your location. Please try again or tap the map below.', true);
-    }
-    
-    focusMap();
-    console.warn('[webview] location permission request failed:', errorCode, err.message);
-  }
-}
-
-/** Check permission state and update button text accordingly */
-async function checkLocationPermission() {
-  const btn = $id('loc-gps-btn');
-  const label = $id('loc-gps-label');
-  if (!btn || !label) return;
-
-  try {
-    // Use LocationService to get permission state
-    const permState = await LocationService.getPermissionState();
-    locationPermissionState = permState;
-    
-    if (permState === 'denied') {
-      label.textContent = '🔓 Enable Location';
-      btn.onclick = requestLocationPermission;
-      showLocationServicePopup('Location access is blocked. Enable Location Services and allow access, or tap the map below to set your location manually.');
-    } else {
-      label.textContent = 'Use my current location';
-      btn.onclick = useCurrentLocation;
-    }
-  } catch {
-    // permissions API not supported — use default
-    label.textContent = 'Use my current location';
-    btn.onclick = useCurrentLocation;
-  }
-}
-
-/** Get the device's current location from GPS */
-function getLocationFromGPS() {
-  const btn = $id('loc-gps-btn');
-  const label = $id('loc-gps-label');
-  if (!btn || !label) return;
-
-  // Restore original onclick
-  btn.onclick = useCurrentLocation;
-
-  btn.disabled = true;
-  label.textContent = 'Getting your location…';
-
-  // Safety net: no matter what happens (slow GPS, hung Geocoder, thrown error),
-  // the button always recovers after MAX_WAIT ms so the customer is never stuck.
-  const MAX_WAIT = 10000;
-  let settled = false;
-  const resetBtn = () => {
-    if (settled) return;
-    settled = true;
-    btn.disabled = false;
-    label.textContent = 'Use my current location';
-  };
-  const safetyNet = setTimeout(resetBtn, MAX_WAIT);
-
-  // RACE: native geolocation vs. a shorter custom timeout. The first one to
-  // settle wins; the loser is ignored. This prevents the browser's slow
-  // built-in timeout (or an indefinite hang) from trapping the customer.
-  const GPS_TIMEOUT_MS = 7000;
-  let gpsSettled = false;
-  const onGpsDone = () => { gpsSettled = true; };
-
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      onGpsDone();
-      if (settled) return; // custom timeout already fired — abandon
-      clearTimeout(safetyNet);
-      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      // Use the GPS fix directly — even a coarse cell-tower fix is usually
-      // closer to the customer than the IP-based city fallback (which can be
-      // hundreds of km away, e.g. Manila for Bicol connections). Flag it so
-      // the customer verifies against the map.
-      const acc = Number(pos.coords.accuracy);
-      const isCoarse = Number.isFinite(acc) && acc > 3000;
-      console.log('[webview] GPS success — lat:', coords.lat, 'lng:', coords.lng, 'accuracy:', acc + 'm');
-      if (isCoarse) {
-        console.warn('[webview] GPS fix coarse (' + acc + 'm) — pinning anyway, customer verifies');
-      }
-      // Follow the exact same path as selecting a search result: drop the
-      // pin, fly the map to it, reverse-geocode and fill the address box.
-      // Mark this as a real phone GPS fix. Map/search/IP pins must not satisfy confirmation.
-      locationPermissionState = 'granted';
-      zoomMapToPin(coords, 16, true, true);
-      if (mapAvailable()) {
-        const status = $id('loc-status');
-        if (status) {
-          status.textContent = isCoarse
-            ? '📍 Approximate location — pan/drag to fine-tune, then confirm'
-            : '📍 Location found — pan/drag to fine-tune if needed';
-        }
-      }
-      if (!settled) {
-        showToast(isCoarse
-          ? '📍 Approximate location found — please check it on the map'
-          : '📍 Location found — check it and confirm');
-      }
-      resetBtn();
-    },
-    (err) => handleError(err),
-    { enableHighAccuracy: true, timeout: GPS_TIMEOUT_MS, maximumAge: 0 },
-  );
-
-  // Shared failure path: GPS denied/blocked/timeout/inaccurate → fall back to
-  // an IP-based approximate position so the customer doesn't have to hunt for
-  // their spot on the map after clicking "Use my current location".
-  // Each failure mode now pins the device's last coordinates (when available),
-  // pre-fills the address box and pans the map there so the customer only has
-  // to confirm — not re-navigate.
-  function handleError(err) {
-    onGpsDone();
-    if (settled) return; // custom timeout already fired — abandon
-    clearTimeout(safetyNet);
-    btn.disabled = true;
-    label.textContent = 'Finding approximate location…';
-    console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
-
-    // A failed native GPS request must stay a failure. IP coordinates are not
-    // proof that the phone's Location Services are enabled.
-    locationPermissionState = err && err.code === 1 ? 'denied' : 'unavailable';
-    resetBtn();
-    showLocError(err && err.code === 1
-      ? 'Phone location is off. Enable Location Services and allow access to continue.'
-      : 'Phone Location Services are off or unavailable. Turn on Location on your phone, then try again.', true);
-    focusMap();
-    return;
-    } // end handleError
-
-  // Custom short timeout: if native GPS hasn't responded in GPS_TIMEOUT_MS,
-  // fire this BEFORE the browser's own timeout so the customer recovers faster.
-  setTimeout(() => {
-    if (gpsSettled || settled) return;
-    // Abort the native call is not possible, but we abandon its callback.
-    clearTimeout(safetyNet);
-    resetBtn();
-    console.warn('[webview] geolocation custom timeout fired');
-    showLocError('Getting your location is taking too long — tap your spot on the map below, or try again.');
-    focusMap();
-  }, GPS_TIMEOUT_MS);
 }
 
 /** Pan the map to the store and nudge the customer to tap their spot. */
@@ -3335,12 +3147,19 @@ function initSearchAutocomplete() {
 function updateLocConfirmState() {
   const status = $id('loc-status');
   if (!status) return;
+  // Coordinate readout under the map — live-synced with pendingCoords so it
+  // stays accurate through GPS fixes, map taps and pin drags (and still shows
+  // when the map itself failed to load).
+  setCoordsDisplay(
+    pendingCoords && Number.isFinite(pendingCoords.lat) ? pendingCoords.lat : null,
+    pendingCoords && Number.isFinite(pendingCoords.lng) ? pendingCoords.lng : null,
+  );
   if (!mapAvailable()) { status.textContent = ''; return; }
   const address = (($id('loc-address') && $id('loc-address').value) || '').trim();
   const hasAddress = address.length >= 5;
   status.classList.toggle('loc-status-ok', !!pendingCoords && hasAddress);
   if (!pendingCoords) {
-    status.textContent = '📍 Tap the map to drop your pin — or search above';
+    status.textContent = '📍 Tap the map, search, or use the GPS button above';
   } else if (!hasAddress) {
     status.textContent = '✓ Pin saved — now complete your address below';
   } else {
