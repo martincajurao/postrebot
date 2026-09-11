@@ -467,25 +467,44 @@ function activeBranchName() {
  *  Used at first load so the menu is filtered to the customer's branch BEFORE
  *  they confirm their delivery address. Never blocks the menu: resolves to the
  *  branch key (or null) and applies the filter when detection succeeds.
- *  Uses LocationService for robust handling with automatic IP fallback. */
+ * 
+ *  IMPORTANT: This function can use IP fallback for approximate branch detection
+ *  because it's only for menu filtering, NOT for delivery location. The delivery
+ *  location must always come from GPS or map pin (user's explicit confirmation). */
 async function detectBranchFromDeviceGps() {
   try {
-    // Use LocationService which handles GPS, timeouts, and IP fallback automatically
-    const position = await LocationService.getCurrentPosition({ allowIPFallback: true });
-    
-    if (!position || !LocationService.isValidLocation(position)) {
-      return null;
+    // Try GPS first
+    try {
+      const position = await LocationService.getGPSPosition();
+      
+      if (position && LocationService.isValidLocation(position)) {
+        const branch = await detectBranchFromCoords(position.lat, position.lng);
+        if (branch) {
+          showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
+        }
+        return branch;
+      }
+    } catch (gpsError) {
+      console.warn('[webview] GPS branch detection failed, trying IP fallback:', gpsError.code);
     }
     
-    const branch = await detectBranchFromCoords(position.lat, position.lng);
-    if (branch) {
-      const source = position.source === 'ip' ? ' (approximate)' : '';
-      showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu' + source);
+    // IP fallback for approximate branch detection only (NOT for delivery location)
+    // IP geolocation returns ISP location, which is only approximate but enough for menu filtering
+    const ipPosition = await LocationService.getIPBasedLocation();
+    
+    if (ipPosition && LocationService.isValidLocation(ipPosition)) {
+      const branch = await detectBranchFromCoords(ipPosition.lat, ipPosition.lng);
+      if (branch) {
+        const city = ipPosition.city ? ' near ' + ipPosition.city : '';
+        showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu (approximate' + city + ')');
+      }
+      return branch;
     }
-    return branch;
+    
+    return null;
     
   } catch (err) {
-    console.warn('[webview] branch detection failed:', err.code, err.message);
+    console.warn('[webview] branch detection failed completely:', err.code, err.message);
     return null;
   }
 }
@@ -2820,27 +2839,23 @@ async function useCurrentLocation() {
   label.textContent = 'Finding your location…';
 
   try {
-    // Use LocationService with IP fallback
-    const position = await LocationService.getCurrentPosition({ allowIPFallback: true });
+    // Use GPS ONLY - no IP fallback for delivery location
+    const position = await LocationService.getCurrentPosition();
     
-    // Update state
-    locationPermissionState = LocationService.permissionState;
+    // Update state - this is a real GPS location
+    locationPermissionState = 'granted';
     pendingCoords = { lat: position.lat, lng: position.lng };
-    pinSource = position.source; // 'gps' or 'ip'
+    pinSource = 'gps';
 
     // Reset button
     btn.disabled = false;
-    label.textContent = '✓ Location found';
+    label.textContent = 'Use my current location';
 
     // Pin on map and reverse geocode
-    zoomMapToPin(position, 16, true, position.source === 'gps');
+    zoomMapToPin(position, 16, true, true);
 
-    // Show toast based on source
-    if (position.source === 'ip') {
-      showToast('📍 Approximate location found via network. Tap to adjust on map if needed.');
-    } else {
-      showToast('📍 Location found!');
-    }
+    // Show success toast
+    showToast('📍 Location found! You can adjust the pin if needed.');
 
     // Reverse geocode to fill address
     try {
@@ -2854,26 +2869,28 @@ async function useCurrentLocation() {
     updateLocConfirmState();
 
   } catch (err) {
-    // Handle specific error types with appropriate messages
+    // GPS failed - phone location is likely off or denied
     locationPermissionState = LocationService.permissionState;
     
     btn.disabled = false;
-    label.textContent = 'Try again';
+    label.textContent = '🔓 Enable Location';
+    btn.onclick = requestLocationPermission;
 
     // Show specific error message based on error code
     const errorCode = err.code || LocationService.ErrorCodes.UNKNOWN_ERROR;
     
+    // Clear any pending coords since GPS failed
+    pendingCoords = null;
+    pinSource = null;
+    
     if (errorCode === LocationService.ErrorCodes.PERMISSION_DENIED) {
-      // Permission denied - show enable button
-      label.textContent = '🔓 Enable Location';
-      btn.onclick = requestLocationPermission;
-      showLocError(err.message || 'Location access was denied. Please allow location access, or tap the map below.', true);
+      showLocError('Phone location is OFF or access is blocked. Please enable Location Services on your phone, or tap the map below to set your location manually.', true);
     } else if (errorCode === LocationService.ErrorCodes.TIMEOUT) {
-      // Timeout - suggest retry or map
-      showLocError(err.message || 'Getting your location timed out. Please try again or tap your location on the map below.', true);
+      showLocError('Getting your location timed out. Your phone location might be off. Please try again or tap your location on the map below.', true);
+    } else if (errorCode === ErrorCodes.API_UNSUPPORTED) {
+      showLocError('Your browser does not support location services. Tap your spot on the map below to set your location.', true);
     } else {
-      // Other errors (unavailable, API unsupported, etc.)
-      showLocError(err.message || 'Could not get your location. Please tap your spot on the map below.', true);
+      showLocError(err.message || 'Could not get your location. Please check that phone location is ON, or tap the map below.', true);
     }
     
     focusMap();
@@ -2891,17 +2908,31 @@ async function requestLocationPermission() {
   label.textContent = 'Waiting for permission…';
 
   try {
-    // Use LocationService to request GPS (no IP fallback - we want actual permission)
+    // Request GPS position (no IP fallback - we want real permission)
     const position = await LocationService.getGPSPosition();
     
-    // Permission granted!
+    // Permission granted and GPS working!
     locationPermissionState = 'granted';
     btn.disabled = false;
     label.textContent = 'Use my current location';
     btn.onclick = useCurrentLocation;
     
-    // Now get the location with fallback enabled
-    await useCurrentLocation();
+    // Now use the position
+    pendingCoords = { lat: position.lat, lng: position.lng };
+    pinSource = 'gps';
+    zoomMapToPin(position, 16, true, true);
+    showToast('📍 Location found! You can adjust the pin if needed.');
+    
+    // Reverse geocode to fill address
+    try {
+      const address = await reverseGeocode(position.lat, position.lng);
+      const addrEl = $id('loc-address');
+      if (addrEl && !addrEl.value.trim()) addrEl.value = address;
+    } catch {
+      // Geocoding failed - user can type manually
+    }
+    
+    updateLocConfirmState();
     
   } catch (err) {
     // Permission denied or GPS failed
@@ -2912,12 +2943,17 @@ async function requestLocationPermission() {
     
     const errorCode = err.code || LocationService.ErrorCodes.UNKNOWN_ERROR;
     
+    // Clear pending coords
+    pendingCoords = null;
+    pinSource = null;
+    
     if (errorCode === LocationService.ErrorCodes.PERMISSION_DENIED) {
-      showLocError('Location permission was denied. Please enable Location Services and allow access, or tap the map below.', true);
+      showLocError('Phone location is OFF. Please enable Location Services on your phone, or tap the map below to set your location manually.', true);
     } else {
       showLocError(err.message || 'Could not get your location. Please try again or tap the map below.', true);
     }
     
+    focusMap();
     console.warn('[webview] location permission request failed:', errorCode, err.message);
   }
 }

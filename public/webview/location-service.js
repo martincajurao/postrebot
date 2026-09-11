@@ -1,12 +1,12 @@
 /**
  * Location Service Module — Production-grade geolocation handling
  * 
- * Features:
- * - Proper state management with clear permission states
- * - Graceful fallbacks: GPS → IP geolocation → Map pin
- * - Specific error messages (not generic "turn on location")
- * - Timeout handling with safety nets
- * - Works in Messenger WebView, regular browsers, and insecure contexts
+ * IMPORTANT DESIGN DECISIONS:
+ * - IP geolocation returns ISP location, NOT user location. It's ONLY used for
+ *   approximate branch detection at startup (for menu filtering).
+ * - The GPS button ("Use my current location") uses REAL GPS ONLY - no IP fallback.
+ *   If GPS fails, user must drop a pin on the map. This ensures accurate delivery.
+ * - The map pin is the ONLY reliable way for users to confirm their actual location.
  * 
  * State Machine:
  * 'unknown' → 'checking' → 'granted' | 'denied' | 'unavailable' | 'timeout'
@@ -26,7 +26,7 @@ const LocationService = (() => {
 
   // Internal state
   let _permissionState = 'unknown';
-  let _lastPosition = null;
+  let _lastGPSPosition = null;  // Only GPS positions are stored as "last known"
   let _isRequestInProgress = false;
 
   // Error codes for clear error handling
@@ -37,7 +37,7 @@ const LocationService = (() => {
     SECURE_CONTEXT_REQUIRED: 'SECURE_CONTEXT_REQUIRED',
     API_UNSUPPORTED: 'API_UNSUPPORTED',
     ACCURACY_TOO_LOW: 'ACCURACY_TOO_LOW',
-    IP_FALLBACK_FAILED: 'IP_FALLBACK_FAILED',
+    GPS_DISABLED: 'GPS_DISABLED',  // Phone location services are off
     UNKNOWN_ERROR: 'UNKNOWN_ERROR',
   };
 
@@ -127,13 +127,14 @@ const LocationService = (() => {
     }
   }
 
-  // Get current position using the Geolocation API
+  // Get current position using REAL GPS only - no IP fallback
+  // This is the ONLY function that should be used for the "Use my current location" button
   function getGPSPosition() {
     return new Promise((resolve, reject) => {
       if (!isGeolocationSupported()) {
         reject({
           code: ErrorCodes.API_UNSUPPORTED,
-          message: 'Your browser does not support geolocation.',
+          message: 'Your browser does not support geolocation. Tap the map below to set your location.',
           canRetry: false,
         });
         return;
@@ -148,7 +149,7 @@ const LocationService = (() => {
         clearTimeout(safetyNetTimer);
         if (isError) reject(result);
         else {
-          _lastPosition = result;
+          _lastGPSPosition = result;
           resolve(result);
         }
       };
@@ -157,7 +158,7 @@ const LocationService = (() => {
       safetyNetTimer = setTimeout(() => {
         finish({
           code: ErrorCodes.TIMEOUT,
-          message: 'Getting your location took too long. Please try again or tap your location on the map.',
+          message: 'Getting your location took too long. Please try again or tap your location on the map below.',
           canRetry: true,
         }, true);
       }, CONFIG.SAFETY_NET_MS);
@@ -177,7 +178,7 @@ const LocationService = (() => {
           if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
             finish({
               code: ErrorCodes.POSITION_UNAVAILABLE,
-              message: 'Could not determine your location. Please try again or tap the map.',
+              message: 'Could not determine your location. Please try again or tap the map below.',
               canRetry: true,
             }, true);
             return;
@@ -187,7 +188,7 @@ const LocationService = (() => {
           if (Number.isFinite(coords.accuracy) && coords.accuracy > CONFIG.MAX_ACCURACY_METERS) {
             finish({
               code: ErrorCodes.ACCURACY_TOO_LOW,
-              message: `Location accuracy is low (${Math.round(coords.accuracy)}m). Please try again or use the map.`,
+              message: `Location accuracy is low (${Math.round(coords.accuracy)}m). Please try again or tap the map below.`,
               canRetry: true,
             }, true);
             return;
@@ -273,10 +274,10 @@ const LocationService = (() => {
     return null;
   }
 
-  // Main method: Get current location with automatic fallback chain
-  async function getCurrentPosition(options = {}) {
-    const { allowIPFallback = true, requireHighAccuracy = false } = options;
-
+  // Get GPS position ONLY - no IP fallback
+  // This is used by the "Use my current location" button
+  // If GPS fails, the user must drop a pin on the map
+  async function getCurrentPosition() {
     if (_isRequestInProgress) {
       throw {
         code: ErrorCodes.UNKNOWN_ERROR,
@@ -291,39 +292,27 @@ const LocationService = (() => {
       // Check permission state first
       const permState = await getPermissionState();
 
-      // If permission is explicitly denied, try IP fallback
+      // If permission is explicitly denied, throw error immediately
       if (permState === 'denied') {
-        if (allowIPFallback) {
-          const ipLocation = await getIPBasedLocation();
-          if (ipLocation) return ipLocation;
-        }
         throw {
           code: ErrorCodes.PERMISSION_DENIED,
-          message: 'Location access is blocked. Please enable location in your browser settings, or tap the map below to set your location manually.',
+          message: 'Phone location is off or access is blocked. Please enable Location Services on your phone, or tap the map below to set your location manually.',
           canRetry: true,
           action: 'ENABLE_PERMISSION',
         };
       }
 
-      // Try GPS first
-      try {
-        return await getGPSPosition();
-      } catch (gpsError) {
-        // GPS failed - if IP fallback is allowed, try it
-        if (allowIPFallback && gpsError.code !== ErrorCodes.PERMISSION_DENIED) {
-          const ipLocation = await getIPBasedLocation();
-          if (ipLocation) return ipLocation;
-        }
-        throw gpsError;
-      }
+      // Try GPS only - NO IP fallback for delivery location
+      return await getGPSPosition();
+      
     } finally {
       _isRequestInProgress = false;
     }
   }
 
-  // Get last known successful position
+  // Get last known GPS position (only real GPS, never IP)
   function getLastKnownPosition() {
-    return _lastPosition;
+    return _lastGPSPosition;
   }
 
   // Check if a location was obtained via GPS (high accuracy)
@@ -392,12 +381,12 @@ const LocationService = (() => {
       const validStates = ['unknown', 'checking', 'granted', 'denied', 'unavailable', 'timeout'];
       if (validStates.includes(state)) _permissionState = state;
     },
-    getCurrentPosition,
-    getGPSPosition,
-    getIPBasedLocation,
+    getCurrentPosition,      // GPS only - for "Use my current location" button
+    getGPSPosition,          // GPS only - raw access
+    getIPBasedLocation,      // IP only - for approximate branch detection (startup only!)
     getPermissionState,
     queryPermissionState,
-    getLastKnownPosition,
+    getLastKnownPosition,    // Returns last GPS position only
     isHighAccuracyLocation,
     isValidLocation,
     isGeolocationSupported,
