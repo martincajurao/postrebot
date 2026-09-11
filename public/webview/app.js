@@ -2628,8 +2628,16 @@ function showLocationGate() {
     }
   });
 
-  // Auto-detect customer location on modal open (GPS only, no IP)
-  autoDetectLocation();
+  // Auto-detect ONLY if no saved location exists (first-time user)
+  // If user already has a saved location, just show it - don't re-detect
+  const hasSavedLocation = saved && saved.lat != null && saved.lng != null;
+  if (!hasSavedLocation) {
+    // First-time user: try to auto-detect location
+    autoDetectLocation();
+  } else {
+    // Returning customer with saved location: just update status
+    updateLocConfirmState();
+  }
 
   // Re-validate the confirm button as the address is typed.
   const addrEl = $id('loc-address');
@@ -2647,8 +2655,10 @@ function showLocationGate() {
 }
 
 /** Auto-detect customer location on modal open using GPS.
- * If GPS succeeds: pre-fill address, drop pin on map.
- * If GPS fails: leave fields empty, user can type or drop pin. */
+ * Step 1: Check if phone location is enabled (fast check)
+ * Step 2: If enabled, try GPS
+ * Step 3: If GPS succeeds, pre-fill address and drop pin
+ * Step 4: If GPS fails or location is off, let user type or drop pin */
 async function autoDetectLocation() {
   const statusEl = $id('loc-autodetect');
   const labelEl = $id('loc-autodetect-label');
@@ -2657,8 +2667,27 @@ async function autoDetectLocation() {
   if (statusEl) statusEl.classList.remove('hidden');
   if (labelEl) labelEl.textContent = 'Finding your location…';
   
+  // STEP 1: Check if phone location is enabled (fast check, no GPS attempt)
   try {
-    // Try GPS only - no IP fallback for delivery location
+    const permState = await LocationService.getPermissionState();
+    locationPermissionState = permState;
+    
+    if (permState === 'denied') {
+      // Phone location is OFF or blocked - don't even try GPS
+      if (labelEl) {
+        labelEl.textContent = '📍 Phone location is OFF — please type or tap the map';
+      }
+      if (statusEl) statusEl.classList.add('loc-autodetect-neutral');
+      console.log('[webview] auto-detect: phone location is OFF');
+      return;
+    }
+  } catch {
+    // Permissions API not available - proceed with GPS attempt
+    console.log('[webview] auto-detect: permissions API not available, trying GPS');
+  }
+  
+  // STEP 2: Phone location appears enabled - try GPS
+  try {
     const position = await LocationService.getGPSPosition();
     
     if (position && LocationService.isValidLocation(position)) {
@@ -2695,7 +2724,7 @@ async function autoDetectLocation() {
       console.log('[webview] auto-detect GPS success:', position.lat, position.lng);
     }
   } catch (err) {
-    // GPS failed - phone location is off or denied
+    // GPS failed - phone location might be off or GPS unavailable
     locationPermissionState = LocationService.permissionState;
     pendingCoords = null;
     pinSource = null;
