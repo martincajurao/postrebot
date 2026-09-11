@@ -467,57 +467,27 @@ function activeBranchName() {
  *  Used at first load so the menu is filtered to the customer's branch BEFORE
  *  they confirm their delivery address. Never blocks the menu: resolves to the
  *  branch key (or null) and applies the filter when detection succeeds.
- *  On Android (Messenger/Chrome WebView) the geolocation prompt is frequently
- *  suppressed or hangs forever — so we race GPS against an IP-based fallback. */
-function detectBranchFromDeviceGps() {
-  return new Promise((resolve) => {
-    const hasGeo = typeof navigator !== 'undefined' && navigator.geolocation && navigator.geolocation.getCurrentPosition;
-    let settled = false;
-    const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
-
-    // Fallback path: IP-approximate position → nearest branch.
-    const viaIp = () => {
-      ipLocate().then((ip) => {
-        if (!ip) { finish(null); return; }
-        detectBranchFromCoords(ip.lat, ip.lng)
-          .then((branch) => {
-            if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu (approximate)');
-            finish(branch);
-          })
-          .catch(() => finish(null));
-      });
-    };
-
-    if (!hasGeo) { viaIp(); return; }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        // Same accuracy gate as the location modal: a coarse cell fix can be
-        // wrong by hundreds of km (Magarao → Manila) — trust IP over it.
-        const acc = Number(pos.coords.accuracy);
-        if (Number.isFinite(acc) && acc > 3000) {
-          console.warn('[webview] startup GPS fix too inaccurate (' + acc + 'm) — IP fallback');
-          viaIp();
-          return;
-        }
-        const lat = Number(pos.coords.latitude);
-        const lng = Number(pos.coords.longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) { viaIp(); return; }
-        detectBranchFromCoords(lat, lng)
-          .then((branch) => {
-            if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
-            finish(branch);
-          })
-          .catch(() => viaIp());
-      },
-      () => viaIp(), // denied/unavailable/timeout → IP fallback
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
-    );
-
-    // Android safety net: some WebViews never call either callback. If nothing
-    // has settled after 10s, go straight to the IP fallback.
-    setTimeout(() => { if (!settled) viaIp(); }, 10000);
-  });
+ *  Uses LocationService for robust handling with automatic IP fallback. */
+async function detectBranchFromDeviceGps() {
+  try {
+    // Use LocationService which handles GPS, timeouts, and IP fallback automatically
+    const position = await LocationService.getCurrentPosition({ allowIPFallback: true });
+    
+    if (!position || !LocationService.isValidLocation(position)) {
+      return null;
+    }
+    
+    const branch = await detectBranchFromCoords(position.lat, position.lng);
+    if (branch) {
+      const source = position.source === 'ip' ? ' (approximate)' : '';
+      showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu' + source);
+    }
+    return branch;
+    
+  } catch (err) {
+    console.warn('[webview] branch detection failed:', err.code, err.message);
+    return null;
+  }
 }
 
 
@@ -2824,59 +2794,94 @@ function setMapPin(latlng, fromGps) {
 }
 
 /** GPS button — locate the device, pin it on the map and reverse-geocode it.
- *  Robust against slow/blocked geolocation: races the native API against a
- *  short timeout, and always (always) re-enables the button — even when the
- *  Geocoder hangs. On any failure the map now pans to the last known device
- *  coordinates (when available) so the customer doesn't have to hunt for their
- *  spot — they only have to confirm, not re-navigate. */
-function useCurrentLocation() {
+ *  Uses LocationService for robust geolocation with automatic fallback to IP. */
+async function useCurrentLocation() {
   hideLocError();
   const btn = $id('loc-gps-btn');
   const label = $id('loc-gps-label');
   if (!btn || !label) return;
 
-  // Geolocation only exists on secure origins (HTTPS / localhost) and is
-  // frequently blocked inside Messenger's in-app browser — the map below is
-  // the guaranteed fallback there.
-  if (!navigator.geolocation || !window.isSecureContext) {
+  // Clear any previous pin before requesting a fresh location
+  pendingCoords = null;
+  pinSource = null;
+
+  // Check if geolocation is supported
+  if (!LocationService.isGeolocationSupported()) {
     locationPermissionState = 'unavailable';
     pendingCoords = null;
     pinSource = null;
-    showLocError('Phone Location Services are unavailable here. Open this page over HTTPS and enable Location on your phone.', true);
+    showLocError('Your browser does not support location services. Tap your spot on the map below instead.', true);
     focusMap();
     return;
   }
 
-  // A map/search pin from an earlier attempt is not proof that phone location
-  // is enabled. Clear it before requesting a fresh native GPS fix.
-  pendingCoords = null;
-  pinSource = null;
+  // Update UI to show progress
+  btn.disabled = true;
+  label.textContent = 'Finding your location…';
 
-  // Check permission state first — if denied, show enable button instead
-  if (navigator.permissions && navigator.permissions.query) {
-    navigator.permissions.query({ name: 'geolocation' }).then((result) => {
-      if (result.state === 'denied') {
-        // Permission already denied — show enable button
-        btn.disabled = false;
-        label.textContent = '🔓 Enable Location';
-        btn.onclick = requestLocationPermission;
-        showLocError('Location permission is blocked. Enable Location Services and allow access to continue.', true);
-        return;
-      }
-      // Permission is granted or prompt — proceed with getting location
-      getLocationFromGPS();
-    }).catch(() => {
-      // permissions API not supported — fall through to direct GPS request
-      getLocationFromGPS();
-    });
-  } else {
-    // permissions API not supported — fall through to direct GPS request
-    getLocationFromGPS();
+  try {
+    // Use LocationService with IP fallback
+    const position = await LocationService.getCurrentPosition({ allowIPFallback: true });
+    
+    // Update state
+    locationPermissionState = LocationService.permissionState;
+    pendingCoords = { lat: position.lat, lng: position.lng };
+    pinSource = position.source; // 'gps' or 'ip'
+
+    // Reset button
+    btn.disabled = false;
+    label.textContent = '✓ Location found';
+
+    // Pin on map and reverse geocode
+    zoomMapToPin(position, 16, true, position.source === 'gps');
+
+    // Show toast based on source
+    if (position.source === 'ip') {
+      showToast('📍 Approximate location found via network. Tap to adjust on map if needed.');
+    } else {
+      showToast('📍 Location found!');
+    }
+
+    // Reverse geocode to fill address
+    try {
+      const address = await reverseGeocode(position.lat, position.lng);
+      const addrEl = $id('loc-address');
+      if (addrEl && !addrEl.value.trim()) addrEl.value = address;
+    } catch {
+      // Geocoding failed - user can type manually
+    }
+
+    updateLocConfirmState();
+
+  } catch (err) {
+    // Handle specific error types with appropriate messages
+    locationPermissionState = LocationService.permissionState;
+    
+    btn.disabled = false;
+    label.textContent = 'Try again';
+
+    // Show specific error message based on error code
+    const errorCode = err.code || LocationService.ErrorCodes.UNKNOWN_ERROR;
+    
+    if (errorCode === LocationService.ErrorCodes.PERMISSION_DENIED) {
+      // Permission denied - show enable button
+      label.textContent = '🔓 Enable Location';
+      btn.onclick = requestLocationPermission;
+      showLocError(err.message || 'Location access was denied. Please allow location access, or tap the map below.', true);
+    } else if (errorCode === LocationService.ErrorCodes.TIMEOUT) {
+      // Timeout - suggest retry or map
+      showLocError(err.message || 'Getting your location timed out. Please try again or tap your location on the map below.', true);
+    } else {
+      // Other errors (unavailable, API unsupported, etc.)
+      showLocError(err.message || 'Could not get your location. Please tap your spot on the map below.', true);
+    }
+    
+    focusMap();
   }
 }
 
 /** Request location permission and get the location */
-function requestLocationPermission() {
+async function requestLocationPermission() {
   hideLocError();
   const btn = $id('loc-gps-btn');
   const label = $id('loc-gps-label');
@@ -2885,67 +2890,61 @@ function requestLocationPermission() {
   btn.disabled = true;
   label.textContent = 'Waiting for permission…';
 
-  // Request permission by calling getCurrentPosition
-  if (!navigator.geolocation) {
-    locationPermissionState = 'unavailable';
-    showLocError('This browser cannot access phone location.', true);
-    return;
+  try {
+    // Use LocationService to request GPS (no IP fallback - we want actual permission)
+    const position = await LocationService.getGPSPosition();
+    
+    // Permission granted!
+    locationPermissionState = 'granted';
+    btn.disabled = false;
+    label.textContent = 'Use my current location';
+    btn.onclick = useCurrentLocation;
+    
+    // Now get the location with fallback enabled
+    await useCurrentLocation();
+    
+  } catch (err) {
+    // Permission denied or GPS failed
+    locationPermissionState = LocationService.permissionState;
+    btn.disabled = false;
+    label.textContent = '🔓 Enable Location';
+    btn.onclick = requestLocationPermission;
+    
+    const errorCode = err.code || LocationService.ErrorCodes.UNKNOWN_ERROR;
+    
+    if (errorCode === LocationService.ErrorCodes.PERMISSION_DENIED) {
+      showLocError('Location permission was denied. Please enable Location Services and allow access, or tap the map below.', true);
+    } else {
+      showLocError(err.message || 'Could not get your location. Please try again or tap the map below.', true);
+    }
+    
+    console.warn('[webview] location permission request failed:', errorCode, err.message);
   }
-
-  navigator.geolocation.getCurrentPosition(
-    () => {
-      // A successful native callback confirms permission and phone Location
-      // Services are available; it is not an IP or map fallback.
-      locationPermissionState = 'granted';
-      btn.onclick = useCurrentLocation;
-      getLocationFromGPS();
-    },
-    (err) => {
-      // Permission still denied
-      btn.disabled = false;
-      label.textContent = '🔓 Enable Location';
-      btn.onclick = requestLocationPermission;
-      console.warn('[webview] location permission denied:', err && err.message);
-      showLocError('Location permission was denied. Enable Location Services and allow access to continue.', true);
-    },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-  );
 }
 
 /** Check permission state and update button text accordingly */
-function checkLocationPermission() {
+async function checkLocationPermission() {
   const btn = $id('loc-gps-btn');
   const label = $id('loc-gps-label');
   if (!btn || !label) return;
 
-  if (navigator.permissions && navigator.permissions.query) {
-    navigator.permissions.query({ name: 'geolocation' }).then((result) => {
-      locationPermissionState = result.state;
-      if (result.state === 'denied') {
-        label.textContent = '🔓 Enable Location';
-        btn.onclick = requestLocationPermission;
-        showLocationServicePopup('Phone location is off. Enable Location Services and allow access to continue.');
-      } else {
-        label.textContent = 'Use my current location';
-        btn.onclick = useCurrentLocation;
-      }
-      // Listen for permission changes
-      result.onchange = () => {
-        locationPermissionState = result.state;
-        if (result.state === 'granted') {
-          label.textContent = 'Use my current location';
-          btn.onclick = useCurrentLocation;
-        } else if (result.state === 'denied') {
-          label.textContent = '🔓 Enable Location';
-          btn.onclick = requestLocationPermission;
-          showLocationServicePopup('Phone location is off. Enable Location Services and allow access to continue.');
-        }
-      };
-    }).catch(() => {
-      // permissions API not supported — use default
+  try {
+    // Use LocationService to get permission state
+    const permState = await LocationService.getPermissionState();
+    locationPermissionState = permState;
+    
+    if (permState === 'denied') {
+      label.textContent = '🔓 Enable Location';
+      btn.onclick = requestLocationPermission;
+      showLocationServicePopup('Location access is blocked. Enable Location Services and allow access, or tap the map below to set your location manually.');
+    } else {
       label.textContent = 'Use my current location';
       btn.onclick = useCurrentLocation;
-    });
+    }
+  } catch {
+    // permissions API not supported — use default
+    label.textContent = 'Use my current location';
+    btn.onclick = useCurrentLocation;
   }
 }
 
@@ -3195,9 +3194,20 @@ async function confirmLocation() {
     showLocError('Please enter your complete address (house #, street, barangay, city).');
     return;
   }
-  if (locationPermissionState !== 'granted' || pinSource !== 'gps' || !pendingCoords) {
-    showLocError('Turn on phone Location and tap “Use my current location” before confirming.', true);
+  // FIX: Accept any valid location source (GPS, IP, or map pin)
+  if (!pendingCoords || !LocationService.isValidLocation(pendingCoords)) {
+    showLocError('Please set your location first \u2014 tap the map or use "Use my current location".', true);
     return;
+  }
+  
+  // If we have coordinates but no source recorded, default to 'pin'
+  if (!pinSource) {
+    pinSource = 'pin';
+  }
+  
+  // If we have coordinates but permission state wasn't tracked, update it
+  if (locationPermissionState === 'unknown' && pinSource === 'gps') {
+    locationPermissionState = 'granted';
   }
   const landmark = (($id('loc-landmark') && $id('loc-landmark').value) || '').trim();
   saveLocation({
