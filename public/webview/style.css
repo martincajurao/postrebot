@@ -2492,17 +2492,17 @@ img.img-skel {
 
 /* Nominatim address-search dropdown (custom) */
 .loc-search-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
+  position: fixed;
+  top: auto;
   left: 0;
-  right: 0;
-  z-index: 6000;
+  width: auto;
+  z-index: 99999;
   max-height: 220px;
   overflow-y: auto;
   background: #fff;
   border: 1px solid #e9ecef;
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
 .loc-search-item {

@@ -2628,14 +2628,23 @@ function showLocationGate() {
     }
   });
 
-  // Auto-detect ONLY if no saved location exists (first-time user)
+  // Auto-detect ONLY if user has NO saved location with valid coordinates
   // If user already has a saved location, just show it - don't re-detect
-  const hasSavedLocation = saved && saved.lat != null && saved.lng != null;
-  if (!hasSavedLocation) {
-    // First-time user: try to auto-detect location
+  const hasValidSavedLocation = saved && 
+    saved.address && 
+    Number.isFinite(saved.lat) && 
+    Number.isFinite(saved.lng);
+  
+  if (!hasValidSavedLocation) {
+    // First-time user or no coordinates: try to auto-detect location
     autoDetectLocation();
   } else {
-    // Returning customer with saved location: just update status
+    // Returning customer with valid saved location: just show it
+    // Restore the pin on map and update status
+    if (locMap) {
+      setMapPin({ lat: saved.lat, lng: saved.lng }, false);
+      locMap.setView([saved.lat, saved.lng], 15);
+    }
     updateLocConfirmState();
   }
 
@@ -3283,7 +3292,13 @@ function initSearchAutocomplete() {
       });
       dropdown.appendChild(item);
     });
-    wrap.appendChild(dropdown);
+    // Append to body and position relative to input (fixes overflow clipping)
+    document.body.appendChild(dropdown);
+    const rect = input.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.width = rect.width + 'px';
   };
 
   input.addEventListener('input', () => {
@@ -3298,7 +3313,7 @@ function initSearchAutocomplete() {
   });
 
   document.addEventListener('click', (e) => {
-    if (!wrap.contains(e.target)) close();
+    if (!input.contains(e.target) && (!dropdown || !dropdown.contains(e.target))) close();
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') close();
