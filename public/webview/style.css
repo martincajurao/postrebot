@@ -2236,57 +2236,66 @@ img.img-skel {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(45, 52, 54, 0.6);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  padding: 12px;
+  background: rgba(24, 28, 31, 0.68);
+  backdrop-filter: blur(8px) saturate(1.05);
+  -webkit-backdrop-filter: blur(8px) saturate(1.05);
   animation: loc-fade-in 0.25s ease;
 }
 
 .loc-gate-card {
   width: 100%;
-  max-width: 480px;
-  background: #fff;
-  border-radius: 20px 20px 0 0;
-  padding: 12px 20px calc(20px + env(safe-area-inset-bottom, 0px));
-  max-height: 92vh;
+  max-width: 500px;
+  max-height: min(92vh, 760px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  background: linear-gradient(180deg, #fff 0%, #fffaf9 100%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 26px 26px 16px 16px;
+  padding: 10px 20px calc(20px + env(safe-area-inset-bottom, 0px));
   animation: loc-sheet-up 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3), 0 3px 12px rgba(0, 0, 0, 0.12);
+  scrollbar-width: thin;
+  scrollbar-color: #e5c5be transparent;
 }
 
 .loc-gate-handle {
-  width: 44px;
+  width: 46px;
   height: 5px;
   border-radius: 999px;
-  background: #e9ecef;
-  margin: 0 auto 14px;
+  background: #e3d6d2;
+  margin: 0 auto 16px;
 }
 
 .loc-gate-icon {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.7rem;
-  margin: 0 auto 12px;
+  font-size: 1.85rem;
+  margin: 0 auto 14px;
+  border: 6px solid #fff;
   border-radius: 50%;
-  background: #fef5f4;
+  background: linear-gradient(145deg, #fff0ec, #fde0d8);
+  box-shadow: 0 8px 22px rgba(231, 76, 60, 0.18);
 }
 
 .loc-gate h2 {
   text-align: center;
-  font-size: 1.25rem;
+  font-size: clamp(1.25rem, 4vw, 1.45rem);
+  letter-spacing: -0.02em;
   color: #2d3436;
-  margin-bottom: 6px;
+  margin-bottom: 7px;
 }
 
 .loc-gate-sub {
+  max-width: 390px;
   text-align: center;
-  color: #636e72;
-  font-size: 0.9rem;
-  line-height: 1.45;
-  margin-bottom: 18px;
+  color: #73706f;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0 auto 18px;
 }
 
 /* ---- Header delivery-location bar ---- */
@@ -2378,21 +2387,29 @@ img.img-skel {
 
 .loc-gps-btn {
   width: 100%;
+  min-height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 13px 14px;
-  border: 2px solid #e74c3c;
-  border-radius: 12px;
-  background: #fff;
-  color: #e74c3c;
-  font-size: 1rem;
-  font-weight: 600;
+  gap: 9px;
+  padding: 13px 16px;
+  border: 1px solid #e74c3c;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fff, #fff7f5);
+  color: #d84232;
+  font-size: 0.96rem;
+  font-weight: 700;
   font-family: inherit;
   cursor: pointer;
-  transition: transform 0.15s ease, background 0.2s ease;
+  box-shadow: 0 5px 14px rgba(231, 76, 60, 0.12);
+  transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
+.loc-gps-btn:hover { background: #fff1ee; box-shadow: 0 7px 18px rgba(231, 76, 60, 0.17); }
+.loc-gps-btn:focus-visible,
+.loc-confirm-btn:focus-visible,
+#loc-search:focus-visible,
+#loc-address:focus-visible,
+#loc-landmark:focus-visible { outline: 3px solid rgba(231, 76, 60, 0.25); outline-offset: 2px; }
 
 .loc-gps-btn:active {
   transform: scale(0.98);
@@ -2439,8 +2456,16 @@ img.img-skel {
 
 .loc-confirm-btn {
   width: 100%;
+  min-height: 52px;
   margin-top: 16px;
+  border-radius: 14px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(231, 76, 60, 0.2);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
+.loc-confirm-btn:hover { filter: brightness(1.03); box-shadow: 0 10px 22px rgba(231, 76, 60, 0.25); }
+.loc-confirm-btn:active { transform: translateY(1px); }
 
 /* --- Map pin picker (Leaflet / OpenStreetMap) --- */
 .loc-map-wrap {
@@ -2451,10 +2476,12 @@ img.img-skel {
 #loc-map {
   position: relative;
   z-index: 1;
-  height: 190px;
-  border-radius: 12px;
-  border: 2px solid #f0f0f0;
+  height: 210px;
+  border-radius: 14px;
+  border: 1px solid #eadedb;
   background: #eef2f5;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55), 0 4px 14px rgba(45, 52, 54, 0.08);
+  overflow: hidden;
 }
 
 /* The map owns its own gestures — don't let map drags scroll the sheet. */
@@ -2510,12 +2537,15 @@ img.img-skel {
 
 #loc-search {
   width: 100%;
+  min-height: 48px;
   padding: 11px 14px;
-  border: 2px solid #e9ecef;
-  border-radius: 12px;
-  font-size: 0.95rem;
+  border: 1px solid #e4dcd9;
+  border-radius: 14px;
+  font-size: 0.92rem;
   font-family: inherit;
-  background: #f8f9fa;
+  color: #2d3436;
+  background: #fff;
+  box-shadow: 0 3px 10px rgba(45, 52, 54, 0.04);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
