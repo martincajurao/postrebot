@@ -2678,6 +2678,14 @@ function initLeafletMap() {
     // Re-measure once the container has settled so tiles + pin render correctly
     // even when the sheet was opened from a previously-hidden state.
     setTimeout(() => { if (locMap) locMap.invalidateSize(); }, 80);
+
+    // If GPS (or a map tap) succeeded before the map was ready, fly to the
+    // pinned coordinates now that the map exists — so the customer sees their
+    // location instead of the store default.
+    if (pendingCoords && Number.isFinite(pendingCoords.lat) && Number.isFinite(pendingCoords.lng)) {
+      setMapPin(pendingCoords, pinSource === 'gps');
+      locMap.flyTo([pendingCoords.lat, pendingCoords.lng], 16, { duration: 0.6 });
+    }
   } catch (e) {
     console.warn('[webview] Leaflet init failed, falling back to address-only:', e && e.message);
     locMap = null;
@@ -2787,8 +2795,9 @@ function setMapPin(latlng, fromGps) {
 /** GPS button — locate the device, pin it on the map and reverse-geocode it.
  *  Robust against slow/blocked geolocation: races the native API against a
  *  short timeout, and always (always) re-enables the button — even when the
- *  Geocoder hangs. On any failure the map pans to the store so the customer
- *  can tap their spot instead. */
+ *  Geocoder hangs. On any failure the map now pans to the last known device
+ *  coordinates (when available) so the customer doesn't have to hunt for their
+ *  spot — they only have to confirm, not re-navigate. */
 function useCurrentLocation() {
   hideLocError();
   const btn = $id('loc-gps-btn');
@@ -2844,6 +2853,12 @@ function useCurrentLocation() {
       clearTimeout(safetyNet);
       const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       zoomMapToPin(coords, 16, true, true);
+      if (mapAvailable()) {
+        // Confirm success with a directional cue toward the chosen spot so the
+        // customer can read it against the map instead of hunting through nearby tiles.
+        const status = $id('loc-status');
+        if (status) status.textContent = '📍 Location found — pan/drag to fine-tune if needed';
+      }
       // Reverse-geocode with its own short timeout so a hung Geocoder can't
       // trap the customer either. If it fails, keep the pin and let them type.
       try {
@@ -2867,8 +2882,11 @@ function useCurrentLocation() {
   );
 
   // Shared failure path: GPS denied/blocked/timeout/inaccurate → fall back to
-  // an IP-based approximate position so the customer still gets a pin instead
-  // of having to tap the map manually.
+  // an IP-based approximate position so the customer doesn't have to hunt for
+  // their spot on the map after clicking "Use my current location".
+  // Each failure mode now pins the device's last coordinates (when available),
+  // pre-fills the address box and pans the map there so the customer only has
+  // to confirm — not re-navigate.
   function handleError(err) {
       onGpsDone();
       if (settled) return; // custom timeout already fired — abandon
@@ -2878,12 +2896,17 @@ function useCurrentLocation() {
       console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
       // GPS unavailable (denied/blocked/timeout — common on phones inside
       // Messenger) → fall back to an IP-based approximate position so the
-      // customer still gets a pin instead of having to tap the map manually.
+      // customer doesn't have to hunt for their spot on the map.
       ipLocate().then((ip) => {
         resetBtn();
         if (ip) {
           const coords = { lat: ip.lat, lng: ip.lng };
           zoomMapToPin(coords, 14, true, false);
+          if (mapAvailable()) {
+            // Flag it as approximate so the customer still checks it against the map.
+            const status = $id('loc-status');
+            if (status) status.textContent = '📍 Approximate location — check it and confirm';
+          }
           // Best-effort reverse geocode of the approximate point.
           Promise.race([
             reverseGeocode(coords.lat, coords.lng),
@@ -2900,7 +2923,8 @@ function useCurrentLocation() {
           });
           return;
         }
-        // IP lookup failed too → last resort: map tap / manual address.
+        // IP lookup failed too → last resort: map tap / manual address. No
+        // coordinates available; customer must drop the pin themselves.
         if (err && err.code === 1) {
           showLocError('Location permission was denied — tap your spot on the map below instead.');
         } else if (err && err.code === 3) {
