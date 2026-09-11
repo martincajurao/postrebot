@@ -2839,25 +2839,25 @@ function useCurrentLocation() {
     async (pos) => {
       onGpsDone();
       if (settled) return; // custom timeout already fired — abandon
-      // Accuracy gate: without enableHighAccuracy Android returns a coarse
-      // cell-tower fix that can be WRONG BY HUNDREDS OF KM (Magarao → Manila).
-      // If the device admits the fix is worse than 3 km, treat it as a failure
-      // (retry path below falls through to the IP locate fallback, which is
-      // city-level and more trustworthy than a bad cell fix).
-      const acc = Number(pos.coords.accuracy);
-      if (Number.isFinite(acc) && acc > 3000) {
-        console.warn('[webview] GPS fix too inaccurate (' + acc + 'm) — treating as failure');
-        handleError(new Error('inaccurate-fix:' + acc));
-        return;
-      }
       clearTimeout(safetyNet);
       const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      // Use the GPS fix directly — even a coarse cell-tower fix is usually
+      // closer to the customer than the IP-based city fallback (which can be
+      // hundreds of km away, e.g. Manila for Bicol connections). Flag it so
+      // the customer verifies against the map.
+      const acc = Number(pos.coords.accuracy);
+      const isCoarse = Number.isFinite(acc) && acc > 3000;
+      if (isCoarse) {
+        console.warn('[webview] GPS fix coarse (' + acc + 'm) — pinning anyway, customer verifies');
+      }
       zoomMapToPin(coords, 16, true, true);
       if (mapAvailable()) {
-        // Confirm success with a directional cue toward the chosen spot so the
-        // customer can read it against the map instead of hunting through nearby tiles.
         const status = $id('loc-status');
-        if (status) status.textContent = '📍 Location found — pan/drag to fine-tune if needed';
+        if (status) {
+          status.textContent = isCoarse
+            ? '📍 Approximate location — pan/drag to fine-tune, then confirm'
+            : '📍 Location found — pan/drag to fine-tune if needed';
+        }
       }
       // Reverse-geocode with its own short timeout so a hung Geocoder can't
       // trap the customer either. If it fails, keep the pin and let them type.
