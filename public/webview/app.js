@@ -225,6 +225,7 @@ let prevCartCount = 0;
 function updateCartBadge() {
   const badge = $id('cart-badge');
   const headerBadge = $id('header-cart-badge');
+  const headerCartBtn = $id('header-cart-btn');
   const count = cart.items.reduce((s, i) => s + i.quantity, 0);
 
   if (badge) {
@@ -236,6 +237,9 @@ function updateCartBadge() {
     headerBadge.textContent = count;
     headerBadge.classList.toggle('hidden', count === 0);
   }
+  // Screen readers announce the count through the button's label, not the
+  // decorative (aria-hidden) badge.
+  if (headerCartBtn) headerCartBtn.setAttribute('aria-label', 'Cart, ' + count + ' item' + (count === 1 ? '' : 's'));
 
   // Animate badge when item is added (count increases)
   if (count > prevCartCount) {
@@ -618,8 +622,8 @@ function refreshCartUI() {
 /** Render the store contact config into the header, disabled link, and menu "Visit us" card. */
 function renderConfig() {
   const c = config.contact || {};
-  const headerSub = $id('header-sub');
-  if (headerSub) headerSub.textContent = c.hours || 'Order online';
+  // Hours render in the contact strip + "Visit us" card — the header no
+  // longer duplicates them.
 
   const strip = $id('contact-strip');
   const phoneLink = $id('contact-phone');
@@ -2341,36 +2345,83 @@ function getSavedLocations() {
   } catch { return []; }
 }
 
-/** Stable signature so re-confirming the same spot updates instead of duplicating. */
-function locationSignature(loc) {
-  const lat = Number.isFinite(loc.lat) ? loc.lat.toFixed(5) : '';
-  const lng = Number.isFinite(loc.lng) ? loc.lng.toFixed(5) : '';
-  return (lat + ',' + lng + '|' + String(loc.address || '').trim().toLowerCase()).slice(0, 160);
+/** Numeric coords of a location (null when absent/malformed — tolerant of
+ *  string coords coming from older records or the server). */
+function locationCoords(loc) {
+  const lat = Number(loc.lat);
+  const lng = Number(loc.lng);
+  return (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0))
+    ? { lat, lng } : null;
+}
+
+/** Approximate distance in meters between two coordinate pairs (equirectangular
+ *  — plenty accurate for the small distances we compare). */
+function coordsDistanceMeters(a, b) {
+  const R = 6371000;
+  const rad = (d) => d * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng) * Math.cos(rad((a.lat + b.lat) / 2));
+  return Math.sqrt(dLat * dLat + dLng * dLng) * R;
+}
+
+// Points closer than this count as the same place when deduping saved
+// locations. GPS jitter moves the fix by meters on every confirm, so exact
+// coordinate equality (the old signature) duplicated the same address.
+const DEDUPE_RADIUS_METERS = 75;
+
+/** True when two saved records describe the same place: identical normalized
+ *  address, or both points within DEDUPE_RADIUS_METERS of each other. */
+function samePlace(a, b) {
+  const addrA = String(a.address || '').trim().toLowerCase();
+  const addrB = String(b.address || '').trim().toLowerCase();
+  if (addrA && addrA === addrB) return true;
+  const cA = locationCoords(a);
+  const cB = locationCoords(b);
+  if (cA && cB) return coordsDistanceMeters(cA, cB) <= DEDUPE_RADIUS_METERS;
+  return false;
 }
 
 function saveLocation(loc) {
   // "In use" location — kept for branch detection, checkout, pin restore.
   try { storageSet(LOCATION_KEY(), JSON.stringify(loc)); } catch { /* non-fatal */ }
-  // Append/update in the saved-locations list.
+  // Append/update in the saved-locations list, deduped by place (same address
+  // or points within DEDUPE_RADIUS_METERS) so GPS jitter, string-vs-number
+  // coords and hand-typed variants can't create duplicate records.
   try {
     const list = getSavedLocations();
-    const sig = locationSignature(loc);
-    const existingIdx = list.findIndex((l) => locationSignature(l) === sig);
+    const coords = locationCoords(loc);
+    const existingIdx = list.findIndex((l) => samePlace(l, loc));
+    const prev = existingIdx >= 0 ? list[existingIdx] : null;
     const entry = {
-      id: existingIdx >= 0 ? list[existingIdx].id : 'loc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      address: loc.address,
-      landmark: loc.landmark || null,
-      lat: Number.isFinite(loc.lat) ? loc.lat : null,
-      lng: Number.isFinite(loc.lng) ? loc.lng : null,
-      source: loc.source || 'manual',
-      label: loc.label || (existingIdx >= 0 ? list[existingIdx].label : null) || null,
-      savedAt: new Date().toISOString(),
+      id: prev ? prev.id : 'loc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      address: String(loc.address || '').trim(),
+      landmark: loc.landmark || (prev ? prev.landmark : null) || null,
+      // New coords win; keep the previous fix when this save has none
+      // (e.g. an address-only re-confirm must not lose the pin).
+      lat: coords ? coords.lat : (prev ? locationCoords(prev)?.lat ?? null : null),
+      lng: coords ? coords.lng : (prev ? locationCoords(prev)?.lng ?? null : null),
+      source: loc.source || (prev ? prev.source : null) || 'manual',
+      label: loc.label || (prev ? prev.label : null) || null,
+      savedAt: prev ? prev.savedAt : new Date().toISOString(),
       lastUsedAt: new Date().toISOString(),
     };
     if (existingIdx >= 0) list[existingIdx] = entry; else list.unshift(entry);
     // Most-recently-used first, capped so storage can't grow unbounded.
     list.sort((a, b) => String(b.lastUsedAt || '').localeCompare(String(a.lastUsedAt || '')));
-    storageSet(LOCATIONS_KEY(), JSON.stringify(list.slice(0, MAX_SAVED_LOCATIONS)));
+    // Collapse duplicates already sitting in storage (records created by
+    // older versions whose signature broke on jitter / string coords).
+    const deduped = [];
+    for (const l of list) {
+      const dupIdx = deduped.findIndex((d) => samePlace(d, l));
+      if (dupIdx >= 0) {
+        const keep = String(l.lastUsedAt || '') > String(deduped[dupIdx].lastUsedAt || '')
+          ? l.lastUsedAt : deduped[dupIdx].lastUsedAt;
+        deduped[dupIdx].lastUsedAt = keep;
+      } else {
+        deduped.push(l);
+      }
+    }
+    storageSet(LOCATIONS_KEY(), JSON.stringify(deduped.slice(0, MAX_SAVED_LOCATIONS)));
   } catch { /* non-fatal */ }
 }
 
@@ -2454,6 +2505,19 @@ function setHeaderHidden(hidden) {
   const h = $id('site-header');
   if (!h) return;
   h.classList.toggle('header-hidden', !!hidden);
+}
+
+/** Header interactions: the logo is the "menu home" button — back to the
+ *  categories view and scroll to the top (also re-shows the header). */
+function initHeaderActions() {
+  const logoBtn = $id('header-logo-btn');
+  if (!logoBtn || logoBtn.dataset.bound) return;
+  logoBtn.dataset.bound = '1';
+  logoBtn.addEventListener('click', () => {
+    showCategories();
+    forceHeaderVisible();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
 }
 
 function initHeaderAutoHide() {
@@ -2546,7 +2610,16 @@ async function useSavedLocation(id) {
     const branch = await detectBranchFromCoords(confirmedLat, confirmedLng);
     if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
   }
-  // A confirmed location exists → populate the (branch-filtered) menu.
+  // Catalog not loaded yet (startup loaders failed or were slow)? Re-attempt
+  // now — the old code jumped straight to revealMenu(), which with empty
+  // catalogs showed the permanent "load error" screen instead of recovering.
+  if (categories.length === 0 && products.length === 0) {
+    await loadAppData();
+  }
+  // Filter to the active branch (also re-renders the current view), then
+  // unlock home. Filter runs AFTER loadAppData() because the loaders reset
+  // products = allProducts.
+  applyBranchFilter();
   revealMenu();
 }
 
@@ -3237,14 +3310,13 @@ async function confirmLocation() {
     }
   }
   
-  // Apply branch filter and reveal menu
-  applyBranchFilter();
-  
-  // Load app data if not already loaded
+  // Load app data if not already loaded (the startup loaders may have failed
+  // — re-attempt so the menu isn't blank), THEN apply the branch filter: the
+  // loaders reset products = allProducts, so filtering must come after.
   if (categories.length === 0 && products.length === 0) {
     await loadAppData();
   }
-  
+  applyBranchFilter();
   revealMenu();
 }
 
@@ -3323,6 +3395,7 @@ async function init() {
   console.log('[webview] Init - activeBranch:', activeBranch);
   
   updateLocationBar();
+  initHeaderActions();
   initHeaderAutoHide();
   
   // Show the location gate immediately - NO data loading here

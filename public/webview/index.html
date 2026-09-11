@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260911-2">
+  <link rel="stylesheet" href="style.css?v=20260911-5">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -44,46 +44,47 @@
     <header id="site-header" class="header">
       <div class="header-top">
         <div class="header-content">
-          <div class="header-logo">
-            <div class="logo-circle">
-              <span class="logo-icon">🍽️</span>
-            </div>
-            <div class="logo-accent"></div>
-          </div>
+          <!-- Logo = "menu home" button: scrolls back to the top and opens the
+               category view (bound in initHeaderActions()). -->
+          <button type="button" class="header-logo" id="header-logo-btn" aria-label="Back to menu home">
+            <span class="logo-circle">
+              <span class="logo-icon" aria-hidden="true">🍽️</span>
+            </span>
+            <span class="logo-accent" aria-hidden="true"></span>
+          </button>
           <div class="header-text">
             <h1>Postre Food Products</h1>
-            <p class="header-sub" id="header-sub">Order online</p>
+            <!-- Delivery location — inline under the title, spanning the full
+                 text-column width (no extra row, no unused space). Tap = change. -->
+            <button type="button" class="loc-inline" id="loc-bar" onclick="changeDeliveryLocation()" aria-label="Change delivery location">
+              <span class="loc-inline-icon" aria-hidden="true">📍</span>
+              <span class="loc-inline-text">
+                <span class="loc-inline-label" id="loc-bar-label">Deliver to</span>
+                <span class="loc-inline-address" id="loc-bar-address">Set your delivery location</span>
+              </span>
+              <span class="loc-inline-caret" aria-hidden="true">▾</span>
+            </button>
           </div>
           <div class="header-actions">
-            <button class="header-btn" onclick="showOrders()" title="My Orders">
-              <span class="header-btn-icon">📜</span>
+            <button type="button" class="header-btn" id="header-orders-btn" onclick="showOrders()" title="My Orders" aria-label="My orders">
+              <span class="header-btn-icon" aria-hidden="true">📜</span>
             </button>
-            <button class="header-btn" onclick="showCart()" title="Cart">
-              <span class="header-btn-icon">🛒</span>
-              <span id="header-cart-badge" class="header-badge hidden">0</span>
+            <button type="button" class="header-btn" id="header-cart-btn" onclick="showCart()" title="Cart" aria-label="Cart, 0 items">
+              <span class="header-btn-icon" aria-hidden="true">🛒</span>
+              <span id="header-cart-badge" class="header-badge hidden" aria-hidden="true">0</span>
             </button>
           </div>
         </div>
       </div>
-      <!-- Delivery location bar — shows the confirmed address; tap to change
-           it (re-opens the location gate with saved locations). -->
-      <button type="button" class="loc-bar" id="loc-bar" onclick="changeDeliveryLocation()" aria-label="Change delivery location">
-        <span class="loc-bar-icon">📍</span>
-        <span class="loc-bar-text">
-          <span class="loc-bar-label" id="loc-bar-label">Deliver to</span>
-          <span class="loc-bar-address" id="loc-bar-address">Set your delivery location</span>
-        </span>
-        <span class="loc-bar-caret">▾</span>
-      </button>
       <div class="contact-strip" id="contact-strip">
-        <div class="contact-divider"></div>
+        <div class="contact-divider" aria-hidden="true"></div>
         <a class="contact-item" id="contact-phone" href="#">
-          <span class="contact-icon">📞</span>
+          <span class="contact-icon" aria-hidden="true">📞</span>
           <span id="contact-phone-text"></span>
         </a>
-        <span class="contact-separator">•</span>
+        <span class="contact-separator" aria-hidden="true">•</span>
         <span class="contact-item" id="contact-hours">
-          <span class="contact-icon">🕘</span>
+          <span class="contact-icon" aria-hidden="true">🕘</span>
           <span id="contact-hours-text"></span>
         </span>
       </div>
@@ -386,6 +387,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260911-2"></script>
+  <script src="app.js?v=20260911-6"></script>
 </body>
 </html>

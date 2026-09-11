@@ -37,12 +37,17 @@ body {
 }
 
 /* === Header === */
+/* === Header ===
+   Layout: brand row (logo button · title · actions) → delivery location bar
+   → contact strip. The scrolled state compresses spacing and collapses the
+   brand sub-line; auto-hide on scroll is unchanged (JS toggles the classes). */
 .header {
+  --hd-pad-x: 14px;
   background: linear-gradient(135deg, #c0392b 0%, #e74c3c 50%, #c0392b 100%);
   background-size: 200% 200%;
   animation: gradient-shift 8s ease infinite;
   color: #fff;
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 0;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) var(--hd-pad-x) 0;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -54,10 +59,18 @@ body {
   will-change: transform;
 }
 
-/* Scrolled state: compact (drop the top breathing room, tighten shadow). */
+/* Scrolled state: compact — tighter top padding, subtler shadow and a smaller
+   logo so more content stays visible. */
 .header.header-scrolled {
   padding-top: calc(6px + env(safe-area-inset-top, 0px));
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
+}
+.header.header-scrolled .logo-circle {
+  width: 40px;
+  height: 40px;
+}
+.header.header-scrolled .logo-icon {
+  font-size: 1.3rem;
 }
 
 /* Hidden state: slid out of view. 140px clearance covers safe-area + bar
@@ -69,6 +82,7 @@ body {
 /* Respect users who prefer reduced motion — snap instead of slide. */
 @media (prefers-reduced-motion: reduce) {
   .header { transition: none; }
+  .logo-circle { transition: none; }
 }
 
 @keyframes gradient-shift {
@@ -78,38 +92,51 @@ body {
 }
 
 .header-top {
-  padding-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 .header-content {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
+/* Logo — a real button ("menu home"): reset UA button chrome so it keeps its
+   original look, but gains keyboard focus and :active feedback. */
 .header-logo {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.header-logo:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 3px;
+  border-radius: 50%;
 }
 
 .logo-circle {
   width: 48px;
   height: 48px;
   background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 2px solid rgba(255, 255, 255, 0.3);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease, width 0.25s ease, height 0.25s ease;
 }
 
-.logo-circle:active {
+.header-logo:hover .logo-circle {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+.header-logo:active .logo-circle {
   transform: scale(0.92);
 }
 
@@ -117,12 +144,13 @@ body {
   font-size: 1.6rem;
   line-height: 1;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+  transition: font-size 0.25s ease;
 }
 
 .logo-accent {
   position: absolute;
-  bottom: -2px;
-  right: -2px;
+  bottom: 0;
+  right: 0;
   width: 14px;
   height: 14px;
   background: #2ecc71;
@@ -137,7 +165,7 @@ body {
 }
 
 .header-text h1 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
   margin-bottom: 2px;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
@@ -147,12 +175,8 @@ body {
   text-overflow: ellipsis;
 }
 
-.header-sub {
-  font-size: 0.72rem;
-  opacity: 0.9;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
+/* Sub-line slot under the title is now the delivery location — see the
+   .loc-inline block in the location section. */
 
 .header-actions {
   display: flex;
@@ -163,8 +187,6 @@ body {
   width: 40px;
   height: 40px;
   background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 12px;
   display: flex;
@@ -173,6 +195,7 @@ body {
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .header-btn:hover {
@@ -183,6 +206,11 @@ body {
 .header-btn:active {
   transform: scale(0.92);
   background: rgba(255, 255, 255, 0.2);
+}
+
+.header-btn:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 2px;
 }
 
 .header-btn-icon {
@@ -209,6 +237,7 @@ body {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   animation: badge-pop 0.3s ease;
 }
+.header-badge.hidden { display: none; }
 
 @keyframes badge-pop {
   0% { transform: scale(0); }
@@ -216,13 +245,13 @@ body {
   100% { transform: scale(1); }
 }
 
-/* === Contact Strip === */
+/* === Contact Strip (phone · hours — hidden by renderConfig() when unset) === */
 .contact-strip {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 0 12px;
+  padding: 8px 0 10px;
   position: relative;
 }
 
@@ -232,7 +261,7 @@ body {
   left: 10%;
   right: 10%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
 }
 
 .contact-item {
@@ -251,6 +280,11 @@ body {
 
 .contact-item:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+.contact-item:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 1px;
 }
 
 .contact-icon {
@@ -2298,39 +2332,50 @@ img.img-skel {
   margin: 0 auto 18px;
 }
 
-/* ---- Header delivery-location bar ---- */
-.loc-bar {
-  width: 100%;
+/* ---- Delivery location (inline under the brand title) ----
+   Lives inside the header text column and spans its full width — no extra
+   row and no unused horizontal space. Tap = change location. The JS only
+   touches the element id (#loc-bar) and the .has-location state class. */
+.loc-inline {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.55rem 14px;
+  gap: 6px;
+  width: 100%;
+  margin-top: 3px;
+  padding: 5px 8px 5px 0;
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+  background: none;
   color: #fff;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.2s ease;
 }
-.loc-bar:active { background: rgba(0, 0, 0, 0.24); }
-.loc-bar-icon { font-size: 0.95rem; flex: none; }
-.loc-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-.loc-bar-label {
-  font-size: 0.66rem;
+.loc-inline:hover { background: rgba(255, 255, 255, 0.12); }
+.loc-inline:active { background: rgba(255, 255, 255, 0.16); }
+.loc-inline:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 1px;
+}
+.loc-inline-icon { font-size: 0.9rem; line-height: 1; flex: none; }
+.loc-inline-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.loc-inline-label {
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  opacity: 0.8;
+  opacity: 0.85;
 }
-.loc-bar-address {
+.loc-inline-address {
   font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.loc-bar-caret { flex: none; font-size: 0.7rem; opacity: 0.8; }
-.loc-bar.has-location .loc-bar-icon { filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5)); }
+.loc-inline-caret { flex: none; font-size: 0.65rem; opacity: 0.85; }
+.loc-inline.has-location .loc-inline-icon { filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.6)); }
 
 /* ---- Saved locations (multi-address) ---- */
 .loc-saved { margin-top: 0.9rem; }
