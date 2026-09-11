@@ -2638,6 +2638,9 @@ function showLocationGate() {
     }
   });
 
+  // Check location permission and update button state
+  checkLocationPermission();
+
   // Re-validate the confirm button as the address is typed.
   const addrEl = $id('loc-address');
   if (addrEl && !addrEl.dataset.locBound) {
@@ -2817,6 +2820,100 @@ function useCurrentLocation() {
     return;
   }
 
+  // Check permission state first — if denied, show enable button instead
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+      if (result.state === 'denied') {
+        // Permission already denied — show enable button
+        btn.disabled = false;
+        label.textContent = '🔓 Enable Location';
+        btn.onclick = requestLocationPermission;
+        showLocError('Location permission is blocked. Click "Enable Location" to allow access in your browser.');
+        return;
+      }
+      // Permission is granted or prompt — proceed with getting location
+      getLocationFromGPS();
+    }).catch(() => {
+      // permissions API not supported — fall through to direct GPS request
+      getLocationFromGPS();
+    });
+  } else {
+    // permissions API not supported — fall through to direct GPS request
+    getLocationFromGPS();
+  }
+}
+
+/** Request location permission and get the location */
+function requestLocationPermission() {
+  hideLocError();
+  const btn = $id('loc-gps-btn');
+  const label = $id('loc-gps-label');
+  if (!btn || !label) return;
+
+  btn.disabled = true;
+  label.textContent = 'Waiting for permission…';
+
+  // Request permission by calling getCurrentPosition
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      // Permission granted — restore button and get location
+      btn.onclick = useCurrentLocation;
+      getLocationFromGPS();
+    },
+    (err) => {
+      // Permission still denied
+      btn.disabled = false;
+      label.textContent = '🔓 Enable Location';
+      btn.onclick = requestLocationPermission;
+      console.warn('[webview] location permission denied:', err && err.message);
+      showLocError('Location permission was denied. Please enable location in your browser settings, then click "Enable Location" again.');
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+}
+
+/** Check permission state and update button text accordingly */
+function checkLocationPermission() {
+  const btn = $id('loc-gps-btn');
+  const label = $id('loc-gps-label');
+  if (!btn || !label) return;
+
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+      if (result.state === 'denied') {
+        label.textContent = '🔓 Enable Location';
+        btn.onclick = requestLocationPermission;
+      } else {
+        label.textContent = 'Use my current location';
+        btn.onclick = useCurrentLocation;
+      }
+      // Listen for permission changes
+      result.onchange = () => {
+        if (result.state === 'granted') {
+          label.textContent = 'Use my current location';
+          btn.onclick = useCurrentLocation;
+        } else if (result.state === 'denied') {
+          label.textContent = '🔓 Enable Location';
+          btn.onclick = requestLocationPermission;
+        }
+      };
+    }).catch(() => {
+      // permissions API not supported — use default
+      label.textContent = 'Use my current location';
+      btn.onclick = useCurrentLocation;
+    });
+  }
+}
+
+/** Get the device's current location from GPS */
+function getLocationFromGPS() {
+  const btn = $id('loc-gps-btn');
+  const label = $id('loc-gps-label');
+  if (!btn || !label) return;
+
+  // Restore original onclick
+  btn.onclick = useCurrentLocation;
+
   btn.disabled = true;
   label.textContent = 'Getting your location…';
 
@@ -2891,9 +2988,21 @@ function useCurrentLocation() {
       btn.disabled = true;
       label.textContent = 'Finding approximate location…';
       console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
-      // GPS unavailable (denied/blocked/timeout — common on phones inside
-      // Messenger) → fall back to an IP-based approximate position so the
-      // customer doesn't have to hunt for their spot on the map.
+
+      // Permission denied (code 1) → don't use IP fallback. IP-based location
+      // is often wrong (e.g. Manila for Bicol users), so just show the store
+      // area and let the customer tap their spot on the map.
+      if (err && err.code === 1) {
+        resetBtn();
+        showLocError('Location permission was denied — tap your spot on the map below, or enable location in your browser settings.');
+        focusMap();
+        return;
+      }
+
+      // GPS unavailable (blocked/timeout/unavailable — common on phones inside
+      // Messenger and on laptops without GPS) → fall back to an IP-based
+      // approximate position so the customer doesn't have to hunt for their
+      // spot on the map.
       ipLocate().then((ip) => {
         resetBtn();
         if (ip) {
@@ -2923,9 +3032,7 @@ function useCurrentLocation() {
         }
         // IP lookup failed too → last resort: map tap / manual address. No
         // coordinates available; customer must drop the pin themselves.
-        if (err && err.code === 1) {
-          showLocError('Location permission was denied — tap your spot on the map below instead.');
-        } else if (err && err.code === 3) {
+        if (err && err.code === 3) {
           showLocError('Getting your location timed out — try again or tap the map below.');
         } else {
           showLocError('Could not get your location — tap your spot on the map below instead.');
