@@ -2781,14 +2781,18 @@ function setMapPin(latlng, fromGps) {
   updateLocConfirmState();
   if (!fromGps) {
     // Name the picked point so the address box pre-fills — only when empty,
-    // never stomping on what the customer already typed.
-    reverseGeocode(latlng.lat, latlng.lng)
+    // never stomping on what the customer already typed. Race against a timeout
+    // so a hung Geocoder can't trap the customer.
+    Promise.race([
+      reverseGeocode(latlng.lat, latlng.lng),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('geocode-timeout')), 5000)),
+    ])
       .then((addr) => {
         const el = $id('loc-address');
         if (el && !el.value.trim()) el.value = addr;
         updateLocConfirmState();
       })
-      .catch(() => { /* offline / rate-limited — address stays hand-typed */ });
+      .catch(() => { /* offline / rate-limited/timeout — address stays hand-typed */ });
   }
 }
 
@@ -2847,10 +2851,14 @@ function useCurrentLocation() {
       // the customer verifies against the map.
       const acc = Number(pos.coords.accuracy);
       const isCoarse = Number.isFinite(acc) && acc > 3000;
+      console.log('[webview] GPS success — lat:', coords.lat, 'lng:', coords.lng, 'accuracy:', acc + 'm');
       if (isCoarse) {
         console.warn('[webview] GPS fix coarse (' + acc + 'm) — pinning anyway, customer verifies');
       }
-      zoomMapToPin(coords, 16, true, true);
+      // Follow the exact same path as selecting a search result: drop the
+      // pin, fly the map to it, reverse-geocode and fill the address box.
+      // (fromGps = false so setMapPin handles the reverse-geocode.)
+      zoomMapToPin(coords, 16, true, false);
       if (mapAvailable()) {
         const status = $id('loc-status');
         if (status) {
@@ -2859,21 +2867,10 @@ function useCurrentLocation() {
             : '📍 Location found — pan/drag to fine-tune if needed';
         }
       }
-      // Reverse-geocode with its own short timeout so a hung Geocoder can't
-      // trap the customer either. If it fails, keep the pin and let them type.
-      try {
-        const address = await Promise.race([
-          reverseGeocode(coords.lat, coords.lng),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('geocode-timeout')), 5000)),
-        ]);
-        if (settled) return;
-        $id('loc-address').value = address;
-        updateLocConfirmState();
-        showToast('📍 Location found — check it and confirm');
-      } catch (e) {
-        console.warn('[webview] reverse geocode failed/timeout:', e && e.message);
-        showLocError('We got your position but couldn\u2019t name the address — please complete it below.');
-        $id('loc-address').focus();
+      if (!settled) {
+        showToast(isCoarse
+          ? '📍 Approximate location found — please check it on the map'
+          : '📍 Location found — check it and confirm');
       }
       resetBtn();
     },
@@ -2901,6 +2898,7 @@ function useCurrentLocation() {
         resetBtn();
         if (ip) {
           const coords = { lat: ip.lat, lng: ip.lng };
+          console.warn('[webview] GPS failed — using IP fallback:', ip.city || 'unknown', 'lat:', coords.lat, 'lng:', coords.lng);
           zoomMapToPin(coords, 14, true, false);
           if (mapAvailable()) {
             // Flag it as approximate so the customer still checks it against the map.
