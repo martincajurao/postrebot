@@ -127,8 +127,7 @@ const LocationService = (() => {
     }
   }
 
-  // Get current position using REAL GPS only - no IP fallback
-  // This is the ONLY function that should be used for the "Use my current location" button
+  // Get current position using REAL GPS - tries high accuracy first, then low accuracy
   function getGPSPosition() {
     return new Promise((resolve, reject) => {
       if (!isGeolocationSupported()) {
@@ -142,6 +141,7 @@ const LocationService = (() => {
 
       let settled = false;
       let safetyNetTimer = null;
+      let retryCount = 0;
 
       const finish = (result, isError = false) => {
         if (settled) return;
@@ -154,6 +154,67 @@ const LocationService = (() => {
         }
       };
 
+      // Try getting position with specified accuracy
+      const tryGetPosition = (enableHighAccuracy) => {
+        console.log('[LocationService] Trying GPS with highAccuracy:', enableHighAccuracy);
+        
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const coords = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+              timestamp: position.timestamp,
+              source: 'gps',
+            };
+
+            if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
+              // Invalid coordinates - retry with different accuracy
+              if (!retryCount) {
+                retryCount++;
+                return tryGetPosition(!enableHighAccuracy);
+              }
+              finish({
+                code: ErrorCodes.POSITION_UNAVAILABLE,
+                message: 'Could not determine your location. Please try again or tap the map below.',
+                canRetry: true,
+              }, true);
+              return;
+            }
+
+            // Accept any valid GPS position (even low accuracy)
+            console.log('[LocationService] GPS success:', coords.lat, coords.lng, 'accuracy:', coords.accuracy);
+            _permissionState = 'granted';
+            finish(coords, false);
+          },
+          (error) => {
+            console.log('[LocationService] GPS error:', error.code, error.message, 'highAccuracy:', enableHighAccuracy);
+            
+            // If high accuracy failed, try low accuracy
+            if (enableHighAccuracy && !retryCount) {
+              retryCount++;
+              return tryGetPosition(false); // Retry with low accuracy
+            }
+
+            // Both attempts failed or low accuracy also failed
+            const err = handleGeolocationError(error);
+            if (err.code === ErrorCodes.PERMISSION_DENIED) {
+              _permissionState = 'denied';
+            } else if (err.code === ErrorCodes.TIMEOUT) {
+              _permissionState = 'timeout';
+            } else {
+              _permissionState = 'unavailable';
+            }
+            finish(err, true);
+          },
+          {
+            enableHighAccuracy: enableHighAccuracy,
+            timeout: 15000, // 15 seconds timeout
+            maximumAge: 300000, // Accept positions up to 5 minutes old
+          }
+        );
+      };
+
       // Safety net: hard timeout to prevent hanging forever
       safetyNetTimer = setTimeout(() => {
         finish({
@@ -161,59 +222,12 @@ const LocationService = (() => {
           message: 'Getting your location took too long. Please try again or tap your location on the map below.',
           canRetry: true,
         }, true);
-      }, CONFIG.SAFETY_NET_MS);
+      }, 20000); // 20 seconds hard limit
 
       _permissionState = 'checking';
       
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const coords = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            timestamp: position.timestamp,
-            source: 'gps',
-          };
-
-          if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
-            finish({
-              code: ErrorCodes.POSITION_UNAVAILABLE,
-              message: 'Could not determine your location. Please try again or tap the map below.',
-              canRetry: true,
-            }, true);
-            return;
-          }
-
-          // Check accuracy - if too low quality, reject
-          if (Number.isFinite(coords.accuracy) && coords.accuracy > CONFIG.MAX_ACCURACY_METERS) {
-            finish({
-              code: ErrorCodes.ACCURACY_TOO_LOW,
-              message: `Location accuracy is low (${Math.round(coords.accuracy)}m). Please try again or tap the map below.`,
-              canRetry: true,
-            }, true);
-            return;
-          }
-
-          _permissionState = 'granted';
-          finish(coords, false);
-        },
-        (error) => {
-          const err = handleGeolocationError(error);
-          if (err.code === ErrorCodes.PERMISSION_DENIED) {
-            _permissionState = 'denied';
-          } else if (err.code === ErrorCodes.TIMEOUT) {
-            _permissionState = 'timeout';
-          } else {
-            _permissionState = 'unavailable';
-          }
-          finish(err, true);
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: CONFIG.GPS_TIMEOUT_MS,
-          maximumAge: CONFIG.MAX_POSITION_AGE_MS,
-        }
-      );
+      // Start with high accuracy
+      tryGetPosition(true);
     });
   }
 

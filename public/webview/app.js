@@ -2622,31 +2622,15 @@ function showLocationGate() {
         setMapPin({ lat: saved.lat, lng: saved.lng }, false);
         locMap.setView([saved.lat, saved.lng], 15);
       }
+      // Auto-detect AFTER map is ready so we can pan to location
+      autoDetectLocation();
     } else {
       if (wrap) wrap.style.display = 'none';
       showLocError('Map unavailable — please enter your address manually below.');
+      // Still try auto-detect even without map (will just fill address)
+      autoDetectLocation();
     }
   });
-
-  // Auto-detect ONLY if user has NO saved location with valid coordinates
-  // If user already has a saved location, just show it - don't re-detect
-  const hasValidSavedLocation = saved && 
-    saved.address && 
-    Number.isFinite(saved.lat) && 
-    Number.isFinite(saved.lng);
-  
-  if (!hasValidSavedLocation) {
-    // First-time user or no coordinates: try to auto-detect location
-    autoDetectLocation();
-  } else {
-    // Returning customer with valid saved location: just show it
-    // Restore the pin on map and update status
-    if (locMap) {
-      setMapPin({ lat: saved.lat, lng: saved.lng }, false);
-      locMap.setView([saved.lat, saved.lng], 15);
-    }
-    updateLocConfirmState();
-  }
 
   // Re-validate the confirm button as the address is typed.
   const addrEl = $id('loc-address');
@@ -2664,40 +2648,25 @@ function showLocationGate() {
 }
 
 /** Auto-detect customer location on modal open using GPS.
- * Step 1: Check if phone location is enabled (fast check)
- * Step 2: If enabled, try GPS
- * Step 3: If GPS succeeds, pre-fill address and drop pin
- * Step 4: If GPS fails or location is off, let user type or drop pin */
+ * Simply try GPS - if it fails, show message and let user type/drop pin.
+ * No permission API check - just attempt GPS directly since permission API
+ * can be unreliable in WebVs (says granted but GPS fails). */
 async function autoDetectLocation() {
   const statusEl = $id('loc-autodetect');
   const labelEl = $id('loc-autodetect-label');
+  
+  console.log('[webview] ===== AUTO-DETECT START =====');
   
   // Show "Finding your location..." status
   if (statusEl) statusEl.classList.remove('hidden');
   if (labelEl) labelEl.textContent = 'Finding your location…';
   
-  // STEP 1: Check if phone location is enabled (fast check, no GPS attempt)
-  try {
-    const permState = await LocationService.getPermissionState();
-    locationPermissionState = permState;
-    
-    if (permState === 'denied') {
-      // Phone location is OFF or blocked - don't even try GPS
-      if (labelEl) {
-        labelEl.textContent = '📍 Phone location is OFF — please type or tap the map';
-      }
-      if (statusEl) statusEl.classList.add('loc-autodetect-neutral');
-      console.log('[webview] auto-detect: phone location is OFF');
-      return;
-    }
-  } catch {
-    // Permissions API not available - proceed with GPS attempt
-    console.log('[webview] auto-detect: permissions API not available, trying GPS');
-  }
-  
-  // STEP 2: Phone location appears enabled - try GPS
+  // Try GPS directly - simplest and most reliable approach
+  console.log('[webview] Attempting GPS...');
   try {
     const position = await LocationService.getGPSPosition();
+    
+    console.log('[webview] GPS position:', position);
     
     if (position && LocationService.isValidLocation(position)) {
       // GPS success! Update state
@@ -2705,20 +2674,30 @@ async function autoDetectLocation() {
       pendingCoords = { lat: position.lat, lng: position.lng };
       pinSource = 'gps';
       
+      console.log('[webview] COORDINATES:', position.lat, position.lng);
+      console.log('[webview] ACCURACY:', position.accuracy, 'meters');
+      
       // Drop pin on map
       zoomMapToPin(position, 16, true, true);
       
-      // Reverse geocode to fill address
+      // Reverse geocode to fill address and search box
       try {
         const address = await reverseGeocode(position.lat, position.lng);
+        console.log('[webview] ADDRESS:', address);
         const addrEl = $id('loc-address');
         if (addrEl && !addrEl.value.trim()) {
           addrEl.value = address;
         }
-        if (labelEl) labelEl.textContent = '✓ Location found';
-      } catch {
+        // Also fill the search box so user can see/edit
+        const searchEl = $id('loc-search');
+        if (searchEl && !searchEl.value.trim()) {
+          searchEl.value = address;
+        }
+        if (labelEl) labelEl.textContent = '✓ Approximate location found - drag pin to adjust';
+      } catch (geocodeErr) {
+        console.log('[webview] Geocode failed:', geocodeErr.message);
         // Geocoding failed - user can type manually
-        if (labelEl) labelEl.textContent = '✓ Location found — please complete your address';
+        if (labelEl) labelEl.textContent = '✓ Location found — drag pin to adjust';
       }
       
       // Update status
@@ -2730,13 +2709,41 @@ async function autoDetectLocation() {
         if (statusEl) statusEl.classList.add('hidden');
       }, 2000);
       
-      console.log('[webview] auto-detect GPS success:', position.lat, position.lng);
+      console.log('[webview] RESULT: GPS SUCCESS');
+      console.log('[webview] ===== AUTO-DETECT END =====');
     }
   } catch (err) {
-    // GPS failed - phone location might be off or GPS unavailable
+    // GPS failed - but coordinates might still arrive late
+    // Don't show error immediately - wait a moment for late coordinates
+    console.log('[webview] GPS initial error:', err.code, err.message);
+    
+    // Wait up to 3 seconds for late coordinates
+    let coordinatesArrived = false;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      if (pendingCoords && Number.isFinite(pendingCoords.lat)) {
+        coordinatesArrived = true;
+        break;
+      }
+    }
+    
+    if (coordinatesArrived) {
+      // Coordinates arrived late - show success
+      console.log('[webview] COORDINATES ARRIVED LATE:', pendingCoords);
+      locationPermissionState = 'granted';
+      if (labelEl) labelEl.textContent = '✓ Location found';
+      if (statusEl) statusEl.classList.add('loc-autodetect-success');
+      updateLocConfirmState();
+      setTimeout(() => {
+        if (statusEl) statusEl.classList.add('hidden');
+      }, 2000);
+      console.log('[webview] RESULT: GPS SUCCESS (LATE)');
+      console.log('[webview] ===== AUTO-DETECT END =====');
+      return;
+    }
+    
+    // No coordinates arrived - show error
     locationPermissionState = LocationService.permissionState;
-    pendingCoords = null;
-    pinSource = null;
     
     if (labelEl) {
       if (err.code === LocationService.ErrorCodes.PERMISSION_DENIED) {
@@ -2751,7 +2758,8 @@ async function autoDetectLocation() {
     // Keep status visible but styled as neutral/info
     if (statusEl) statusEl.classList.add('loc-autodetect-neutral');
     
-    console.log('[webview] auto-detect GPS failed:', err.code, err.message);
+    console.log('[webview] RESULT: GPS FAILED -', err.code);
+    console.log('[webview] ===== AUTO-DETECT END =====');
   }
 }
 
@@ -2768,6 +2776,9 @@ function initLeafletMap() {
 
     locMap = L.map('loc-map', { scrollWheelZoom: false, zoomControl: true })
       .setView([STORE_LOCATION.lat, STORE_LOCATION.lng], 14);
+    // Expose globally for console debugging
+    window.locMap = locMap;
+    window.setMapPin = setMapPin;
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -3329,7 +3340,7 @@ function updateLocConfirmState() {
   const hasAddress = address.length >= 5;
   status.classList.toggle('loc-status-ok', !!pendingCoords && hasAddress);
   if (!pendingCoords) {
-    status.textContent = '📍 Tap the map to drop your pin — or use "Use my current location"';
+    status.textContent = '📍 Tap the map to drop your pin — or search above';
   } else if (!hasAddress) {
     status.textContent = '✓ Pin saved — now complete your address below';
   } else {
@@ -3384,13 +3395,37 @@ async function confirmLocation() {
   hideLocationGate();
   updateLocationBar();
   showToast('📍 Location saved!');
-  // Detect which branch serves this location (GPS / map pin only — manual
-  // addresses without coordinates fall back to the last-known branch, if any).
+  
+  // Detect branch AFTER user confirms location
   if (Number.isFinite(confirmedLat) && Number.isFinite(confirmedLng)) {
+    // Has coordinates - detect branch from confirmed location
+    console.log('[webview] Detecting branch from confirmed coords:', confirmedLat, confirmedLng);
     const branch = await detectBranchFromCoords(confirmedLat, confirmedLng);
-    if (branch) showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
+    if (branch) {
+      showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu');
+    } else {
+      console.warn('[webview] Could not detect branch from coords, showing all');
+    }
+  } else {
+    // No coordinates (manual address) - try IP fallback for approximate branch
+    console.log('[webview] No coords, trying IP for approximate branch');
+    const ipPosition = await LocationService.getIPBasedLocation();
+    if (ipPosition && LocationService.isValidLocation(ipPosition)) {
+      const branch = await detectBranchFromCoords(ipPosition.lat, ipPosition.lng);
+      if (branch) {
+        showToast('🏬 Showing the ' + (activeBranchName() || branch) + ' menu (approximate)');
+      }
+    }
   }
-  // Location data now exists → safe to populate the (branch-filtered) menu.
+  
+  // Apply branch filter and reveal menu
+  applyBranchFilter();
+  
+  // Load app data if not already loaded
+  if (categories.length === 0 && products.length === 0) {
+    await loadAppData();
+  }
+  
   revealMenu();
 }
 
@@ -3427,12 +3462,12 @@ let initStarted = false;
 async function init() {
   if (initStarted) return;
   initStarted = true;
-  showLoading('Loading menu...');
+  showLoading('Loading...');
 
-  // Detect Messenger in parallel — never let the SDK poll block catalog loading.
+  // Detect Messenger in parallel
   const messengerDetection = detectMessenger();
 
-  // Check if webview is enabled (assume enabled when the check itself fails).
+  // Check if webview is enabled
   let enabled = true;
   try {
     const enabledData = await api('/enabled');
@@ -3453,8 +3488,7 @@ async function init() {
     return;
   }
 
-  // When opened without ?psid (shared URL), resolve the PSID from the Messenger
-  // SDK BEFORE loading the cart so the local cart + orders bind to the customer.
+  // When opened without ?psid (shared URL), resolve the PSID from the Messenger SDK
   if (!psidFromMessenger) {
     const msgrPsid = await resolveMessengerUser();
     if (msgrPsid && msgrPsid !== sessionId) {
@@ -3464,6 +3498,64 @@ async function init() {
     }
   }
 
+  // Show location gate FIRST - load data only AFTER user confirms location
+  activeBranch = storageGet('webview_branch_' + sessionId) || null;
+  
+  console.log('[webview] Init - activeBranch:', activeBranch);
+  
+  updateLocationBar();
+  initHeaderAutoHide();
+  
+  // Show the location gate immediately - NO data loading here
+  showLocationGate();
+  
+  isInsideMessenger = await messengerDetection;
+  
+  console.log('[webview] init complete →', {
+    branch: activeBranch,
+    sessionId,
+    isInsideMessenger,
+  });
+}
+
+/** Clear all saved locations and branch - for testing */
+function clearAllSavedLocations() {
+  try {
+    storageSet(LOCATION_KEY(), '');
+    storageSet(LOCATIONS_KEY(), '[]');
+    storageSet('webview_branch_' + sessionId, '');
+    activeBranch = null;
+    pendingCoords = null;
+    pinSource = null;
+    console.log('[webview] All saved locations cleared');
+    showToast('🗑️ All saved locations cleared');
+  } catch (e) {
+    console.warn('[webview] Failed to clear locations:', e);
+  }
+}
+
+// Expose globally for console debugging
+window.clearAllSavedLocations = clearAllSavedLocations;
+
+/** Pan map to specific coordinates - for testing */
+window.panMapTo = function(lat, lng, zoom) {
+  zoom = zoom || 15;
+  if (!window.locMap) {
+    console.log('Map not loaded yet');
+    return;
+  }
+  console.log('Panning to:', lat, lng);
+  window.locMap.setView([lat, lng], zoom);
+  if (window.setMapPin) {
+    window.setMapPin({ lat: lat, lng: lng }, false);
+  }
+};
+
+/** Load all app data (products, categories, etc.) - called after location is confirmed */
+async function loadAppData() {
+  console.log('[webview] Loading app data...');
+  showLoading('Loading menu...');
+  
   // Load everything; settle all results so one failed loader can't blank the menu.
   const results = await Promise.allSettled([
     loadCategories(),
@@ -3479,70 +3571,29 @@ async function init() {
     console.warn('[webview] ' + failed.length + ' loader(s) failed:', failed.map((f) => f.reason && f.reason.message));
   }
 
-  // loadCart() runs in parallel with the catalog loaders, so its initial
-  // recalcCartTotals() sees an empty catalog and stores 0 totals for every
-  // line. Now that products/packages/food packs are loaded, re-price the
-  // restored cart and persist the corrected totals.
+  // Re-price the restored cart now that products are loaded
   recalcCartTotals();
   storageSet(LOCAL_CART_KEY(), JSON.stringify(cart));
   updateCartBadge();
 
-  // Branch (GPS-based menu filtering): load the branch catalog, then resolve
-  // the customer's branch BEFORE rendering anything. The menu stays behind the
-  // loading overlay until we have location data — if the device can't provide
-  // it, the location gate takes over and revealMenu() fires on confirm.
+  // Load branch catalog
   try {
     const bData = await api('/branches');
     if (bData && Array.isArray(bData.branches)) branchCatalog = bData.branches;
   } catch (e) {
     console.warn('[webview] /branches failed — branch filter still works from item data:', e && e.message);
   }
-  activeBranch = storageGet('webview_branch_' + sessionId) || null;
-  const savedLoc = getSavedLocation();
-  if (savedLoc && Number.isFinite(savedLoc.lat) && Number.isFinite(savedLoc.lng)) {
-    // Returning customer with a confirmed location → re-detect from its coords.
-    await detectBranchFromCoords(savedLoc.lat, savedLoc.lng);
-  } else if (!activeBranch) {
-    // First load (or no usable saved coords) → ask the device GPS directly,
-    // falling back to IP-based location. Never give up without a branch: if
-    // detection fails entirely, hold the menu and let the gate decide.
-    await detectBranchFromDeviceGps();
-  }
-
-  updateLocationBar();
-  initHeaderAutoHide(); // hide-on-scroll-down / show-on-scroll-up
-
-  console.log('[webview] init complete →', {
+  
+  hideLoading();
+  
+  console.log('[webview] App data loaded:', {
     categories: categories.length,
     products: products.length,
     packages: packages.length,
     foodPacks: foodPacks.length,
-    branch: activeBranch,
     cartItems: cart.items.length,
     orders: orders.length,
-    sessionId,
-    isInsideMessenger: await messengerDetection,
   });
-
-  isInsideMessenger = await messengerDetection;
-  hideLoading();
-
-  // No location/branch data at all → do NOT show an unfiltered menu. Keep the
-  // content hidden and open the location gate; confirming a location there
-  // re-detects the branch and calls revealMenu().
-  if (!activeBranch) {
-    showLocationGate('set');
-    return;
-  }
-
-  applyBranchFilter();
-  revealMenu();
-
-  // Location gate: customers confirm their delivery location before using the app.
-  // This runs on EVERY webview open (not just first run) so the customer always
-  // has a chance to review or update their location. A previously saved location
-  // is pre-filled so returning customers only need to re-confirm, not re-type.
-  showLocationGate();
 }
 
 function retryLoad() {
