@@ -1,4 +1,4 @@
-﻿﻿// ===== Postre Food Products — Webview (order online) =====
+﻿// ===== Postre Food Products — Webview (order online) =====
 // Refactored so every field the REST API returns is reflected on the page:
 // categories, products + variants, packages + slots/options + upgrades + discounts,
 // food packs, cart line pricing, checkout, order history with item detail, and the
@@ -225,12 +225,12 @@ function updateCartBadge() {
   const badge = $id('cart-badge');
   const headerBadge = $id('header-cart-badge');
   const count = cart.items.reduce((s, i) => s + i.quantity, 0);
-  
+
   if (badge) {
     badge.textContent = count;
     badge.classList.toggle('hidden', count === 0);
   }
-  
+
   if (headerBadge) {
     headerBadge.textContent = count;
     headerBadge.classList.toggle('hidden', count === 0);
@@ -806,7 +806,7 @@ function packageDefaultChoices(pkg) {
 function selectCardSize(event, kind, id, size) {
   if (event && event.stopPropagation) event.stopPropagation();
   cardSizes[kind + '-' + Number(id)] = size;
-    const card = event && event.target ? event.target.closest('.product-card') : null;
+  const card = event && event.target ? event.target.closest('.product-card') : null;
   if (!card) return;
   card.querySelectorAll('.size-pill').forEach((b) => b.classList.toggle('selected', b.textContent.trim() === String(size)));
   const priceEl = card.querySelector('.card-price');
@@ -830,8 +830,8 @@ function productCardHtml(p, extraCls) {
   // Sizes inline in the price row to save vertical space on the card.
   const sizePills = vs.length > 1
     ? vs.map((v) =>
-        `<button class="size-pill${v.size === selSize ? ' selected' : ''}" onclick="selectCardSize(event, 'product', ${p.id}, '${esc(v.size)}')">${esc(v.size)}</button>`
-      ).join('')
+      `<button class="size-pill${v.size === selSize ? ' selected' : ''}" onclick="selectCardSize(event, 'product', ${p.id}, '${esc(v.size)}')">${esc(v.size)}</button>`
+    ).join('')
     : '';
   return `<div class="product-card${extraCls ? ' ' + extraCls : ''}${unavailable ? ' unavailable' : ''}" ${unavailable ? '' : `onclick="showProductDetail(${p.id})"`}>
     ${imageHtml(p.photo_url, p.name)}
@@ -1005,10 +1005,10 @@ function showPackages() {
     const names = pkg.is_custom
       ? []
       : (pkg.slots || []).map((slot) => {
-          const opts = packageSlotOptions(pkg, slot);
-          const def = opts.find((o) => Number(o.is_default) === 1) || opts[0];
-          return def ? def.name : null;
-        }).filter(Boolean);
+        const opts = packageSlotOptions(pkg, slot);
+        const def = opts.find((o) => Number(o.is_default) === 1) || opts[0];
+        return def ? def.name : null;
+      }).filter(Boolean);
     const dishPreview = names.length > 0
       ? `<div class="pkg-dishes">${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` +${names.length - 3} more` : ""}</div>`
       : "";
@@ -1119,7 +1119,7 @@ function currentPackage() {
   return packages.find((x) => Number(x.id) === Number(packageDetail.pkgId)) || null;
 }
 
-  packages = packages.slice().sort((a, b) => (a.base_price || 0) - (b.base_price || 0));
+packages = packages.slice().sort((a, b) => (a.base_price || 0) - (b.base_price || 0));
 
 /**
  * Auto-discount for "Build Your Own" custom packages, based on the sum of the
@@ -1374,13 +1374,13 @@ function renderByopCustom(pkg, slots, needed, complete) {
       <div class="byop-cat-header">${esc(catName)}</div>
       <div class="byop-btn-grid">
         ${items.map((p) => {
-          const pid = Number(p.id);
-          const isSelected = selectedPids.includes(pid);
-          const upgrade = productMenuPriceM(pid);
-          return `<button class="byop-btn${isSelected ? ' selected' : ''}" onclick="addToSlot(${pid})">
+      const pid = Number(p.id);
+      const isSelected = selectedPids.includes(pid);
+      const upgrade = productMenuPriceM(pid);
+      return `<button class="byop-btn${isSelected ? ' selected' : ''}" onclick="addToSlot(${pid})">
             ${esc(p.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
           </button>`;
-        }).join('')}
+    }).join('')}
       </div>
     </div>`;
   }).join('');
@@ -1415,15 +1415,15 @@ function renderFixedSlots(pkg, slots) {
       </div>
       <div class="slot-options">
         ${options.map((opt) => {
-          const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
-          const upgrade = Number(opt.upgrade_price) || 0;
-          const thumb = opt.photo_url
-            ? `<img class="opt-thumb img-skel" src="${esc(absUrl(opt.photo_url))}" alt="" title="View photo" loading="lazy" onload="this.classList.remove('img-skel')" onclick="openImageLightbox(event, '${esc(absUrl(opt.photo_url))}', '${esc(opt.name)}')" onerror="this.remove()">`
-            : '';
-          return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id})">
+      const selected = cur !== undefined && cur !== null && Number(cur) === Number(opt.product_id);
+      const upgrade = Number(opt.upgrade_price) || 0;
+      const thumb = opt.photo_url
+        ? `<img class="opt-thumb img-skel" src="${esc(absUrl(opt.photo_url))}" alt="" title="View photo" loading="lazy" onload="this.classList.remove('img-skel')" onclick="openImageLightbox(event, '${esc(absUrl(opt.photo_url))}', '${esc(opt.name)}')" onerror="this.remove()">`
+        : '';
+      return `<span class="slot-option${selected ? ' selected' : ''}" onclick="selectPackageSlot(${slot.slot_number}, ${opt.product_id})">
             ${thumb}${esc(opt.name)}${upgrade > 0 ? ` <em>+${formatMoney(upgrade)}</em>` : ''}
           </span>`;
-        }).join('')}
+    }).join('')}
       </div>
     </div>`;
   }).join('');
@@ -2982,63 +2982,67 @@ function getLocationFromGPS() {
   // pre-fills the address box and pans the map there so the customer only has
   // to confirm — not re-navigate.
   function handleError(err) {
-      onGpsDone();
-      if (settled) return; // custom timeout already fired — abandon
-      clearTimeout(safetyNet);
-      btn.disabled = true;
-      label.textContent = 'Finding approximate location…';
-      console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
+    onGpsDone();
+    if (settled) return; // custom timeout already fired — abandon
+    clearTimeout(safetyNet);
+    btn.disabled = true;
+    label.textContent = 'Finding approximate location…';
+    console.warn('[webview] geolocation failed:', err && err.code, err && err.message);
 
-      // Permission denied (code 1) → don't use IP fallback. IP-based location
-      // is often wrong (e.g. Manila for Bicol users), so just show the store
-      // area and let the customer tap their spot on the map.
-      if (err && err.code === 1) {
-        resetBtn();
-        showLocError('Location permission was denied — tap your spot on the map below, or enable location in your browser settings.');
-        focusMap();
+    // Permission denied (code 1) → don't use IP fallback. IP-based location
+    // is often wrong (e.g. Manila for Bicol users), so just show the store
+    // area and let the customer tap their spot on the map.
+    if (err && err.code === 1) {
+      resetBtn();
+      showLocError('Location permission was denied — tap your spot on the map below, or enable location in your browser settings.');
+      focusMap();
+      return;
+    }
+
+    // Never use IP geolocation as a substitute for phone location.
+    locationPermissionState = err && err.code === 1 ? 'denied' : 'unavailable';
+    resetBtn();
+    showLocError(err && err.code === 1
+      ? 'Phone location permission is blocked. Enable it in your browser settings, then try again.'
+      : 'Phone Location Services are off or unavailable. Turn on Location on your phone, then try again.');
+    focusMap();
+    return;
+    ipLocate().then((ip) => {
+      resetBtn();
+      if (ip) {
+        const coords = { lat: ip.lat, lng: ip.lng };
+        console.warn('[webview] GPS failed — using IP fallback:', ip.city || 'unknown', 'lat:', coords.lat, 'lng:', coords.lng);
+        zoomMapToPin(coords, 14, true, false);
+        if (mapAvailable()) {
+          // Flag it as approximate so the customer still checks it against the map.
+          const status = $id('loc-status');
+          if (status) status.textContent = '📍 Approximate location — check it and confirm';
+        }
+        // Best-effort reverse geocode of the approximate point.
+        Promise.race([
+          reverseGeocode(coords.lat, coords.lng),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('geocode-timeout')), 5000)),
+        ]).then((address) => {
+          if (settled) return;
+          $id('loc-address').value = address;
+          updateLocConfirmState();
+          showToast('📍 Approximate location found (from your network) — please check it');
+        }).catch(() => {
+          if (settled) return;
+          showLocError('Set an approximate pin from your network — please complete your exact address below.');
+          $id('loc-address').focus();
+        });
         return;
       }
-
-      // GPS unavailable (blocked/timeout/unavailable — common on phones inside
-      // Messenger and on laptops without GPS) → fall back to an IP-based
-      // approximate position so the customer doesn't have to hunt for their
-      // spot on the map.
-      ipLocate().then((ip) => {
-        resetBtn();
-        if (ip) {
-          const coords = { lat: ip.lat, lng: ip.lng };
-          console.warn('[webview] GPS failed — using IP fallback:', ip.city || 'unknown', 'lat:', coords.lat, 'lng:', coords.lng);
-          zoomMapToPin(coords, 14, true, false);
-          if (mapAvailable()) {
-            // Flag it as approximate so the customer still checks it against the map.
-            const status = $id('loc-status');
-            if (status) status.textContent = '📍 Approximate location — check it and confirm';
-          }
-          // Best-effort reverse geocode of the approximate point.
-          Promise.race([
-            reverseGeocode(coords.lat, coords.lng),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('geocode-timeout')), 5000)),
-          ]).then((address) => {
-            if (settled) return;
-            $id('loc-address').value = address;
-            updateLocConfirmState();
-            showToast('📍 Approximate location found (from your network) — please check it');
-          }).catch(() => {
-            if (settled) return;
-            showLocError('Set an approximate pin from your network — please complete your exact address below.');
-            $id('loc-address').focus();
-          });
-          return;
-        }
-        // IP lookup failed too → last resort: map tap / manual address. No
-        // coordinates available; customer must drop the pin themselves.
-        if (err && err.code === 3) {
-          showLocError('Getting your location timed out — try again or tap the map below.');
-        } else {
-          showLocError('Could not get your location — tap your spot on the map below instead.');
-        }
-        focusMap();
-      });
+      // IP lookup failed too → last resort: map tap / manual address. No
+      // coordinates available; customer must drop the pin themselves.
+      if (err && err.code === 3) {
+        showLocError('Getting your location timed out — try again or tap the map below.');
+      } else {
+        showLocError('Could not get your location — tap your spot on the map below instead.');
+      }
+      focusMap();
+    });
   } // end handleError
 
   // Custom short timeout: if native GPS hasn't responded in GPS_TIMEOUT_MS,
