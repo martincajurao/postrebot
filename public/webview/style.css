@@ -2576,6 +2576,77 @@ img.img-skel {
   font-weight: 600;
 }
 
+.loc-service-alert {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(24, 28, 31, 0.72);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  animation: loc-fade-in 0.18s ease;
+}
+
+.loc-service-card {
+  width: min(100%, 360px);
+  padding: 26px 22px 20px;
+  text-align: center;
+  background: #fff;
+  border-radius: 22px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+  animation: loc-service-pop 0.22s ease-out;
+}
+
+.loc-service-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: #fff0ec;
+  font-size: 1.7rem;
+}
+
+.loc-service-card h2 {
+  margin: 0 0 8px;
+  color: #2d3436;
+  font-size: 1.2rem;
+}
+
+.loc-service-card p {
+  margin: 0 auto 18px;
+  color: #636e72;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.loc-service-enable {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 13px;
+  font-weight: 700;
+}
+
+.loc-service-dismiss {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  color: #8a7772;
+  font: inherit;
+  cursor: pointer;
+}
+
+@keyframes loc-service-pop {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
 @keyframes loc-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

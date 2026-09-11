@@ -358,6 +358,18 @@
       </div>
     </div>
 
+    <!-- Blocking location-services alert. This appears when the phone's
+         Location Services or page permission is unavailable. -->
+    <div id="location-service-alert" class="loc-service-alert hidden" role="alertdialog" aria-modal="true" aria-labelledby="loc-service-title">
+      <div class="loc-service-card">
+        <div class="loc-service-icon" aria-hidden="true">📍</div>
+        <h2 id="loc-service-title">Turn on your location</h2>
+        <p id="loc-service-message">Location is off. Turn on Location Services and allow access so we can find your delivery area.</p>
+        <button type="button" class="btn btn-primary loc-service-enable" id="loc-service-enable" onclick="enableLocationFromPopup()">Enable Location</button>
+        <button type="button" class="loc-service-dismiss" onclick="dismissLocationPopup()">I’ll enable it later</button>
+      </div>
+    </div>
+
     <!-- Toast notification -->
     <div id="toast" class="toast hidden"></div>
   </div>
