@@ -816,28 +816,36 @@ function selectCardSize(event, kind, id, size) {
 }
 
 /** Shared product card markup (category grid + "Popular right now" carousel).
- * extraCls adds a modifier class, e.g. 'fp-card' for the horizontal rail. */
+ * extraCls adds a modifier class, e.g. 'fp-card' for the horizontal rail.
+ * Layout: media block on top (photo + circular quick-add pinned to its corner,
+ * or a sold-out overlay), then name / description / size pills / price row.
+ * JS-facing hooks kept intact: .product-card, .size-pill, .card-price. */
 function productCardHtml(p, extraCls) {
   const unavailable = Number(p.unavailable) === 1;
   const vs = productVariants(p);
   const selSize = cardSizes['product-' + p.id] || (vs[0] ? vs[0].size : null);
-  // Sizes inline in the price row to save vertical space on the card.
+  // Sizes on their own row between description and price — keeps the price row
+  // uncluttered and the tap targets roomy.
   const sizePills = vs.length > 1
     ? vs.map((v) =>
       `<button class="size-pill${v.size === selSize ? ' selected' : ''}" onclick="selectCardSize(event, 'product', ${p.id}, '${esc(v.size)}')">${esc(v.size)}</button>`
     ).join('')
     : '';
   return `<div class="product-card${extraCls ? ' ' + extraCls : ''}${unavailable ? ' unavailable' : ''}" ${unavailable ? '' : `onclick="showProductDetail(${p.id})"`}>
-    ${imageHtml(p.photo_url, p.name)}
+    <div class="card-media">
+      ${imageHtml(p.photo_url, p.name)}
+      ${unavailable
+        ? '<div class="soldout-overlay"><span>Sold out</span></div>'
+        : `<button type="button" class="card-add-btn" aria-label="Add ${esc(p.name)} to cart" onclick="addToCartProductQuick(${p.id}, event)">＋</button>`}
+    </div>
     <div class="info">
       <div class="name">${esc(p.name)}</div>
       ${p.description ? `<div class="desc">${esc(p.description)}</div>` : ''}
+      ${sizePills ? `<div class="card-sizes">${sizePills}</div>` : ''}
       <div class="price-row">
         <span class="price card-price">${productCardPrice(p, selSize)}</span>
-        ${sizePills ? `<span class="card-sizes card-sizes-inline">${sizePills}</span>` : ''}
+        ${unavailable ? '<span class="unavailable-note">Currently unavailable</span>' : ''}
       </div>
-      ${unavailable ? '' : `<div class="card-actions"><button class="card-add-btn" onclick="addToCartProductQuick(${p.id}, event)">+ Add to Cart</button></div>`}
-      ${unavailable ? '<span class="badge-flag">Unavailable</span>' : ''}
     </div>
   </div>`;
 }
@@ -1008,7 +1016,7 @@ function showPackages() {
       : "";
 
     return `<div class="product-card fp-card fp-card-tall">
-      ${imageHtml(pkg.photo_url, pkg.name)}
+      <div class="card-media">${imageHtml(pkg.photo_url, pkg.name)}</div>
       <div class="info">
         <div class="name">${esc(pkg.name)}</div>
         ${pkg.description ? `<div class="desc">${esc(pkg.description)}</div>` : ""}
