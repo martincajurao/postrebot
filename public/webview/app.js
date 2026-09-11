@@ -2628,8 +2628,8 @@ function showLocationGate() {
     }
   });
 
-  // Check location permission and update button state
-  checkLocationPermission();
+  // Auto-detect customer location on modal open (GPS only, no IP)
+  autoDetectLocation();
 
   // Re-validate the confirm button as the address is typed.
   const addrEl = $id('loc-address');
@@ -2644,6 +2644,77 @@ function showLocationGate() {
     initSearchAutocomplete();
   }
   updateLocConfirmState();
+}
+
+/** Auto-detect customer location on modal open using GPS.
+ * If GPS succeeds: pre-fill address, drop pin on map.
+ * If GPS fails: leave fields empty, user can type or drop pin. */
+async function autoDetectLocation() {
+  const statusEl = $id('loc-autodetect');
+  const labelEl = $id('loc-autodetect-label');
+  
+  // Show "Finding your location..." status
+  if (statusEl) statusEl.classList.remove('hidden');
+  if (labelEl) labelEl.textContent = 'Finding your location…';
+  
+  try {
+    // Try GPS only - no IP fallback for delivery location
+    const position = await LocationService.getGPSPosition();
+    
+    if (position && LocationService.isValidLocation(position)) {
+      // GPS success! Update state
+      locationPermissionState = 'granted';
+      pendingCoords = { lat: position.lat, lng: position.lng };
+      pinSource = 'gps';
+      
+      // Drop pin on map
+      zoomMapToPin(position, 16, true, true);
+      
+      // Reverse geocode to fill address
+      try {
+        const address = await reverseGeocode(position.lat, position.lng);
+        const addrEl = $id('loc-address');
+        if (addrEl && !addrEl.value.trim()) {
+          addrEl.value = address;
+        }
+        if (labelEl) labelEl.textContent = '✓ Location found';
+      } catch {
+        // Geocoding failed - user can type manually
+        if (labelEl) labelEl.textContent = '✓ Location found — please complete your address';
+      }
+      
+      // Update status
+      if (statusEl) statusEl.classList.add('loc-autodetect-success');
+      updateLocConfirmState();
+      
+      // Hide status after a moment
+      setTimeout(() => {
+        if (statusEl) statusEl.classList.add('hidden');
+      }, 2000);
+      
+      console.log('[webview] auto-detect GPS success:', position.lat, position.lng);
+    }
+  } catch (err) {
+    // GPS failed - phone location is off or denied
+    locationPermissionState = LocationService.permissionState;
+    pendingCoords = null;
+    pinSource = null;
+    
+    if (labelEl) {
+      if (err.code === LocationService.ErrorCodes.PERMISSION_DENIED) {
+        labelEl.textContent = '📍 Location access denied — please type or tap the map';
+      } else if (err.code === LocationService.ErrorCodes.TIMEOUT) {
+        labelEl.textContent = '📍 Location timed out — please type or tap the map';
+      } else {
+        labelEl.textContent = '📍 Could not find location — please type or tap the map';
+      }
+    }
+    
+    // Keep status visible but styled as neutral/info
+    if (statusEl) statusEl.classList.add('loc-autodetect-neutral');
+    
+    console.log('[webview] auto-detect GPS failed:', err.code, err.message);
+  }
 }
 
 /** Create the Leaflet map once, after the modal is visible. */

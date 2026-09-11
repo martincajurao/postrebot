@@ -1,4 +1,4 @@
-/* === Reset & Base === */
+﻿/* === Reset & Base === */
 * {
   margin: 0;
   padding: 0;
@@ -3189,3 +3189,23 @@ img.img-skel {
   text-decoration: none;
   font-weight: 600;
 }
+
+/* Auto-detect status indicator (replaces old GPS button) */
+.loc-autodetect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 12px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 14px;
+  background: #f8f9fa;
+  color: #666;
+  font-size: 0.92rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+.loc-autodetect.hidden { display: none; }
+.loc-autodetect-success { border-color: #27ae60; background: #f0fdf4; color: #166534; }
+.loc-autodetect-neutral { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
+.loc-autodetect-icon { font-size: 1.1rem; line-height: 1; }

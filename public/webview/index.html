@@ -322,10 +322,11 @@
         <h2 id="loc-gate-title">Where should we deliver?</h2>
         <p class="loc-gate-sub">Set your location so your order reaches the right place. Or pick one of your saved locations below.</p>
 
-        <button type="button" class="loc-gps-btn" id="loc-gps-btn" onclick="useCurrentLocation()">
-          <span class="loc-gps-icon">🧭</span>
-          <span id="loc-gps-label">Use my current location</span>
-        </button>
+        <!-- Auto-detect status - shows "Finding your location..." while GPS runs -->
+        <div id="loc-autodetect" class="loc-autodetect">
+          <span class="loc-autodetect-icon">📍</span>
+          <span id="loc-autodetect-label">Finding your location…</span>
+        </div>
 
         <!-- Saved locations — previously confirmed addresses. Tap one to use it
              right away (no re-typing). Managed by renderSavedLocations(). -->
@@ -357,18 +358,6 @@
         <p id="loc-gate-error" class="loc-gate-error hidden"></p>
 
         <button type="button" class="btn btn-primary loc-confirm-btn" id="loc-confirm-btn" onclick="confirmLocation()">Confirm Location</button>
-      </div>
-    </div>
-
-    <!-- Blocking location-services alert. This appears when the phone's
-         Location Services or page permission is unavailable. -->
-    <div id="location-service-alert" class="loc-service-alert hidden" role="alertdialog" aria-modal="true" aria-labelledby="loc-service-title">
-      <div class="loc-service-card">
-        <div class="loc-service-icon" aria-hidden="true">📍</div>
-        <h2 id="loc-service-title">Turn on your location</h2>
-        <p id="loc-service-message">Location is off. Turn on Location Services and allow access so we can find your delivery area.</p>
-        <button type="button" class="btn btn-primary loc-service-enable" id="loc-service-enable" onclick="enableLocationFromPopup()">Enable Location</button>
-        <button type="button" class="loc-service-dismiss" onclick="dismissLocationPopup()">I’ll enable it later</button>
       </div>
     </div>
 
