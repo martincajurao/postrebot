@@ -15,13 +15,20 @@
 const LocationService = (() => {
   'use strict';
 
-  // Configuration
+  // Configuration — tuned for phones: a cold GPS fix indoors on cellular
+  // routinely takes 20-30s, while desktop (WiFi-based) answers in ~1s.
   const CONFIG = {
-    GPS_TIMEOUT_MS: 10000,
-    SAFETY_NET_MS: 12000,
+    GPS_TIMEOUT_MS: 10000,          // legacy alias (kept for compat)
+    HIGH_ACCURACY_TIMEOUT_MS: 25000, // stage 1: full GPS fix, phones need this long
+    LOW_ACCURACY_TIMEOUT_MS: 12000,  // stage 2: cell/WiFi fix, fast but coarse
+    SAFETY_NET_MS: 38000,            // hard ceiling so we never hang forever
     MAX_ACCURACY_METERS: 3000,
     MAX_POSITION_AGE_MS: 60000,
     IP_GEOCODE_TIMEOUT_MS: 8000,
+    // A POSITION_UNAVAILABLE that arrives this fast almost always means the
+    // phone's master Location switch is OFF (no provider to even query),
+    // not a real "couldn't fix" — surface it as GPS_DISABLED.
+    GPS_OFF_FAST_FAIL_MS: 3000,
   };
 
   // Internal state
@@ -127,7 +134,14 @@ const LocationService = (() => {
     }
   }
 
-  // Get current position using REAL GPS - tries high accuracy first, then low accuracy
+  // Get current position using REAL GPS — two staged attempts:
+  //   1. enableHighAccuracy:true  (real satellite fix, slow but precise)
+  //   2. enableHighAccuracy:false (cell/WiFi fix, fast but coarse)
+  // Either stage may succeed; only if both fail do we surface the error.
+  // A POSITION_UNAVAILABLE that arrives suspiciously fast (under
+  // GPS_OFF_FAST_FAIL_MS) is reported as GPS_DISABLED — the phone's master
+  // Location switch is almost certainly OFF. There is no API that reads
+  // that switch directly, so timing is the only signal browsers give us.
   function getGPSPosition() {
     return new Promise((resolve, reject) => {
       if (!isGeolocationSupported()) {
@@ -141,7 +155,7 @@ const LocationService = (() => {
 
       let settled = false;
       let safetyNetTimer = null;
-      let retryCount = 0;
+      const startTime = Date.now();
 
       const finish = (result, isError = false) => {
         if (settled) return;
@@ -154,10 +168,29 @@ const LocationService = (() => {
         }
       };
 
-      // Try getting position with specified accuracy
-      const tryGetPosition = (enableHighAccuracy) => {
+      // Classify a raw geolocation error. fastFail=true when the error
+      // arrived almost instantly (phone location services likely OFF).
+      const classifyError = (error, fastFail) => {
+        const err = handleGeolocationError(error);
+        if (err.code === ErrorCodes.PERMISSION_DENIED) {
+          _permissionState = 'denied';
+        } else if (err.code === ErrorCodes.TIMEOUT) {
+          _permissionState = 'timeout';
+        } else if (err.code === ErrorCodes.POSITION_UNAVAILABLE && fastFail) {
+          _permissionState = 'unavailable';
+          err.code = ErrorCodes.GPS_DISABLED;
+          err.message = 'Phone location looks OFF — turn on Location Services, then tap Retry. Or tap the map below to set your location.';
+          err.action = 'ENABLE_GPS';
+        } else {
+          _permissionState = 'unavailable';
+        }
+        return err;
+      };
+
+      // One attempt with the given accuracy mode. onFatal(error) is only
+      // called when this was the last attempt and it failed.
+      const attempt = (enableHighAccuracy, timeoutMs, onDone) => {
         console.log('[LocationService] Trying GPS with highAccuracy:', enableHighAccuracy);
-        
         navigator.geolocation.getCurrentPosition(
           (position) => {
             const coords = {
@@ -169,48 +202,34 @@ const LocationService = (() => {
             };
 
             if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
-              // Invalid coordinates - retry with different accuracy
-              if (!retryCount) {
-                retryCount++;
-                return tryGetPosition(!enableHighAccuracy);
-              }
-              finish({
+              onDone(null, {
                 code: ErrorCodes.POSITION_UNAVAILABLE,
                 message: 'Could not determine your location. Please try again or tap the map below.',
                 canRetry: true,
-              }, true);
+              });
               return;
             }
 
             // Accept any valid GPS position (even low accuracy)
             console.log('[LocationService] GPS success:', coords.lat, coords.lng, 'accuracy:', coords.accuracy);
             _permissionState = 'granted';
-            finish(coords, false);
+            onDone(coords, null);
           },
           (error) => {
             console.log('[LocationService] GPS error:', error.code, error.message, 'highAccuracy:', enableHighAccuracy);
-            
-            // If high accuracy failed, try low accuracy
-            if (enableHighAccuracy && !retryCount) {
-              retryCount++;
-              return tryGetPosition(false); // Retry with low accuracy
+            // PERMISSION_DENIED is final — retrying with another mode can't help.
+            if (error && error.code === 1) {
+              onDone(null, classifyError(error, false));
+              return;
             }
-
-            // Both attempts failed or low accuracy also failed
-            const err = handleGeolocationError(error);
-            if (err.code === ErrorCodes.PERMISSION_DENIED) {
-              _permissionState = 'denied';
-            } else if (err.code === ErrorCodes.TIMEOUT) {
-              _permissionState = 'timeout';
-            } else {
-              _permissionState = 'unavailable';
-            }
-            finish(err, true);
+            // Otherwise hand control back; the caller decides whether to try
+            // the next stage or fail.
+            onDone(null, { _rawError: error });
           },
           {
             enableHighAccuracy: enableHighAccuracy,
-            timeout: 15000, // 15 seconds timeout
-            maximumAge: 300000, // Accept positions up to 5 minutes old
+            timeout: timeoutMs,
+            maximumAge: 60000, // Accept fixes up to 1 min old (fast on re-taps)
           }
         );
       };
@@ -219,15 +238,26 @@ const LocationService = (() => {
       safetyNetTimer = setTimeout(() => {
         finish({
           code: ErrorCodes.TIMEOUT,
-          message: 'Getting your location took too long. Please try again or tap your location on the map below.',
+          message: 'Getting your location took too long. Make sure you have a clear sky view, then try again — or tap your location on the map below.',
           canRetry: true,
         }, true);
-      }, 20000); // 20 seconds hard limit
+      }, CONFIG.SAFETY_NET_MS);
 
       _permissionState = 'checking';
-      
-      // Start with high accuracy
-      tryGetPosition(true);
+
+      // Stage 1: full-accuracy GPS fix (needs patience on phones).
+      attempt(true, CONFIG.HIGH_ACCURACY_TIMEOUT_MS, (coords, err) => {
+        if (coords) return finish(coords, false);
+        if (!err._rawError) return finish(err, true); // denied / invalid
+        // Stage 1 failed on timeout/unavailable — fall back to the fast,
+        // low-accuracy mode rather than giving up (phones often answer here).
+        attempt(false, CONFIG.LOW_ACCURACY_TIMEOUT_MS, (coords2, err2) => {
+          if (coords2) return finish(coords2, false);
+          const raw = err2._rawError || err._rawError;
+          const fastFail = (Date.now() - startTime) < CONFIG.GPS_OFF_FAST_FAIL_MS;
+          finish(classifyError(raw, fastFail), true);
+        });
+      });
     });
   }
 
@@ -290,8 +320,11 @@ const LocationService = (() => {
 
   // Get GPS position ONLY - no IP fallback
   // This is used by the "Use my current location" button
-  // If GPS fails, the user must drop a pin on the map
-  async function getCurrentPosition() {
+  // If GPS fails, the user must drop a pin on the map.
+  // Manual taps pass { force: true } so a stale cached 'denied' state can
+  // never short-circuit Retry — the user may have just enabled Location in
+  // Settings and come back. The permission is always re-queried fresh.
+  async function getCurrentPosition(options) {
     if (_isRequestInProgress) {
       throw {
         code: ErrorCodes.UNKNOWN_ERROR,
@@ -303,11 +336,22 @@ const LocationService = (() => {
     _isRequestInProgress = true;
 
     try {
-      // Check permission state first
-      const permState = await getPermissionState();
+      // Re-query the live permission state on every call (the Permissions
+      // API result can go stale the moment the user flips the OS switch).
+      let permState = 'unknown';
+      try {
+        permState = await queryPermissionState();
+        _permissionState = permState === 'granted' ? 'granted' :
+                           permState === 'denied' ? 'denied' : 'unknown';
+      } catch {
+        permState = _permissionState;
+      }
 
-      // If permission is explicitly denied, throw error immediately
-      if (permState === 'denied') {
+      // Only the quiet automatic attempt respects a cached 'denied' (to
+      // avoid popping a prompt on gate-open). A manual "locate me" / Retry
+      // tap ALWAYS attempts real GPS — that is the whole point of Retry.
+      const isManual = !!(options && options.force);
+      if (permState === 'denied' && !isManual) {
         throw {
           code: ErrorCodes.PERMISSION_DENIED,
           message: 'Phone location is off or access is blocked. Please enable Location Services on your phone, or tap the map below to set your location manually.',
@@ -318,7 +362,7 @@ const LocationService = (() => {
 
       // Try GPS only - NO IP fallback for delivery location
       return await getGPSPosition();
-      
+
     } finally {
       _isRequestInProgress = false;
     }
@@ -384,7 +428,7 @@ const LocationService = (() => {
   // Reset the service state
   function reset() {
     _permissionState = 'unknown';
-    _lastPosition = null;
+    _lastGPSPosition = null;
     _isRequestInProgress = false;
   }
 

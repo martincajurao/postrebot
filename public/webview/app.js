@@ -2887,7 +2887,16 @@ function handleGPSFailure(err, viaAuto) {
   } else if (code === E.TIMEOUT) {
     setLocateBar('error', '📍 Getting your location timed out — try again, or tap the map below');
   } else if (code === E.POSITION_UNAVAILABLE || code === E.GPS_DISABLED) {
-    setLocateBar('error', '📍 Could not get your position — check that phone location is ON, or tap the map');
+    // GPS_DISABLED = the fix failed almost instantly, which means the
+    // phone's master Location switch is OFF (not a signal problem).
+    const gpsOff = code === E.GPS_DISABLED;
+    setLocateBar('error', gpsOff
+      ? '📍 Phone location is OFF — turn on Location Services, then tap ↻ Retry'
+      : '📍 Could not get your position — check that phone location is ON, or tap the map');
+    if (gpsOff && !viaAuto) {
+      showPermissionHelp();
+      showLocError('Phone location is OFF. Turn on Location Services in your phone Settings, come back here and tap ↻ Retry — or tap your spot on the map below.');
+    }
   } else if (code === E.API_UNSUPPORTED || code === E.SECURE_CONTEXT_REQUIRED) {
     setLocateBar('error', "📍 Location isn't available here — tap your spot on the map below");
   } else {
@@ -2928,7 +2937,10 @@ async function useCurrentLocation(viaAuto) {
   setLocateBar(null, viaAuto ? 'Finding your location…' : 'Getting your location…');
 
   try {
-    const position = await LocationService.getCurrentPosition();
+    // Manual taps force a real GPS attempt (never short-circuit on a stale
+    // cached 'denied'); the quiet auto attempt passes nothing so it stays
+    // polite when access is blocked.
+    const position = await LocationService.getCurrentPosition(viaAuto ? undefined : { force: true });
     if (position && LocationService.isValidLocation(position)) {
       applyGPSFix(position);
     } else {
