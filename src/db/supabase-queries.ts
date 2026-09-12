@@ -40,6 +40,42 @@ export async function updateCustomer(psid: string, fields: { name?: string; phon
   await db.from('customers').update(updates).eq('psid', psid);
 }
 
+/** Save (or refresh) a customer's delivery coordinates.
+ *
+ *  Filled by three paths:
+ *   1. webview location gate confirm (GPS / map pin)
+ *   2. webview checkout (already handled there)
+ *   3. a native chat location share — "+ → Location → Send". This is the ONLY
+ *      way to get a real GPS fix inside Messenger-on-Android, because the
+ *      Messenger WebView blocks HTML5 geolocation at the OS/app level (the
+ *      host app never shows the Android geolocation prompt). */
+export async function saveCustomerDeliveryLocation(
+  psid: string,
+  lat: number,
+  lng: number,
+  label?: string | null
+): Promise<void> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+  if (lat === 0 && lng === 0) return;
+  await ensureCustomer(psid);
+  const updates: Record<string, any> = { delivery_lat: Number(lat), delivery_lng: Number(lng) };
+  if (label) updates.address = String(label).slice(0, 500);
+  await db.from('customers').update(updates).eq('psid', psid);
+}
+
+/** Latest saved delivery coordinates for a customer (chat share or webview). */
+export async function getCustomerDeliveryLocation(psid: string): Promise<{ lat: number; lng: number; address: string | null } | null> {
+  if (!psid) return null;
+  const { data } = await db.from('customers').select('delivery_lat, delivery_lng, address').eq('psid', psid).maybeSingle();
+  if (!data) return null;
+  const lat = Number(data.delivery_lat);
+  const lng = Number(data.delivery_lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng, address: data.address ? String(data.address) : null };
+}
+
 export async function getCustomerById(id: number): Promise<any | null> {
   const { data } = await db.from('customers').select('*').eq('id', id).maybeSingle();
   return data;

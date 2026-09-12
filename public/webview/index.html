@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260912-3">
+  <link rel="stylesheet" href="style.css?v=20260912-4">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -36,7 +36,7 @@
   <!-- Supabase JS: optional fallback data source (primary is the /api/webview REST API) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Location Service: production-grade geolocation handling with fallbacks -->
-  <script src="location-service.js?v=20260912-3"></script>
+  <script src="location-service.js?v=20260912-4"></script>
 </head>
 <body>
   <div id="app">
@@ -330,6 +330,25 @@
           <span id="loc-gps-label">Use my current location</span>
         </button>
 
+        <!-- "Send my location in chat" — the GPS path that ALWAYS works inside
+             Messenger (Android especially). Messenger's Android webview blocks
+             the browser geolocation prompt at the OS/app level, so the native
+             "+ → Location → Send" share is the only real GPS route there. The
+             bot saves it server-side; the next gate open prefills this pin. -->
+        <button type="button" class="loc-gps-btn loc-chat-btn hidden" id="loc-chat-btn" onclick="useChatLocation()">
+          <span class="loc-gps-icon" id="loc-chat-icon">💬</span>
+          <span id="loc-chat-label">Send my location in chat</span>
+        </button>
+        <div id="loc-chat-help" class="loc-chat-help hidden">
+          <strong>How to send it (takes 5 seconds):</strong>
+          <ol>
+            <li>Tap <b>➕</b> next to the message box</li>
+            <li>Tap <b>Location</b>, then pick your exact spot</li>
+            <li>Tap <b>Send</b> — then reopen the store, your location is already set ✓</li>
+          </ol>
+          <button type="button" id="loc-chat-check" class="loc-retry-btn" onclick="reloadChatLocation()">✔ I've sent it — check the store</button>
+        </div>
+
         <!-- Locate status bar: progress, success, accuracy readout (±m), retry, errors. -->
         <div id="loc-autodetect" class="loc-autodetect hidden">
           <span class="loc-autodetect-icon">📍</span>
@@ -359,6 +378,7 @@
             <button type="button" class="loc-perm-close" onclick="hidePermissionHelp()" aria-label="Dismiss">✕</button>
           </div>
           <ol id="loc-perm-steps" class="loc-perm-steps"></ol>
+          <button type="button" id="loc-chrome-btn" class="btn btn-primary loc-chrome-btn hidden" onclick="openInChrome()">🌐 Open in Chrome — enable GPS there</button>
           <p class="loc-perm-alt">In a hurry? Just tap your spot on the map below instead.</p>
         </div>
 
@@ -397,6 +417,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260912-5"></script>
+  <script src="app.js?v=20260912-8"></script>
 </body>
 </html>

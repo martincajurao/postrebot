@@ -2244,6 +2244,92 @@ function detectMessengerUserAgent() {
   return /\b(FBAV|FB_IAB|FBAN|MessengerForiOS|Orca-Android|Messenger)\b/i.test(ua) || /\[FB_IAB\]/.test(ua);
 }
 
+/** True on Android's system WebView / Custom Tabs / in-app browsers (NOT full
+ *  Chrome). These swallow the geolocation prompt: the API object exists but
+ *  callbacks never fire, so GPS can never succeed there. */
+function isAndroidWebView() {
+  try {
+    const ua = navigator.userAgent || '';
+    if (!/Android/i.test(ua)) return false;
+    // Full Chrome on Android: "... Chrome/xx ... Safari/537.36" WITHOUT "; wv".
+    // WebViews add "; wv" (Lollipop+) or lack "Chrome/" + "Safari/" entirely
+    // (older webviews, Custom Tabs wrappers, FB_IAB).
+    if (/;\s*wv\)/i.test(ua)) return true;
+    if (/\bVersion\/\d+.*Chrome\//i.test(ua)) return true; // classic WebView token
+    if (/\b(FBAV|FB_IAB|FBAN|Orca-Android)\b/i.test(ua)) return true;
+    // No Chrome token at all on Android = some embedded webview.
+    if (!/Chrome\//i.test(ua) && /Safari\/|Mozilla\//i.test(ua)) return true;
+    return false;
+  } catch (e) { return false; }
+}
+
+/** Probe whether this browser will EVER answer a geolocation request.
+ *  Android WebViews famously expose navigator.geolocation but never invoke
+ *  either callback. A throwaway 2.5s probe answers the question fast so we
+ *  can skip the doomed 30s GPS run and send the user straight to the map.
+ *  Resolves true = provider answered (GPS will work), false = dead end. */
+function probeGpsProvider() {
+  return new Promise((resolve) => {
+    try {
+      if (!navigator.geolocation || !window.isSecureContext) { resolve(false); return; }
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(v); } };
+      const timer = setTimeout(() => finish(false), 2500);
+      if (timer && typeof timer.unref === 'function') { try { timer.unref(); } catch (e) {} }
+      navigator.geolocation.getCurrentPosition(
+        () => { clearTimeout(timer); finish(true); },
+        () => { clearTimeout(timer); finish(true); }, // ANY answer (even denial) = alive
+        { enableHighAccuracy: false, timeout: 2000, maximumAge: 60000 }
+      );
+    } catch (e) { resolve(false); }
+  });
+}
+
+/** "Open in Chrome" escape hatch for Android WebViews where GPS can never
+ *  work (app-level location permission off / prompt swallowed). Tries a
+ *  one-tap intent:// open in full Chrome; falls back to copying the page URL
+ *  so the user can paste it into Chrome, where GPS works. */
+function openInChrome() {
+  try {
+    const url = location.href;
+    const noScheme = url.replace(/^https?:\/\//i, '');
+    const intentUrl = 'intent://' + noScheme +
+      '#Intent;scheme=' + (location.protocol === 'http:' ? 'http' : 'https') +
+      ';package=com.android.chrome;S.browser_fallback_url=' +
+      encodeURIComponent(url) + ';end';
+    try { if (typeof gpsLog === 'function') gpsLog('opening in Chrome via intent', 'dbg-warn'); } catch (e) {}
+    window.location.href = intentUrl;
+  } catch (e) {}
+}
+
+function showOpenInBrowserHelp() {
+  try {
+    const url = location.href;
+    const ua = navigator.userAgent || '';
+    const isAndroid = /Android/i.test(ua);
+    // Show the one-tap button (declared in index.html) on Android only.
+    try {
+      const btn = document.getElementById('loc-chrome-btn');
+      if (btn) btn.classList.toggle('hidden', !isAndroid);
+    } catch (e) {}
+    // Best-effort copy so the user just pastes in Chrome if no Chrome app.
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).catch(() => {});
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e2) {}
+        ta.remove();
+      }
+    } catch (e) {}
+    showLocError(isAndroid
+      ? 'No location popup appeared — Messenger is blocked from asking. Tap "Open in Chrome" below (link also copied), allow location there, and order. Or just tap your spot on the map.'
+      : 'GPS is blocked inside this in-app browser. Link copied — open Chrome, paste it there, and tap "Use my current location". Or just tap your spot on the map below.');
+  } catch (e) {}
+}
+
 /** Wait up to ~2s for the MessengerExtensions SDK, then resolve detection. */
 async function detectMessenger() {
   if (window.__messengerExtensionsReady) return true;
@@ -2709,6 +2795,22 @@ function showLocationGate() {
   const wrap = document.querySelector('.loc-map-wrap');
   if (wrap) wrap.style.display = '';
 
+  // Inside Messenger (and Android webviews above all) the browser GPS prompt
+  // can never appear — surface the native "+ → Location" chat share as a
+  // first-class alternative right next to the GPS button.
+  try {
+    const chatBtn = $id('loc-chat-btn');
+    if (chatBtn) {
+      const inMessenger = (typeof detectMessengerUserAgent === 'function' && detectMessengerUserAgent()) || isAndroidWebView();
+      chatBtn.classList.toggle('hidden', !inMessenger);
+    }
+  } catch (e) {}
+
+  // If this chat already has a location saved server-side (native chat share
+  // or an earlier confirm), prefill the pin so Android users don't have to
+  // fiddle with GPS at all — just verify and Confirm.
+  loadChatLocationIntoGate(saved);
+
   // Load Leaflet dynamically (no-op if already loaded). Once ready, initialize
   // the map. If loading fails, fall back to address-only.
   loadLeaflet().then((ok) => {
@@ -2878,12 +2980,22 @@ function showPermissionHelp() {
     ? LocationService.getPermissionGuidance() : null;
   if (title && guide) title.textContent = guide.title;
   if (steps && guide) steps.innerHTML = guide.steps.map((s) => '<li>' + esc(s) + '</li>').join('');
+  // Android WebView: surface the one-tap "Open in Chrome" button — the panel
+  // alone can't fix an app-level block, the browser switch can.
+  try {
+    const chromeBtn = $id('loc-chrome-btn');
+    if (chromeBtn) chromeBtn.classList.toggle('hidden', !isAndroidWebView());
+  } catch (e) {}
   panel.classList.remove('hidden');
 }
 
 function hidePermissionHelp() {
   const panel = $id('loc-perm-help');
   if (panel) panel.classList.add('hidden');
+  try {
+    const chromeBtn = $id('loc-chrome-btn');
+    if (chromeBtn) chromeBtn.classList.add('hidden');
+  } catch (e) {}
 }
 
 /** Success path shared by the auto attempt and the button: remember the fix,
@@ -2997,15 +3109,26 @@ function handleGPSFailure(err, viaAuto) {
   updateLocConfirmState(); // re-sync (hides a stale coordinate readout on manual failures)
 
   // Friendly, actionable status for each failure mode.
+  // NOTE: on Android WebViews "no popup ever appears" is the signature of an
+  // app-level block (Messenger app has no OS location permission) — the page
+  // can NEVER fix that, so every branch below funnels to Open-in-Chrome + map.
   if (code === E.PERMISSION_DENIED) {
-    setLocateBar('error', '📍 Location access is blocked — enable it below, or tap your spot on the map');
+    setLocateBar('error', '📍 No location popup appeared — Messenger is blocked from asking. Open in Chrome below, or tap the map');
     // The quiet auto attempt just nudges; manual attempts get the full help.
     if (!viaAuto) {
       showPermissionHelp();
-      showLocError('Phone location is off or access is blocked. Enable Location Services and allow access, or tap the map below to set your location.');
+      try { if (isAndroidWebView()) showOpenInBrowserHelp(); } catch (e) {}
+      if (!isAndroidWebView()) showLocError('Phone location is off or access is blocked. Enable Location Services and allow access, or tap the map below to set your location.');
     }
   } else if (code === E.TIMEOUT) {
     setLocateBar('error', '📍 Getting your location timed out — try again, or tap the map below');
+    // Android WebView signature: full 30s silence = the prompt was swallowed
+    // (app-level location off). Hand them the Chrome escape hatch, not a bare retry.
+    if (!viaAuto) {
+      try {
+        if (isAndroidWebView()) showOpenInBrowserHelp();
+      } catch (e) {}
+    }
   } else if (code === E.POSITION_UNAVAILABLE || code === E.GPS_DISABLED) {
     // GPS_DISABLED = the fix failed almost instantly, which means the
     // phone's master Location switch is OFF (not a signal problem).
@@ -3075,6 +3198,34 @@ async function useCurrentLocation(viaAuto) {
     focusMap();
     return;
   }
+
+  // ANDROID WEBVIEW FAST-PATH: inside Messenger-on-Android (or any Android
+  // webview) the geolocation object exists but NEVER answers. Probing takes
+  // 2.5s; the full GPS run would burn ~33s then time out. On a dead probe,
+  // skip straight to the map + Chrome escape hatch.
+  // iPhones are unaffected (WKWebView answers properly → probe passes fast).
+  try {
+    if (isAndroidWebView()) {
+      gpsLocateBusy = true;
+      gpsLocateStartedAt = Date.now();
+      setGPSButtonState('locating');
+      setLocateBar(null, 'Checking location support…');
+      const alive = await probeGpsProvider();
+      gpsLocateBusy = false;
+      gpsLocateStartedAt = 0;
+      if (!alive) {
+        try { if (typeof gpsLog === 'function') gpsLog('Android webview probe: provider silent — skipping GPS run', 'dbg-warn'); } catch (e) {}
+        setGPSButtonState('idle');
+        setLocateBar('error', "📍 GPS is blocked in this in-app browser — tap 'Send my location in chat' below, or drop your pin on the map");
+        setRetryVisible(false);
+        showOpenInBrowserHelp();
+        focusMap();
+        return;
+      }
+      try { if (typeof gpsLog === 'function') gpsLog('Android webview probe: provider alive — running full GPS', 'dbg-ok'); } catch (e) {}
+      // Fall through to the normal run below (fresh flags).
+    }
+  } catch (e) { gpsLocateBusy = false; gpsLocateStartedAt = 0; }
 
   gpsLocateBusy = true;
   gpsLocateStartedAt = Date.now();
@@ -3312,6 +3463,69 @@ function setMapPin(latlng, fromGps) {
   }
 }
 
+/** Server-side saved location for this session — set by a native chat share
+ *  ("+ → Location → Send", handled by the bot webhook) or by an earlier gate
+ *  confirm. This is the ONLY GPS fix that reliably works inside Messenger's
+ *  Android webview, so the gate prefills it whenever it exists. */
+let chatLocationLoaded = false;
+async function loadChatLocationIntoGate(saved) {
+  if (chatLocationLoaded) return;
+  chatLocationLoaded = true;
+  try {
+    const loc = await api('/location?session=' + encodeURIComponent(sessionId));
+    if (!loc) return;
+    const lat = Number(loc.lat);
+    const lng = Number(loc.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
+    // A location confirmed locally this session wins over the server copy.
+    if (saved && Number.isFinite(Number(saved.lat)) && Number.isFinite(Number(saved.lng))) return;
+    pendingCoords = { lat, lng };
+    pinSource = 'pin';
+    setMapPin({ lat, lng }, false);
+    if (loc.address && !pendingAddress) setPendingAddress(loc.address);
+    try { if (locMap && typeof locMap.flyTo === 'function') locMap.flyTo([lat, lng], 16, { duration: 0.6 }); } catch (e) {}
+    setCoordsDisplay(lat, lng);
+    updateLocConfirmState();
+    showToast('📍 Loaded your saved location — check the pin and confirm');
+    try { if (typeof gpsLog === 'function') gpsLog('server location prefilled lat=' + lat + ' lng=' + lng, 'dbg-ok'); } catch (e) {}
+  } catch (e) { /* no record / offline — the gate stays fully usable */ }
+}
+
+/** "Send my location in chat" — the one-tap GPS path that works inside
+ *  Messenger's Android webview: shows the 3 steps, then closes the webview so
+ *  the customer lands in the chat, taps ➕ → Location → Send. The bot saves it
+ *  server-side; the next gate open prefills the pin. */
+function useChatLocation() {
+  try {
+    const help = $id('loc-chat-help');
+    if (help) help.classList.remove('hidden');
+    setLocateBar('neutral', 'Tap ➕ → Location → Send in the chat below, then reopen the store');
+    try { if (typeof gpsLog === 'function') gpsLog('chat-locate: native share instructions shown', 'dbg-warn'); } catch (e) {}
+    // Drop them back into the conversation where the ➕ button lives.
+    const ext = window.MessengerExtensions;
+    if (ext && typeof ext.requestCloseBrowser === 'function') {
+      try {
+        ext.requestCloseBrowser(
+          () => console.log('[webview] closed to chat for location share'),
+          () => {}
+        );
+      } catch (e) {}
+    } else {
+      try { window.close(); } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+/** Re-fetch the server location after the customer says they sent it. */
+async function reloadChatLocation() {
+  try {
+    chatLocationLoaded = false;
+    await loadChatLocationIntoGate(getSavedLocation());
+    const help = $id('loc-chat-help');
+    if (help) help.classList.add('hidden');
+  } catch (e) {}
+}
+
 /** Pan the map to the store and nudge the customer to tap their spot. */
 function focusMap() {
   if (mapAvailable()) {
@@ -3497,6 +3711,16 @@ async function confirmLocation() {
   // "To be decided" until the fee logic is wired up.
   const confirmedLat = pendingCoords ? pendingCoords.lat : null;
   const confirmedLng = pendingCoords ? pendingCoords.lng : null;
+  // Persist the confirmed pin server-side so a later gate open (or the bot's
+  // chat flow) can reuse it. Fire-and-forget — never blocks the unlock.
+  if (Number.isFinite(confirmedLat) && Number.isFinite(confirmedLng)) {
+    try {
+      api('/location', {
+        method: 'PUT',
+        body: JSON.stringify({ lat: confirmedLat, lng: confirmedLng, address: address || null }),
+      }).catch(() => {});
+    } catch (e) {}
+  }
   pendingCoords = null;
   pinSource = null;
   pendingAddress = null;

@@ -210,6 +210,24 @@ const server = app.listen(0, async () => {
     const cancelledOrder = await req('/orders/' + orderId);
     assert('Order is now CANCELLED', cancelledOrder.data.status === 'CANCELLED');
 
+    // 6c. Saved location CRUD (gate confirm + chat-location share round-trip).
+    const putLoc = await req('/location', {
+      method: 'PUT',
+      body: JSON.stringify({ session, lat: 12.3456, lng: 123.9876, address: 'Chat-shared spot' }),
+    });
+    assert('PUT /location (save)', putLoc.status === 200 && putLoc.data.ok === true, String(putLoc.data?.error || ''));
+    const getLoc = await req('/location?session=' + session);
+    assert('GET /location (read back)',
+      getLoc.status === 200 && getLoc.data && Math.abs(Number(getLoc.data.lat) - 12.3456) < 1e-6 && Math.abs(Number(getLoc.data.lng) - 123.9876) < 1e-6,
+      'got ' + JSON.stringify(getLoc.data));
+    const badLoc = await req('/location', {
+      method: 'PUT',
+      body: JSON.stringify({ session, lat: 0, lng: 0 }),
+    });
+    assert('PUT /location (rejects 0,0)', badLoc.status === 400);
+    const noLoc = await req('/location?session=does_not_exist_xyz');
+    assert('GET /location (unknown session → null)', noLoc.status === 200 && noLoc.data === null);
+
     // 7. Config, Enabled, Slots
     const cfg = await req('/config');
     assert('GET /config', cfg.status === 200 && cfg.data.payment && cfg.data.contact);

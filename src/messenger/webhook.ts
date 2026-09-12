@@ -6,6 +6,7 @@ import {
   getVariantByProductAndSize, getFoodPacks, getFoodPackById, getPackageById,
   getPackages, getPackageSlots, getPackageSlotByNumber, getSlotOptions,
   getCustomSlotOptions, getPackageOptionBySlotAndProduct,
+  saveCustomerDeliveryLocation,
 } from '../db';
 import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest, GRAPH_API_VERSION, ensureWebviewWhitelisted, sendCateringMenu } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
@@ -41,6 +42,39 @@ const ADMIN_PSID = process.env.ADMIN_PSID || '';
 /** Fire-and-forget send that never breaks the flow — a failed message is logged only. */
 function safeSend(p: Promise<any>): Promise<void> {
   return p.catch((e) => { console.error('[webhook] send failed', e); return undefined; });
+}
+
+/** Extract {lat,lng,label} from a Messenger message's attachment array.
+ *
+ *  Handles the native "+ → Location" chat share that Messenger sends as:
+ *    attachment.type === 'location'
+ *    attachment.payload.coordinates = { lat, long }
+ *  (also tolerant of 'latitude/longitude/lng' spellings and the generic
+ *  'fallback' attachment type). Returns null when there is no location.
+ *
+ *  WHY THIS MATTERS: inside Messenger's Android webview the OS-level
+ *  geolocation prompt never appears (Android gates it behind the HOST APP's
+ *  native onGeolocationPermissionsShowPrompt, which Meta does not implement
+ *  for webview origins). The chat location share uses Messenger's OWN
+ *  OS-backed location picker, which DOES work on Android — it is the only
+ *  reliable in-Messenger GPS path. */
+export function extractLocationFromAttachments(attachments: any[]): { lat: number; lng: number; label: string | null } | null {
+  const list = Array.isArray(attachments) ? attachments : [];
+  for (const a of list) {
+    const t = String((a && a.type) || '').toLowerCase();
+    if (t !== 'location' && t !== 'fallback') continue;
+    const payload = (a && a.payload) || {};
+    const c = payload.coordinates || {};
+    const lat = Number(c.lat ?? c.latitude);
+    const lng = Number(c.long ?? c.lng ?? c.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (lat === 0 && lng === 0) continue;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) continue;
+    const rawLabel = payload.title || payload.name || '';
+    const label = rawLabel ? String(rawLabel).trim() : null;
+    return { lat, lng, label: label && label.length ? label.slice(0, 250) : null };
+  }
+  return null;
 }
 
 // ---------- public base URL for image links ----------
@@ -1293,6 +1327,28 @@ export async function handleMessage(messaging: any) {
   const psid = messaging.sender?.id;
   if (!psid) return;
   await ensureCustomer(psid);
+
+  // Native chat location share ("+ → Location → Send"). This is the ONLY
+  // reliable GPS path inside Messenger's Android webview (see
+  // extractLocationFromAttachments). Save it to the customer, confirm in chat,
+  // and hand them a one-tap way back into the store where the pin is prefilled.
+  if (messaging.message?.attachments) {
+    const loc = extractLocationFromAttachments(messaging.message.attachments);
+    if (loc) {
+      try {
+        await saveCustomerDeliveryLocation(psid, loc.lat, loc.lng, loc.label);
+        console.log(`[webhook] chat location saved for psid=${psid} lat=${loc.lat} lng=${loc.lng}`);
+        await safeSend(sendText(psid, '📍 Got your location! It is now set for your delivery.'));
+        await safeSend(sendQuickReplies(psid, 'Tap below to open the store — your location is already filled in:', [
+          { title: '🛒 Open the Store', payload: 'WEBVIEW' },
+        ]));
+      } catch (e: any) {
+        console.error('[webhook] could not save chat location', e?.message || e);
+        await safeSend(sendText(psid, '😅 We couldn\u2019t save that location — please try sending it again.'));
+      }
+      return;
+    }
+  }
 
   if (messaging.postback?.payload) {
     const payload = messaging.postback.payload;

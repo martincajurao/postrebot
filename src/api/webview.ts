@@ -535,6 +535,56 @@ r.get('/slots', async (req, res) => {
   }
 });
 
+// ---- Saved location (gate GPS / map pin / chat share) ----
+
+/** Return the customer's latest saved delivery coordinates. Filled by three
+ *  routes: the location gate confirm (PUT below), checkout, or a native chat
+ *  location share handled by the webhook ("+ → Location → Send") — the only
+ *  GPS path that works inside Messenger's Android webview. */
+r.get('/location', async (req, res) => {
+  const sessionId = getSessionId(req);
+  if (!sessionId) return res.json(null);
+  try {
+    const { data } = await supa()
+      .from('customers')
+      .select('delivery_lat, delivery_lng, address')
+      .eq('psid', sessionId)
+      .maybeSingle();
+    if (!data) return res.json(null);
+    const lat = Number(data.delivery_lat);
+    const lng = Number(data.delivery_lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return res.json(null);
+    res.json({ lat, lng, address: data.address ? String(data.address) : null });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Persist the confirmed gate location so it survives reloads, is reused by
+ *  the bot (delivery fee / Waze link), and keeps the chat-share copy current. */
+r.put('/location', async (req, res) => {
+  const sessionId = getSessionId(req);
+  if (!sessionId) return res.status(400).json({ error: 'No session' });
+  const lat = Number(req.body?.lat ?? req.body?.latitude);
+  const lng = Number(req.body?.lng ?? req.body?.longitude ?? req.body?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+    return res.status(400).json({ error: 'Valid lat and lng are required' });
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: 'Coordinates out of range' });
+  }
+  try {
+    const custId = await getOrCreateCustomer(sessionId);
+    const updates: Record<string, any> = { delivery_lat: Number(lat), delivery_lng: Number(lng) };
+    const address = req.body?.address ? String(req.body.address).trim() : '';
+    if (address) updates.address = address.slice(0, 500);
+    await supa().from('customers').update(updates).eq('id', custId);
+    res.json({ ok: true, lat, lng });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- Check if webview is enabled ----
 
 r.get('/enabled', async (_req, res) => {

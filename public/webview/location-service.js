@@ -427,15 +427,27 @@ function getGPSPosition() {
   // Get user-friendly permission guidance based on browser
   function getPermissionGuidance() {
     const ua = navigator.userAgent || '';
+    const inMessenger = /\b(FBAV|FB_IAB|FBAN|Orca-Android|Messenger)\b/i.test(ua);
     if (ua.includes('Android')) {
-      return {
+      // Inside Messenger-on-Android, page-level "allow" is not enough: the
+      // Messenger APP itself needs the OS location permission, otherwise the
+      // WebView prompt is swallowed silently (this is the #1 Android failure).
+      return inMessenger ? {
+        title: 'Enable Location for Messenger (Android)',
+        steps: [
+          'Open phone Settings → Apps → Messenger → Permissions',
+          'Set Location to "Allow" (or "Ask every time")',
+          'Also turn ON the main Settings → Location switch',
+          'Come back here and tap "Use my current location" again',
+          'Still nothing? Open this page in Chrome (link auto-copied) — GPS works there',
+        ],
+      } : {
         title: 'Enable Location on Android',
         steps: [
-          'Open your phone Settings',
-          'Tap "Location" or "Privacy"',
-          'Turn on "Location Services"',
-          'Find your browser in app permissions',
-          'Set location to "Allow"',
+          'Turn ON Settings → Location (main switch)',
+          'Tap the ⋮ menu in Chrome → Settings → Site settings → Location → Allow',
+          'Reload this page and tap "Use my current location" → Allow',
+          'If Chrome never asks: Android Settings → Apps → Chrome → Permissions → Location → Allow',
         ],
       };
     }
