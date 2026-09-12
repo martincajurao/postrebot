@@ -2495,10 +2495,11 @@ img.img-skel {
   line-height: 1;
 }
 
-/* GPS button states — locating pulse + success confirmation */
+/* GPS button states — locating pulse + success confirmation. NOTE: no
+   pointer-events:none here — the button must stay tappable while locating
+   so manual taps can queue behind the auto attempt (see useCurrentLocation). */
 .loc-gps-btn.is-locating {
   animation: loc-gps-pulse 1.1s ease-in-out infinite;
-  pointer-events: none;
 }
 .loc-gps-btn.is-success {
   border-color: #bfe8cd;

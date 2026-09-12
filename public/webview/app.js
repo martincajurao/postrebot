@@ -2736,6 +2736,7 @@ const GPS_COARSE_METERS = (typeof LocationService !== 'undefined' && LocationSer
   ? LocationService.CONFIG.MAX_ACCURACY_METERS : 3000;
 
 let gpsLocateBusy = false;
+let gpsLocateStartedAt = 0; // timestamp of the in-flight run (stuck-busy guard)
 let gpsRerunManual = false; // manual tap that arrived while the auto attempt held the lock
 let gpsBarHideTimer = null;
 
@@ -2974,6 +2975,14 @@ function handleGPSFailure(err, viaAuto) {
  *  popups — the map/manual fallbacks are shown instead); manual runs surface
  *  the full permission-help panel when access is blocked. */
 async function useCurrentLocation(viaAuto) {
+  // Stuck-busy guard: if a previous run crashed past its finally (or an old
+  // cached script left the flag set), a timestamp older than the 40s locator
+  // ceiling means "stale", not "in progress" — reset so the button works.
+  if (gpsLocateBusy && (Date.now() - gpsLocateStartedAt) > 45000) {
+    try { if (typeof gpsLog === 'function') gpsLog('stale busy flag reset (>45s) — previous run never finished', 'dbg-warn'); } catch (e) {}
+    gpsLocateBusy = false;
+    gpsLocateStartedAt = 0;
+  }
   hideLocError();
   hidePermissionHelp();
   setRetryVisible(false);
@@ -3008,6 +3017,7 @@ async function useCurrentLocation(viaAuto) {
   }
 
   gpsLocateBusy = true;
+  gpsLocateStartedAt = Date.now();
   setGPSButtonState('locating');
   setLocateBar(null, viaAuto ? 'Finding your location…' : 'Getting your location…');
   // TEMP debug trace (remove with gpsLog) — full request context.
@@ -3041,6 +3051,14 @@ async function useCurrentLocation(viaAuto) {
     handleGPSFailure(err, viaAuto);
   } finally {
     gpsLocateBusy = false;
+    gpsLocateStartedAt = 0;
+    // A manual tap queued behind the gate-open auto run — handoff: the auto
+    // result is already shown, now run THEIR attempt with full error surface.
+    if (gpsRerunManual) {
+      gpsRerunManual = false;
+      try { if (typeof gpsLog === 'function') gpsLog('queued manual tap now running', 'dbg-warn'); } catch (e) {}
+      setTimeout(() => { try { useCurrentLocation(false); } catch (e) {} }, 250);
+    }
   }
 }
 
