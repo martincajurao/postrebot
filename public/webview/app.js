@@ -2251,7 +2251,7 @@ async function detectMessenger() {
     try { if (window.MessengerExtensions.isInExtension()) return true; } catch { /* ignore */ }
   }
   // Check if opened via Messenger button with psid parameter
-  if (new URLSearchParams(window.location.search).get('psid')) return true;
+  try { if (new URLSearchParams(window.location.search).get('psid')) return true; } catch { /* ignore */ }
 
   for (let i = 0; i < 10; i++) {
     if (window.__messengerExtensionsReady) return true;
@@ -2261,6 +2261,24 @@ async function detectMessenger() {
     await new Promise((r) => setTimeout(r, 150));
   }
   return detectMessengerUserAgent();
+}
+
+/** Android WebView / Messenger in-app browser: GPS prompts are routinely
+ *  swallowed, so pre-warming the permission state + geolocation provider in
+ *  the background makes the real tap resolve fast instead of hanging.
+ *  Never shows UI, never blocks — failures are silently ignored. */
+function warmUpGpsProvider() {
+  try {
+    if (typeof LocationService !== 'undefined' && LocationService.queryPermissionState) {
+      LocationService.queryPermissionState().catch(() => {});
+    }
+    if (!navigator.geolocation || !window.isSecureContext) return;
+    // A throwaway low-accuracy shot warms the OS provider cache. Short
+    // timeout, cached answers welcome — this is warmup, not a fix.
+    navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
+      enableHighAccuracy: false, timeout: 8000, maximumAge: 60000,
+    });
+  } catch (e) { /* warmup must never break the page */ }
 }
 
 /** Close the in-Messenger webview and return the user to the chat thread. */
@@ -2739,6 +2757,45 @@ let gpsLocateBusy = false;
 let gpsLocateStartedAt = 0; // timestamp of the in-flight run (stuck-busy guard)
 let gpsRerunManual = false; // manual tap that arrived while the auto attempt held the lock
 let gpsBarHideTimer = null;
+let gpsElapsedTimer = null; // ticks the "Getting your location… (Xs)" label so phones feel alive
+
+/** Live fix progress from LocationService: show the improving accuracy while
+ *  the watch refines the fix (phones often sit 10-25s here). Never settles
+ *  anything — purely the status text. */
+window.__gpsProgress = function (coords) {
+  try {
+    if (!gpsLocateBusy) return;
+    const acc = coords && Number(coords.accuracy);
+    if (!Number.isFinite(acc) || acc <= 0) return;
+    if (acc <= 60) return; // about to resolve as precise — let the success UI speak
+    setLocateBar(null, 'Improving accuracy (±' + Math.round(acc) + ' m)… hold on');
+    setAccuracyChip(acc);
+  } catch (e) { /* progress must never break locating */ }
+};
+
+function gpsElapsedStart(viaAuto) {
+  gpsElapsedStop();
+  const t0 = Date.now();
+  gpsElapsedTimer = setInterval(() => {
+    try {
+      if (!gpsLocateBusy) { gpsElapsedStop(); return; }
+      const s = Math.round((Date.now() - t0) / 1000);
+      const bar = $id('loc-autodetect');
+      const mode = bar && bar.dataset ? bar.dataset.mode : '';
+      if (mode === 'error' || mode === 'success') return; // a final state won — stop narrating
+      const label = $id('loc-autodetect-label');
+      if (!label) return;
+      const txt = label.textContent || '';
+      if (/Improving accuracy/i.test(txt)) return; // watch progress owns the label now
+      label.textContent = (viaAuto ? 'Finding your location…' : 'Getting your location…') + ' (' + s + 's)';
+    } catch (e) {}
+  }, 1000);
+  if (gpsElapsedTimer && typeof gpsElapsedTimer.unref === 'function') { try { gpsElapsedTimer.unref(); } catch (e) {} }
+}
+
+function gpsElapsedStop() {
+  if (gpsElapsedTimer) { clearInterval(gpsElapsedTimer); gpsElapsedTimer = null; }
+}
 
 /** Sync the GPS button's visual state: idle | locating | success. */
 function setGPSButtonState(state) {
@@ -2973,10 +3030,13 @@ function handleGPSFailure(err, viaAuto) {
 
 /** Locate the device. viaAuto = the quiet attempt on gate-open (no hard error
  *  popups — the map/manual fallbacks are shown instead); manual runs surface
- *  the full permission-help panel when access is blocked. */
+ *  the full permission-help panel when access is blocked.
+ *  iOS SAFARI NOTE: programmatic locate calls outside a user gesture may be
+ *  silently ignored — the auto attempt is best-effort only; the GPS button
+ *  tap IS the gesture, so it always carries the real request. */
 async function useCurrentLocation(viaAuto) {
   // Stuck-busy guard: if a previous run crashed past its finally (or an old
-  // cached script left the flag set), a timestamp older than the 40s locator
+  // cached script left the flag set), a timestamp older than the ~40s locator
   // ceiling means "stale", not "in progress" — reset so the button works.
   if (gpsLocateBusy && (Date.now() - gpsLocateStartedAt) > 45000) {
     try { if (typeof gpsLog === 'function') gpsLog('stale busy flag reset (>45s) — previous run never finished', 'dbg-warn'); } catch (e) {}
@@ -3020,6 +3080,7 @@ async function useCurrentLocation(viaAuto) {
   gpsLocateStartedAt = Date.now();
   setGPSButtonState('locating');
   setLocateBar(null, viaAuto ? 'Finding your location…' : 'Getting your location…');
+  gpsElapsedStart(!!viaAuto);
   // TEMP debug trace (remove with gpsLog) — full request context.
   gpsLog((viaAuto ? 'AUTO' : 'MANUAL') + ' locate start | api=' + (LocationService.isGeolocationSupported() ? 'YES' : 'NO')
     + ' secure=' + (window.isSecureContext ? 'YES' : 'NO')
@@ -3050,6 +3111,7 @@ async function useCurrentLocation(viaAuto) {
       + ' | ' + ((err && err.message) || 'no message'), 'dbg-err');
     handleGPSFailure(err, viaAuto);
   } finally {
+    gpsElapsedStop();
     gpsLocateBusy = false;
     gpsLocateStartedAt = 0;
     // A manual tap queued behind the gate-open auto run — handoff: the auto
@@ -3077,17 +3139,25 @@ function initLeafletMap() {
     const mapEl = $id('loc-map');
     if (!mapEl || typeof L === 'undefined') throw new Error('Leaflet not available');
 
-    locMap = L.map('loc-map', { scrollWheelZoom: false, zoomControl: true })
+    // Phone-friendly map: finger drag pans, pinch zooms, single tap drops the
+    // pin. tapTolerance widens the tap target for fat fingers; the loading
+    // class shows a placeholder until real tiles paint.
+    mapEl.classList.add('loc-map-loading');
+    locMap = L.map('loc-map', { scrollWheelZoom: false, zoomControl: true, tapTolerance: 22, dragging: true, touchZoom: true })
       .setView([STORE_LOCATION.lat, STORE_LOCATION.lng], 14);
     // Expose globally for console debugging
     window.locMap = locMap;
     window.setMapPin = setMapPin;
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(locMap);
+    });
+    tiles.on('load', () => { try { mapEl.classList.remove('loc-map-loading'); } catch (e) {} });
+    tiles.addTo(locMap);
+    setTimeout(() => { try { mapEl.classList.remove('loc-map-loading'); } catch (e) {} }, 6000);
 
-    // Tap anywhere to drop/move the pin.
+    // Tap anywhere to drop/move the pin. A draggable marker + reverse-geocode
+    // on dragend lets phone users fine-tune a coarse GPS fix precisely.
     locMap.on('click', (e) => {
       setMapPin({ lat: e.latlng.lat, lng: e.latlng.lng }, false);
     });
@@ -3504,6 +3574,10 @@ async function init() {
 
   // Detect Messenger in parallel
   const messengerDetection = detectMessenger();
+
+  // Pre-warm the GPS provider while the catalog loads — by the time the
+  // customer taps "Use my current location", the OS already has a fix warm.
+  try { warmUpGpsProvider(); } catch (e) {}
 
   // Check if webview is enabled
   let enabled = true;

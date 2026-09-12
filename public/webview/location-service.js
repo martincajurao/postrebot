@@ -19,10 +19,10 @@ const LocationService = (() => {
   // routinely takes 20-30s, while desktop (WiFi-based) answers in ~1s.
   const CONFIG = {
     GPS_TIMEOUT_MS: 10000,          // legacy alias (kept for compat)
-    QUICK_TIMEOUT_MS: 10000,         // stage 1: one-shot low-accuracy (cell/WiFi) fix — fast indoors
-    WATCH_WINDOW_MS: 25000,            // stage 2: persistent watch window (provider accumulates fix)
-    WATCH_ACCEPTABLE_M: 2500,          // mid-window coarse fix this good (or better) is usable
-    MAX_CACHED_AGE_MS: 120000,         // accept a cached fix up to 2 min old (fast re-taps)
+    QUICK_TIMEOUT_MS: 8000,          // stage 1: one-shot low-accuracy (cell/WiFi) fix — fast indoors
+    WATCH_WINDOW_MS: 20000,          // stage 2: persistent watch window (provider accumulates fix)
+    WATCH_ACCEPTABLE_M: 1000,        // mid-window coarse fix this good (or better) is usable
+    MAX_CACHED_AGE_MS: 30000,        // accept a cached fix up to 30s old (older fixes mis-pin phones that moved)
     MAX_ACCURACY_METERS: 3000,
     MAX_POSITION_AGE_MS: 60000,
     IP_GEOCODE_TIMEOUT_MS: 8000,
@@ -138,6 +138,18 @@ const LocationService = (() => {
     }
   }
 
+  // Convert a GeolocationPosition into our plain {lat,lng,...} shape.
+  function toCoords(position) {
+    const c = (position && position.coords) || {};
+    return {
+      lat: c.latitude,
+      lng: c.longitude,
+      accuracy: c.accuracy,
+      timestamp: (position && position.timestamp) || Date.now(),
+      source: 'gps',
+    };
+  }
+
   // Get current position using REAL GPS — two staged attempts:
   //   1. enableHighAccuracy:true  (real satellite fix, slow but precise)
   //   2. enableHighAccuracy:false (cell/WiFi fix, fast but coarse)
@@ -158,14 +170,19 @@ function getGPSPosition() {
       }
       const startedAt = Date.now();
       let settled = false;
-      let watchId = null; let tm = null;
-      let best = null;
+      let watchId = null; let tm = null; let stage1Timer = null;
+      let best = null; let stage = 1;
       const log = (m, c) => { try { if (window.__gpsLog) window.__gpsLog(m, c, 'WATCH'); } catch (e) {} };
+      const cleanup = () => {
+        try { if (watchId !== null && watchId !== undefined) navigator.geolocation.clearWatch(watchId); } catch (e) {}
+        watchId = null;
+        if (tm) { clearTimeout(tm); tm = null; }
+        if (stage1Timer) { clearTimeout(stage1Timer); stage1Timer = null; }
+      };
       const ok = (coords, why) => {
         if (settled) return;
         settled = true;
-        try { if (watchId !== null) navigator.geolocation.clearWatch(watchId); } catch (e) {}
-        clearTimeout(tm);
+        cleanup();
         _permissionState = 'granted';
         _lastGPSPosition = coords;
         log('GPS fix OK lat=' + coords.lat + ' lng=' + coords.lng + ' acc=~' + Math.round(coords.accuracy) + 'm elapsed=' + (Date.now() - startedAt) + 'ms (' + why + ')', 'dbg-ok');
@@ -174,8 +191,7 @@ function getGPSPosition() {
       const bad = (err) => {
         if (settled) return;
         settled = true;
-        try { if (watchId !== null) navigator.geolocation.clearWatch(watchId); } catch (e) {}
-        clearTimeout(tm);
+        cleanup();
         err._elapsedMs = Date.now() - startedAt;
         _permissionState = err.code === ErrorCodes.PERMISSION_DENIED ? 'denied' : err.code === ErrorCodes.TIMEOUT ? 'timeout' : 'unavailable';
         log('FAILED code=' + err.code + ' raw=' + (err._rawCode || '-') + ' fastFail=' + (err._fastFail || '-') + ' elapsed=' + err._elapsedMs + 'ms | ' + err.message, 'dbg-err');
@@ -195,14 +211,39 @@ function getGPSPosition() {
       };
       _permissionState = 'checking';
       log('GPS stage 1/2: one-shot low-accuracy');
+      // PHONE SAFETY: some Android WebViews / Messenger in-app browsers NEVER
+      // call either callback of getCurrentPosition (no timeout fires). Our own
+      // watchdog guarantees stage 2 always starts.
+      stage = 1;
+      stage1Timer = setTimeout(() => {
+        if (settled || stage !== 1) return;
+        log('GPS stage 1 watchdog fired (no callback) - moving to watch', 'dbg-warn');
+        startWatch();
+      }, CONFIG.QUICK_TIMEOUT_MS + 4000);
+      try {
       navigator.geolocation.getCurrentPosition(
         function (position) {
+          if (settled || stage !== 1) return;
+          stage = 0; // stage 1 answered - watch path no longer needed
+          if (stage1Timer) { clearTimeout(stage1Timer); stage1Timer = null; }
           var c = position.coords;
           var atMs = Date.now() - startedAt;
           log('GPS stage 1 OK acc=~' + Math.round(c.accuracy) + 'm elapsed=' + atMs + 'ms', 'dbg-ok');
-          ok(toCoords(position), 'quick');
+          // A wildly coarse stage-1 fix (cell-tower km-level) is worse than
+          // waiting a few more seconds for the watch — hold it as fallback
+          // and let stage 2 refine it instead of pinning the wrong street.
+          var quick = toCoords(position);
+          if (Number.isFinite(quick.accuracy) && quick.accuracy > CONFIG.WATCH_ACCEPTABLE_M) {
+            best = quick;
+            log('GPS stage 1 too coarse (~' + Math.round(quick.accuracy) + 'm) - holding, refining via watch', 'dbg-warn');
+            startWatch();
+            return;
+          }
+          ok(quick, 'quick');
         },
         function (raw) {
+          if (settled || stage !== 1) return;
+          if (stage1Timer) { clearTimeout(stage1Timer); stage1Timer = null; }
           var atMs = Date.now() - startedAt;
           log('GPS stage 1 ERR rawCode=' + (raw && raw.code) + ' elapsed=' + atMs + 'ms', 'dbg-err');
           if (raw && raw.code === 1) { bad(classify(raw, atMs)); return; }
@@ -210,8 +251,21 @@ function getGPSPosition() {
         },
         { enableHighAccuracy: false, timeout: CONFIG.QUICK_TIMEOUT_MS, maximumAge: CONFIG.MAX_CACHED_AGE_MS }
       );
+      } catch (e) { if (stage1Timer) { clearTimeout(stage1Timer); stage1Timer = null; } startWatch(); }
       function startWatch() {
+      if (settled) return;
+      if (stage === 2) return; // never start the watch twice
+      stage = 2;
+      if (stage1Timer) { clearTimeout(stage1Timer); stage1Timer = null; }
       log('GPS stage 2/2: watch window=' + CONFIG.WATCH_WINDOW_MS + 'ms');
+      // HARD CEILING: guarantees the promise ALWAYS settles even if the
+      // provider goes completely silent (common on phones with Location OFF
+      // where some WebViews never invoke error callbacks).
+      tm = setTimeout(() => {
+        if (settled) return;
+        if (best) { log('window ended - using best coarse fix acc=~' + Math.round(best.accuracy) + 'm', 'dbg-warn'); ok(best, 'best-coarse'); }
+        else bad({ code: ErrorCodes.TIMEOUT, message: 'Getting your location took too long. Make sure Location is ON with a clear sky view, then try again - or tap your location on the map below.', canRetry: true, _rawCode: 3, _fastFail: false });
+      }, CONFIG.QUICK_TIMEOUT_MS + CONFIG.WATCH_WINDOW_MS + 5000);
       try {
         watchId = navigator.geolocation.watchPosition(
           (pos) => {
@@ -220,6 +274,7 @@ function getGPSPosition() {
             if (!Number.isFinite(la) || !Number.isFinite(ln)) return;
             const c = { lat: la, lng: ln, accuracy: ac, timestamp: pos.timestamp, source: 'gps' };
             log('fix update acc=~' + Math.round(ac) + 'm elapsed=' + el + 'ms');
+            try { if (typeof window.__gpsProgress === 'function') window.__gpsProgress(c); } catch (e) {}
             if (Number.isFinite(ac) && ac <= 60) ok(c, 'precise');
             else if (Number.isFinite(ac) && ac <= CONFIG.WATCH_ACCEPTABLE_M) {
               if (!best || ac < best.accuracy) best = c;
@@ -231,13 +286,9 @@ function getGPSPosition() {
             log('provider ERR rawCode=' + (raw && raw.code) + ' msg=' + (raw && raw.message) + ' elapsed=' + el + 'ms', 'dbg-err');
             if (raw && raw.code === 1) bad(classify(raw, el));
           },
-          { enableHighAccuracy: true, timeout: CONFIG.WATCH_WINDOW_MS, maximumAge: CONFIG.MAX_CACHED_AGE_MS }
+          { enableHighAccuracy: true, timeout: CONFIG.WATCH_WINDOW_MS, maximumAge: 0 }
         );
       } catch (e) { bad(classify({ code: 2, message: String((e && e.message) || e) }, 0)); return; }
-      tm = setTimeout(() => {
-        if (best) { log('window ended - using best coarse fix acc=~' + Math.round(best.accuracy) + 'm', 'dbg-warn'); ok(best, 'best-coarse'); }
-        else bad({ code: ErrorCodes.TIMEOUT, message: 'Getting your location took too long. Make sure Location is ON with a clear sky view, then try again - or tap your location on the map below.', canRetry: true, _rawCode: 3, _fastFail: false });
-      }, CONFIG.WATCH_WINDOW_MS);
       } // end startWatch
     }); // end Promise executor
   } // end getGPSPosition
@@ -362,9 +413,15 @@ function getGPSPosition() {
 
   // Check if a location is valid for delivery
   function isValidLocation(location) {
-    return location && 
-           Number.isFinite(location.lat) && 
-           Number.isFinite(location.lng);
+    if (!location) return false;
+    const lat = Number(location.lat);
+    const lng = Number(location.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    // Phones with Location OFF sometimes hand back a (0,0) "Null Island"
+    // fix — never accept it as a delivery point.
+    if (lat === 0 && lng === 0) return false;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+    return true;
   }
 
   // Get user-friendly permission guidance based on browser

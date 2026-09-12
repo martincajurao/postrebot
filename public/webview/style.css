@@ -2734,11 +2734,28 @@ img.img-skel {
   position: relative;
   z-index: 1;
   height: 210px;
+  min-height: 210px;
   border-radius: 14px;
   border: 1px solid #eadedb;
   background: #eef2f5;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55), 0 4px 14px rgba(45, 52, 54, 0.08);
   overflow: hidden;
+}
+
+/* Crosswalk loading placeholder — swapped out once Leaflet paints tiles.
+   Phones on slow data stare at a grey box otherwise. */
+#loc-map.loc-map-loading::before {
+  content: '🗺️ Loading map…';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  color: #636e72;
+  background: #eef2f5;
+  z-index: 500;
+  pointer-events: none;
 }
 
 /* The map owns its own gestures — don't let map drags scroll the sheet. */
