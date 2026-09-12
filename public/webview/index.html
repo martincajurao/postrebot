@@ -342,6 +342,18 @@
           <span id="loc-browser-label">Set my location in phone browser</span>
         </button>
 
+        <!-- Shown when webview GPS fails: the locate button is replaced by
+             these steps (the capture page saves the spot server-side and it
+             shows up in the Saved locations chips below). -->
+        <div id="loc-browser-instr" class="loc-browser-instr hidden">
+          <p class="loc-browser-instr-title">📍 GPS can't run inside this app</p>
+          <ol>
+            <li>Tap <b>Set my location in phone browser</b> below</li>
+            <li>Allow location when your browser asks — it saves automatically ✓</li>
+            <li>Come back — your spot appears in <b>Saved locations</b> below, ready to tap</li>
+          </ol>
+        </div>
+
         <!-- Locate status bar: progress, success, accuracy readout (±m), retry, errors. -->
         <div id="loc-autodetect" class="loc-autodetect hidden">
           <span class="loc-autodetect-icon">📍</span>
@@ -397,6 +409,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260912-13"></script>
+  <script src="app.js?v=20260912-14"></script>
 </body>
 </html>

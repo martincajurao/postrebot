@@ -2638,6 +2638,20 @@ img.img-skel {
 .loc-browser-btn { margin-top: 8px; }
 .loc-browser-btn.hidden { display: none; }
 .loc-browser-btn.is-locating { display: none; }
+/* GPS-failure instruction block (webview): replaces the locate button */
+.loc-browser-instr {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed #e4c4b8;
+  border-radius: 12px;
+  background: #fffbf8;
+  text-align: left;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.loc-browser-instr.hidden { display: none; }
+.loc-browser-instr-title { color: #a93226; font-weight: 700; margin-bottom: 4px; }
+.loc-browser-instr ol { margin: 0; padding-left: 18px; color: #6d3f3a; }
 
 .loc-divider {
   display: flex;

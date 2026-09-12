@@ -2339,6 +2339,33 @@ function showOpenInBrowserHelp() {
   } catch (e) {}
 }
 
+/** Webview GPS failed → swap the locate button for the phone-browser
+ *  instruction block. Self-gated: no-ops outside Messenger/Android webviews
+ *  (where GPS works and retry is the right affordance). */
+function showBrowserInstruction() {
+  try {
+    const inMessenger = (typeof detectMessengerUserAgent === 'function' && detectMessengerUserAgent()) || isAndroidWebView();
+    if (!inMessenger) return;
+    const gpsBtn = $id('loc-gps-btn');
+    const instr = $id('loc-browser-instr');
+    const browserBtn = $id('loc-browser-btn');
+    if (gpsBtn) gpsBtn.classList.add('hidden');
+    if (instr) instr.classList.remove('hidden');
+    if (browserBtn) browserBtn.classList.remove('hidden');
+    setRetryVisible(false); // a Retry tap can never work here — don't offer it
+  } catch (e) {}
+}
+
+/** Restore the locate button (GPS succeeded, or a fresh gate open). */
+function hideBrowserInstruction() {
+  try {
+    const gpsBtn = $id('loc-gps-btn');
+    const instr = $id('loc-browser-instr');
+    if (gpsBtn) gpsBtn.classList.remove('hidden');
+    if (instr) instr.classList.add('hidden');
+  } catch (e) {}
+}
+
 /** Wait up to ~2s for the MessengerExtensions SDK, then resolve detection. */
 async function detectMessenger() {
   if (window.__messengerExtensionsReady) return true;
@@ -2814,6 +2841,7 @@ function showLocationGate() {
       browserBtn.classList.toggle('hidden', !inMessenger);
     }
   } catch (e) {}
+  hideBrowserInstruction(); // fresh open always starts with the locate button
 
   // If this session already has a location saved server-side (browser capture
   // or an earlier confirm), prefill the pin so Android users don't have to
@@ -3010,6 +3038,7 @@ function hidePermissionHelp() {
 /** Success path shared by the auto attempt and the button: remember the fix,
  *  pin + zoom the map, show accuracy, then reverse-geocode (best-effort). */
 function applyGPSFix(position, wasAuto) {
+  hideBrowserInstruction(); // success → bring the locate button back
   // Handoff (see useCurrentLocation): a manual tap arrived while the quiet
   // auto attempt was running — the auto fix just landed, so immediately run
   // one REAL manual attempt so the customer gets their explicit result
@@ -3148,6 +3177,9 @@ function handleGPSFailure(err, viaAuto) {
   }
   // Every failure except "no GPS support at all" is worth one retry tap.
   setRetryVisible(code !== E.API_UNSUPPORTED && code !== E.SECURE_CONTEXT_REQUIRED);
+  // Webview: the locate button can never succeed here — replace it with the
+  // phone-browser instruction (no-ops on iOS/desktop where retry is valid).
+  if (!viaAuto) showBrowserInstruction();
   console.warn('[webview] locate failed —', code, err && err.message);
   focusMap();
 }
@@ -3220,6 +3252,7 @@ async function useCurrentLocation(viaAuto) {
         setLocateBar('error', "📍 GPS is blocked here — tap 'Set my location in phone browser' below, or drop your pin on the map");
         setRetryVisible(false);
         showOpenInBrowserHelp();
+        showBrowserInstruction();
         focusMap();
         return;
       }
