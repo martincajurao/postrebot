@@ -44,7 +44,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 // Webview ordering interface (REST API + static frontend)
 app.use('/api/webview', webviewApi);
 
-// Middleware to configure frame permissions specifically for Messenger webview:
+// Middleware to configure frame permissasdasdsaions specifically for Messenger webview:
 // On Desktop Messenger (facebook.com / messenger.com), the webview is embedded in an iframe.
 // We must allow Meta domains in CSP frame-ancestors and ensure X-Frame-Options does not block framing.
 const allowMessengerFraming = (_req: express.Request, res: express.Response, next: express.NextFunction) => {
