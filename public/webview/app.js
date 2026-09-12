@@ -2745,7 +2745,12 @@ function setGPSButtonState(state) {
   const label = $id('loc-gps-label');
   const icon = $id('loc-gps-icon');
   if (!btn) return;
-  btn.disabled = state === 'locating';
+  // NEVER hard-disable the button: a disabled button swallows taps silently
+  // (no onclick at all), which is exactly the "dead button" during the ~30s
+  // gate-open auto attempt. Keep it tappable; the busy guard in
+  // useCurrentLocation() queues manual taps instead of dropping them.
+  btn.disabled = false;
+  btn.setAttribute('aria-disabled', state === 'locating' ? 'true' : 'false');
   btn.classList.toggle('is-locating', state === 'locating');
   btn.classList.toggle('is-success', state === 'success');
   if (label) {
@@ -2977,7 +2982,13 @@ async function useCurrentLocation(viaAuto) {
   // remember it and let the finishing auto attempt rerun it as a manual
   // one (see the handoff in handleGPSFailure/applyGPSFix).
   if (gpsLocateBusy) {
-    if (!viaAuto) gpsRerunManual = true;
+    if (!viaAuto) {
+      gpsRerunManual = true;
+      // Tell them the tap landed — a silent no-op feels exactly like a dead
+      // button. The queued manual attempt runs when the auto one finishes.
+      setLocateBar(null, 'Noted — starting your location request right after this one…');
+      try { if (typeof gpsLog === 'function') gpsLog('MANUAL tap queued (auto in progress) — will rerun as real attempt', 'dbg-warn'); } catch (e) {}
+    }
     return;
   }
 
