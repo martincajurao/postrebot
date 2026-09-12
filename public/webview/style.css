@@ -2582,63 +2582,6 @@ img.img-skel {
 .loc-retry-btn:active { transform: scale(0.95); }
 .loc-retry-btn.hidden { display: none; }
 
-/* GPS debug log (TEMPORARY testing aid — REMOVE BEFORE PRODUCTION) */
-.loc-debug-toggle {
-  display: block;
-  margin: 6px 0 0 auto;
-  padding: 2px 6px;
-  border: none;
-  background: transparent;
-  color: #b2bec3;
-  font-family: inherit;
-  font-size: 0.68rem;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.loc-debug {
-  margin: 8px 0 0;
-  border: 1px solid #dfe6e9;
-  border-radius: 10px;
-  background: #2d3436;
-  overflow: hidden;
-  text-align: left;
-}
-.loc-debug.hidden { display: none; }
-.loc-debug-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  background: #636e72;
-  color: #fff;
-  font-size: 0.72rem;
-}
-.loc-debug-clear {
-  padding: 2px 8px;
-  border: none;
-  border-radius: 6px;
-  background: #b2bec3;
-  color: #2d3436;
-  font-family: inherit;
-  font-size: 0.68rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-.loc-debug-log {
-  max-height: 220px;
-  overflow-y: auto;
-  padding: 8px 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.66rem;
-  line-height: 1.6;
-  color: #dfe6e9;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.loc-debug-log .dbg-ok { color: #55efc4; }
-.loc-debug-log .dbg-err { color: #ff7675; }
-.loc-debug-log .dbg-warn { color: #ffeaa7; }
-
 /* Blocked-permission help panel (per-platform re-enable steps) */
 .loc-perm-help {
   margin: 10px 0 0;

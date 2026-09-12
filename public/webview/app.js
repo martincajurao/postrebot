@@ -3062,16 +3062,16 @@ function applyGPSFix(position, wasAuto) {
     });
 }
 
-/** TEMPORARY testing aid — timestamped GPS trace (REMOVE BEFORE PRODUCTION).
+/** GPS debug trace — production-hidden (set GPS_DEBUG=true to re-enable during
+ *  future testing, or via localStorage: localStorage.setItem('gps_debug','1')).
  *  gpsLog(line, cls): append one line; toggleGPSDebugLog/clearGPSDebugLog
- *  drive the collapsible panel. Auto-opens on the first logged line so the
- *  user never has to hunt for it mid-test. */
+ *  drive the collapsible panel (no-op while hidden). */
+const GPS_DEBUG = (() => { try { return localStorage.getItem('gps_debug') === '1'; } catch (e) { return false; } })();
 function gpsLog(line, cls) {
+  if (!GPS_DEBUG) return;
   try {
-    const panel = $id('loc-debug');
     const box = $id('loc-debug-log');
     if (!box) return;
-    if (panel && panel.classList.contains('hidden')) panel.classList.remove('hidden');
     const t = new Date();
     const ts = String(t.getMinutes()).padStart(2, '0') + ':' + String(t.getSeconds()).padStart(2, '0') + '.' + String(t.getMilliseconds()).padStart(3, '0');
     const div = document.createElement('div');
@@ -3083,17 +3083,9 @@ function gpsLog(line, cls) {
     while (box.children.length > 200) box.removeChild(box.firstChild);
   } catch (e) { /* logging must never break locating */ }
 }
-function toggleGPSDebugLog() {
-  const panel = $id('loc-debug');
-  if (panel) panel.classList.toggle('hidden');
-}
-function clearGPSDebugLog() {
-  const box = $id('loc-debug-log');
-  if (box) box.innerHTML = '';
-}
-/** TEMP bridge — exposes the debug logger to location-service.js stage
- *  traces (REMOVE WITH gpsLog BEFORE PRODUCTION). Signature:
- *  __gpsLog(line, cls, stage). */
+function toggleGPSDebugLog() {}
+function clearGPSDebugLog() {}
+/** Bridge to location-service.js stage traces — no-op unless GPS_DEBUG is on. */
 window.__gpsLog = function (line, cls, stage) {
   gpsLog((stage ? '[' + stage + '] ' : '') + line, cls || undefined);
 };
