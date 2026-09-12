@@ -2674,16 +2674,14 @@ function showLocationGate() {
   if (!gate) return;
   const mainContent = $id('main-content');
   if (mainContent) mainContent.classList.add('hidden');
-  // Prefill from the address remembered at checkout so repeat customers
-  // only need to drop/keep the pin and confirm.
+  // Prefill the resolved address from the address remembered at checkout or
+  // the previously saved gate location, so repeat customers only need to
+  // re-confirm (or adjust the pin / landmark).
   const remembered = loadCustomerData();
-  if (remembered && remembered.address) $id('loc-address').value = remembered.address;
-  // Pre-fill from a previously saved gate location too, and restore the pin
-  // on the map so the customer sees their saved spot visually.
   const saved = getSavedLocation();
-  if (saved && saved.address && !$id('loc-address').value) {
-    $id('loc-address').value = saved.address;
-  }
+  pendingAddress = null;
+  pendingAddressFromUser = false;
+  setPendingAddress((remembered && remembered.address) || (saved && saved.address) || null);
   // Returning customer → show their saved addresses for one-tap selection.
   renderSavedLocations();
   forceHeaderVisible(); // never let the header hide while the gate is open
@@ -2713,12 +2711,6 @@ function showLocationGate() {
     }
   });
 
-  // Re-validate the confirm button as the address is typed.
-  const addrEl = $id('loc-address');
-  if (addrEl && !addrEl.dataset.locBound) {
-    addrEl.dataset.locBound = '1';
-    addrEl.addEventListener('input', updateLocConfirmState);
-  }
   // Wire up Nominatim address search on the search box.
   const searchEl = $id('loc-search');
   if (searchEl && !searchEl.dataset.locBound) {
@@ -2859,20 +2851,18 @@ function applyGPSFix(position) {
     ? '📍 Approximate location found — please verify it on the map'
     : '📍 Location found — check it and confirm');
 
-  // Name the fix: pre-fill address + search only if empty — never stomping on
-  // what the customer already typed.
+  // Name the fix (reverse-geocode, best effort). Auto names never stomp an
+  // explicit customer choice (search pick).
   reverseGeocode(position.lat, position.lng)
     .then((address) => {
-      const addrEl = $id('loc-address');
-      if (addrEl && !addrEl.value.trim()) addrEl.value = address;
+      setPendingAddress(address);
       const searchEl = $id('loc-search');
       if (searchEl && !searchEl.value.trim()) searchEl.value = address;
-      updateLocConfirmState();
     })
     .catch(() => {
       setLocateBar('success', isCoarse
-        ? '✓ Position found — complete your address below'
-        : '✓ Location found — complete your address below');
+        ? '✓ Position found — add a landmark below'
+        : '✓ Location found — add a landmark below');
     });
 }
 
@@ -3035,6 +3025,36 @@ function hideLocError() {
 let pendingCoords = null;
 // Where the point came from: 'gps' or 'pin' (map tap/drag).
 let pinSource = null;
+// Named address resolved for the chosen point — from reverse-geocoding the
+// GPS fix / map pin, a search-result pick, or the gate prefill. The old
+// editable "Complete address" textarea was removed: the pin, the search and
+// the landmark carry the information now, so this lives in state instead.
+let pendingAddress = null;
+// True once the customer explicitly picked an address (search result) —
+// later auto-geocoding never overwrites an explicit choice.
+let pendingAddressFromUser = false;
+
+/** Store/show the resolved address. fromUser=true marks an explicit customer
+ *  choice (search pick) that subsequent auto-geocoding must not stomp. */
+function setPendingAddress(addr, fromUser) {
+  const text = (addr && String(addr).trim()) || null;
+  if (fromUser) {
+    pendingAddressFromUser = true;
+    pendingAddress = text;
+  } else if (!pendingAddressFromUser) {
+    pendingAddress = text;
+  }
+  const view = $id('loc-resolved');
+  if (view) {
+    if (pendingAddress) {
+      view.textContent = '📍 ' + pendingAddress;
+      view.classList.remove('hidden');
+    } else {
+      view.classList.add('hidden');
+    }
+  }
+  updateLocConfirmState();
+}
 
 /** Drop/move the pin and remember the chosen point. */
 /** Smoothly zoom the map into the pinned coordinates. Works around the two
@@ -3098,11 +3118,9 @@ function setMapPin(latlng, fromGps) {
       new Promise((_, reject) => setTimeout(() => reject(new Error('geocode-timeout')), 5000)),
     ])
       .then((addr) => {
-        const el = $id('loc-address');
-        if (el && !el.value.trim()) el.value = addr;
-        updateLocConfirmState();
+        setPendingAddress(addr);
       })
-      .catch(() => { /* offline / rate-limited/timeout — address stays hand-typed */ });
+      .catch(() => { /* offline / rate-limited/timeout — the pin still carries the spot */ });
   }
 }
 
@@ -3152,16 +3170,12 @@ async function geocodeAddress(query) {
   })).filter((r) => r.lat && r.lng);
 }
 
-/** Drop the pin from a search result, fill the address, and pan the map. */
+/** Drop the pin from a search result, name the address, and pan the map. */
 function selectSearchResult(result) {
   if (!result || !result.lat || !result.lng) return;
   const coords = { lat: result.lat, lng: result.lng };
   zoomMapToPin(coords, 16, true, false);
-  const addrEl = $id('loc-address');
-  if (addrEl) {
-    addrEl.value = result.label;
-    updateLocConfirmState();
-  }
+  setPendingAddress(result.label, true);
   hideLocError();
 }
 
@@ -3236,13 +3250,12 @@ function updateLocConfirmState() {
     pendingCoords && Number.isFinite(pendingCoords.lng) ? pendingCoords.lng : null,
   );
   if (!mapAvailable()) { status.textContent = ''; return; }
-  const address = (($id('loc-address') && $id('loc-address').value) || '').trim();
-  const hasAddress = address.length >= 5;
-  status.classList.toggle('loc-status-ok', !!pendingCoords && hasAddress);
-  if (!pendingCoords) {
+  const hasSpot = !!pendingCoords || !!pendingAddress;
+  status.classList.toggle('loc-status-ok', hasSpot);
+  if (!hasSpot) {
     status.textContent = '📍 Tap the map, search, or use the GPS button above';
-  } else if (!hasAddress) {
-    status.textContent = '✓ Pin saved — now complete your address below';
+  } else if (!pendingAddress) {
+    status.textContent = '✓ Spot set — add a landmark below so the rider finds you';
   } else {
     status.textContent = '✓ Location set — ready to confirm!';
   }
@@ -3251,13 +3264,20 @@ function updateLocConfirmState() {
 /** Confirm button — validate and persist the delivery location, then unlock home. */
 async function confirmLocation() {
   hideLocError();
-  const address = (($id('loc-address') && $id('loc-address').value) || '').trim();
-  if (address.length < 5) {
-    showLocError('Please enter your complete address (house #, street, barangay, city).');
+  const landmark = (($id('loc-landmark') && $id('loc-landmark').value) || '').trim();
+  // Address resolution order: named address (GPS/search/pin) — landmark —
+  // coordinate label. With the editable address field gone, the pin, the
+  // search and the landmark carry the delivery information.
+  const address = pendingAddress
+    || (landmark ? 'Near ' + landmark : null)
+    || (pendingCoords ? 'Pinned location (' + formatCoords(pendingCoords.lat, pendingCoords.lng) + ')' : null);
+  if (!address) {
+    showLocError('Set your delivery spot first — use the GPS button, tap the map, search, or type a landmark below.');
     return;
   }
-  // FIX: Accept any valid location source (GPS, IP, or map pin)
-  if (!pendingCoords || !LocationService.isValidLocation(pendingCoords)) {
+  // FIX: Accept any valid location source (GPS, IP, or map pin). A landmark
+  // alone (no pin) is accepted as a manual, coordinate-less location.
+  if (pendingCoords && !LocationService.isValidLocation(pendingCoords)) {
     showLocError('Please set your location first \u2014 tap the map or use "Use my current location".', true);
     return;
   }
@@ -3271,7 +3291,6 @@ async function confirmLocation() {
   if (locationPermissionState === 'unknown' && pinSource === 'gps') {
     locationPermissionState = 'granted';
   }
-  const landmark = (($id('loc-landmark') && $id('loc-landmark').value) || '').trim();
   saveLocation({
     address,
     landmark: landmark || null,
@@ -3292,6 +3311,8 @@ async function confirmLocation() {
   const confirmedLng = pendingCoords ? pendingCoords.lng : null;
   pendingCoords = null;
   pinSource = null;
+  pendingAddress = null;
+  pendingAddressFromUser = false;
   hideLocationGate();
   updateLocationBar();
   showToast('📍 Location saved!');

@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260911-7">
+  <link rel="stylesheet" href="style.css?v=20260911-8">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -363,18 +363,15 @@
         <div class="loc-map-wrap" id="loc-map-wrap">
           <div id="loc-map" aria-label="Tap the map to set your delivery location"></div>
           <div id="loc-coords" class="loc-coords hidden" aria-live="polite"></div>
+          <div id="loc-resolved" class="loc-resolved hidden" aria-live="polite"></div>
           <p class="loc-map-hint" id="loc-status">📍 Tap the map to drop your pin — or search above</p>
         </div>
 
-        <div class="loc-divider"><span>then complete your address</span></div>
+        <div class="loc-divider"><span>add a landmark to help your rider (optional)</span></div>
 
         <div class="form-group">
-          <label for="loc-address">Complete address</label>
-          <textarea id="loc-address" rows="3" placeholder="House #, street, barangay, city"></textarea>
-        </div>
-        <div class="form-group">
-          <label for="loc-landmark">Landmark (optional)</label>
-          <input type="text" id="loc-landmark" placeholder="e.g. near Sto. Tomas Chapel">
+          <label for="loc-landmark">Landmark / delivery notes (optional)</label>
+          <input type="text" id="loc-landmark" placeholder="e.g. near Sto. Tomas Chapel, blue gate">
         </div>
 
         <p id="loc-gate-error" class="loc-gate-error hidden"></p>
@@ -387,6 +384,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260911-7"></script>
+  <script src="app.js?v=20260911-8"></script>
 </body>
 </html>

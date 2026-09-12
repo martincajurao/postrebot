@@ -2479,7 +2479,6 @@ img.img-skel {
 .loc-gps-btn:focus-visible,
 .loc-confirm-btn:focus-visible,
 #loc-search:focus-visible,
-#loc-address:focus-visible,
 #loc-landmark:focus-visible { outline: 3px solid rgba(231, 76, 60, 0.25); outline-offset: 2px; }
 
 .loc-gps-btn:active {
@@ -2549,6 +2548,19 @@ img.img-skel {
   font-variant-numeric: tabular-nums;
 }
 .loc-coords.hidden { display: none; }
+
+/* Resolved address readout (named via GPS/search/pin) — read-only */
+.loc-resolved {
+  margin: 4px auto 0;
+  max-width: 95%;
+  text-align: center;
+  font-size: 0.76rem;
+  color: #636e72;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loc-resolved.hidden { display: none; }
 
 /* Inline retry affordance in the status bar */
 .loc-retry-btn {
