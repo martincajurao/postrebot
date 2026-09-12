@@ -25,10 +25,13 @@ const LocationService = (() => {
     MAX_ACCURACY_METERS: 3000,
     MAX_POSITION_AGE_MS: 60000,
     IP_GEOCODE_TIMEOUT_MS: 8000,
-    // A POSITION_UNAVAILABLE that arrives this fast almost always means the
-    // phone's master Location switch is OFF (no provider to even query),
-    // not a real "couldn't fix" — surface it as GPS_DISABLED.
-    GPS_OFF_FAST_FAIL_MS: 3000,
+    // A POSITION_UNAVAILABLE or fast PERMISSION_DENIED that arrives this fast
+    // almost always means the phone's master Location switch is OFF (no
+    // provider to even query), not a real "couldn't fix" — surface it as
+    // GPS_DISABLED. There is no API that reads that switch directly, so
+    // timing is the only signal browsers give us. 5s covers both the
+    // instant-fail (switch off) and the fast-denied (OS-level block) cases.
+    GPS_OFF_FAST_FAIL_MS: 5000,
   };
 
   // Internal state
@@ -169,14 +172,20 @@ const LocationService = (() => {
       };
 
       // Classify a raw geolocation error. fastFail=true when the error
-      // arrived almost instantly (phone location services likely OFF).
+      // arrived almost instantly. Either POSITION_UNAVAILABLE or a fast
+      // PERMISSION_DENIED means the phone's master Location switch is
+      // likely OFF (Android/iOS report "switch off" as code 1 or 2 —
+      // never as a distinct code), so both surface as GPS_DISABLED.
       const classifyError = (error, fastFail) => {
         const err = handleGeolocationError(error);
-        if (err.code === ErrorCodes.PERMISSION_DENIED) {
+        if (err.code === ErrorCodes.PERMISSION_DENIED && !fastFail) {
+          // Denied AFTER the user was actually prompted (slow = they saw
+          // the dialog and tapped Block, or a site-level block).
           _permissionState = 'denied';
         } else if (err.code === ErrorCodes.TIMEOUT) {
           _permissionState = 'timeout';
-        } else if (err.code === ErrorCodes.POSITION_UNAVAILABLE && fastFail) {
+        } else if (fastFail && (err.code === ErrorCodes.POSITION_UNAVAILABLE ||
+                                err.code === ErrorCodes.PERMISSION_DENIED)) {
           _permissionState = 'unavailable';
           err.code = ErrorCodes.GPS_DISABLED;
           err.message = 'Phone location looks OFF — turn on Location Services, then tap Retry. Or tap the map below to set your location.';
@@ -217,14 +226,12 @@ const LocationService = (() => {
           },
           (error) => {
             console.log('[LocationService] GPS error:', error.code, error.message, 'highAccuracy:', enableHighAccuracy);
-            // PERMISSION_DENIED is final — retrying with another mode can't help.
-            if (error && error.code === 1) {
-              onDone(null, classifyError(error, false));
-              return;
-            }
-            // Otherwise hand control back; the caller decides whether to try
-            // the next stage or fail.
-            onDone(null, { _rawError: error });
+            // Hand control back with the raw error and its arrival time —
+            // the caller classifies it (fast deny/unavailable = switch OFF
+            // is only visible once both stages have had their chance, and
+            // PERMISSION_DENIED must still fall through to stage 2 so the
+            // fast-fail timer can see it).
+            onDone(null, { _rawError: error, _atMs: Date.now() });
           },
           {
             enableHighAccuracy: enableHighAccuracy,
@@ -248,13 +255,21 @@ const LocationService = (() => {
       // Stage 1: full-accuracy GPS fix (needs patience on phones).
       attempt(true, CONFIG.HIGH_ACCURACY_TIMEOUT_MS, (coords, err) => {
         if (coords) return finish(coords, false);
-        if (!err._rawError) return finish(err, true); // denied / invalid
+        if (!err._rawError) return finish(err, true); // invalid coords
+        // Fast PERMISSION_DENIED on stage 1 = OS-level block (switch OFF):
+        // fail immediately so the "location is OFF" error shows in ~1s
+        // instead of after both full timeouts (~37s of spinning).
+        const stage1Fast = (err._atMs - startTime) < CONFIG.GPS_OFF_FAST_FAIL_MS;
+        if (stage1Fast && err._rawError && err._rawError.code === 1) {
+          return finish(classifyError(err._rawError, true), true);
+        }
         // Stage 1 failed on timeout/unavailable — fall back to the fast,
         // low-accuracy mode rather than giving up (phones often answer here).
         attempt(false, CONFIG.LOW_ACCURACY_TIMEOUT_MS, (coords2, err2) => {
           if (coords2) return finish(coords2, false);
-          const raw = err2._rawError || err._rawError;
-          const fastFail = (Date.now() - startTime) < CONFIG.GPS_OFF_FAST_FAIL_MS;
+          const raw = (err2 && err2._rawError) || err._rawError;
+          const atMs = (err2 && err2._atMs) || err._atMs || Date.now();
+          const fastFail = (atMs - startTime) < CONFIG.GPS_OFF_FAST_FAIL_MS;
           finish(classifyError(raw, fastFail), true);
         });
       });
