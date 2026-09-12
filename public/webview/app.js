@@ -2340,12 +2340,11 @@ function showOpenInBrowserHelp() {
 }
 
 /** Webview GPS failed → swap the locate button for the phone-browser
- *  instruction block. Self-gated: no-ops outside Messenger/Android webviews
- *  (where GPS works and retry is the right affordance). */
+ *  instruction block. Runs on EVERY manual failure (per product decision):
+ *  inside Messenger the prompt can never appear, and even in real browsers
+ *  the capture page is a working fallback, so the card is always accurate. */
 function showBrowserInstruction() {
   try {
-    const inMessenger = (typeof detectMessengerUserAgent === 'function' && detectMessengerUserAgent()) || isAndroidWebView();
-    if (!inMessenger) return;
     const gpsBtn = $id('loc-gps-btn');
     const instr = $id('loc-browser-instr');
     const browserBtn = $id('loc-browser-btn');
