@@ -2285,26 +2285,35 @@ function probeGpsProvider() {
   });
 }
 
+/** URL of the standalone GPS capture page for this session. Opened in the
+ *  real phone browser (Chrome/Safari) where the location prompt actually
+ *  works — the page fixes the coordinates, saves them server-side for this
+ *  session, and the store prefills them on the next visit. */
+function gpsCaptureUrl() {
+  const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+  return base + 'gps.html?session=' + encodeURIComponent(sessionId);
+}
+
 /** "Open in Chrome" escape hatch for Android WebViews where GPS can never
- *  work (app-level location permission off / prompt swallowed). Tries a
- *  one-tap intent:// open in full Chrome; falls back to copying the page URL
- *  so the user can paste it into Chrome, where GPS works. */
+ *  work (app-level location permission off / prompt swallowed). Opens the
+ *  dedicated /gps.html capture page in the real browser via a one-tap
+ *  intent:// jump (fallback URL included for when Chrome isn't installed). */
 function openInChrome() {
   try {
-    const url = location.href;
+    const url = gpsCaptureUrl();
     const noScheme = url.replace(/^https?:\/\//i, '');
     const intentUrl = 'intent://' + noScheme +
       '#Intent;scheme=' + (location.protocol === 'http:' ? 'http' : 'https') +
       ';package=com.android.chrome;S.browser_fallback_url=' +
       encodeURIComponent(url) + ';end';
-    try { if (typeof gpsLog === 'function') gpsLog('opening in Chrome via intent', 'dbg-warn'); } catch (e) {}
+    try { if (typeof gpsLog === 'function') gpsLog('opening GPS capture page in Chrome via intent', 'dbg-warn'); } catch (e) {}
     window.location.href = intentUrl;
   } catch (e) {}
 }
 
 function showOpenInBrowserHelp() {
   try {
-    const url = location.href;
+    const url = gpsCaptureUrl();
     const ua = navigator.userAgent || '';
     const isAndroid = /Android/i.test(ua);
     // Show the one-tap button (declared in index.html) on Android only.
@@ -2325,10 +2334,8 @@ function showOpenInBrowserHelp() {
       }
     } catch (e) {}
     showLocError(isAndroid
-      // Location help copies — the native share is gone, so copy mentions a Google
-// Maps link where relevant.
-      ? 'No GPS here — Messenger is blocked from asking for location. Share a Google Maps link in this chat (or tap "Open in Chrome" below), then reopen the store. Or just tap your spot on the map.'
-      : 'GPS is blocked inside this in-app browser. Link copied — open Chrome, paste it there, and tap "Use my current location". Or just tap your spot on the map below.');
+      ? 'No GPS in this in-app browser. Tap "Open in Chrome" below — the page will find your spot and save it automatically. Or just tap your spot on the map.'
+      : 'GPS is blocked in this in-app browser. Link copied — open Chrome, paste it, and your location will be captured there. Or tap the map below.');
   } catch (e) {}
 }
 
@@ -2798,13 +2805,16 @@ function showLocationGate() {
   if (wrap) wrap.style.display = '';
 
   // Inside Messenger (and Android webviews above all) the browser GPS prompt
-  // can never appear — surface the chat link-share (Google Maps / Waze link
-  // pasted in chat) as a first-class alternative right next to the GPS button.
+  // can never appear — surface "Set my location in phone browser" (the
+  // gps.html capture page) as a first-class alternative next to the GPS
+  // button, with the chat link-share as a small backup link.
   try {
     const chatBtn = $id('loc-chat-btn');
-    if (chatBtn) {
+    const chatAlt = $id('loc-chat-alt');
+    if (chatBtn || chatAlt) {
       const inMessenger = (typeof detectMessengerUserAgent === 'function' && detectMessengerUserAgent()) || isAndroidWebView();
-      chatBtn.classList.toggle('hidden', !inMessenger);
+      if (chatBtn) chatBtn.classList.toggle('hidden', !inMessenger);
+      if (chatAlt) chatAlt.classList.toggle('hidden', !inMessenger);
     }
   } catch (e) {}
 
@@ -3218,7 +3228,7 @@ async function useCurrentLocation(viaAuto) {
       if (!alive) {
         try { if (typeof gpsLog === 'function') gpsLog('Android webview probe: provider silent — skipping GPS run', 'dbg-warn'); } catch (e) {}
         setGPSButtonState('idle');
-        setLocateBar('error', "📍 GPS is blocked in this in-app browser — tap 'Share my location in chat' below, or drop your pin on the map");
+        setLocateBar('error', "📍 GPS is blocked here — tap 'Set my location in phone browser' below, or drop your pin on the map");
         setRetryVisible(false);
         showOpenInBrowserHelp();
         focusMap();
@@ -3489,32 +3499,25 @@ async function loadChatLocationIntoGate(saved) {
     setCoordsDisplay(lat, lng);
     updateLocConfirmState();
     showToast('📍 Loaded your saved location — check the pin and confirm');
+    // Register the server pin as a saved-location chip so browser-captured /
+    // chat-shared spots also appear under "Saved locations" (they must
+    // survive device/storage loss, which localStorage-only entries wouldn't).
+    try {
+      const serverEntry = { address: loc.address || 'Saved location', lat, lng, source: 'gps' };
+      if (!getSavedLocations().some((l) => samePlace(l, serverEntry))) saveLocation(serverEntry);
+      renderSavedLocations();
+    } catch (e) {}
     try { if (typeof gpsLog === 'function') gpsLog('server location prefilled lat=' + lat + ' lng=' + lng, 'dbg-ok'); } catch (e) {}
   } catch (e) { /* no record / offline — the gate stays fully usable */ }
 }
 
-/** "Share my location in chat" — the in-Messenger GPS path that still works:
- *  Meta removed native location sharing to Pages, but a Google Maps / Waze
- *  LINK can still be shared in chat — the bot parses the coordinates from the
- *  link, saves them server-side, and the next gate open prefills the pin. */
+/** Backup path: toggle the Google-Maps link-share instructions (for when the
+ *  phone-browser capture isn't available). The pasted link is parsed by the
+ *  bot webhook, saved server-side, and prefilled on the next store open. */
 function useChatLocation() {
   try {
     const help = $id('loc-chat-help');
-    if (help) help.classList.remove('hidden');
-    setLocateBar('neutral', 'Paste a Google Maps / Waze link in the chat below, then reopen the store');
-    try { if (typeof gpsLog === 'function') gpsLog('chat-locate: link-share instructions shown', 'dbg-warn'); } catch (e) {}
-    // Drop them back into the conversation where they can paste the map link.
-    const ext = window.MessengerExtensions;
-    if (ext && typeof ext.requestCloseBrowser === 'function') {
-      try {
-        ext.requestCloseBrowser(
-          () => console.log('[webview] closed to chat for location link share'),
-          () => {}
-        );
-      } catch (e) {}
-    } else {
-      try { window.close(); } catch (e) {}
-    }
+    if (help) help.classList.toggle('hidden');
   } catch (e) {}
 }
 

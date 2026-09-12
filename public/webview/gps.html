@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Set your delivery location</title>
+  <!--
+    GPS capture page — the escape hatch for in-app browsers (Messenger on
+    Android) where the geolocation prompt can never appear: Android gates the
+    prompt behind the HOST APP's native permission, which Meta does not
+    implement. Opened in the REAL browser (Chrome/Safari) the prompt works,
+    so this page grabs the fix and saves it server-side under the same
+    webview session (?session=...). The store webview then prefills the pin
+    + saved location on the next visit.
+  -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(160deg, #fffbf8 0%, #fdecea 100%);
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px; color: #3d2420;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card {
+      width: 100%; max-width: 380px; text-align: center;
+      background: #fff; border: 1px solid #e4c4b8; border-radius: 20px;
+      padding: 28px 22px 24px; box-shadow: 0 10px 30px rgba(169, 50, 38, 0.10);
+    }
+    .icon { font-size: 44px; line-height: 1; margin-bottom: 14px; }
+    .icon.spin { animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+    h1 { font-size: 1.15rem; color: #a93226; margin-bottom: 8px; }
+    p.msg { font-size: 0.92rem; color: #6d3f3a; line-height: 1.55; min-height: 44px; }
+    .coords {
+      margin: 12px 0 4px; padding: 10px 12px; border-radius: 12px;
+      background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534;
+      font-size: 0.85rem; font-variant-numeric: tabular-nums; display: none;
+    }
+    .steps {
+      margin: 14px 0 4px; text-align: left; font-size: 0.85rem; color: #6d3f3a;
+      background: #fffbf8; border: 1px dashed #e4c4b8; border-radius: 12px;
+      padding: 12px 14px; display: none; line-height: 1.6;
+    }
+    .steps b { color: #a93226; }
+    button.btn {
+      display: block; width: 100%; margin-top: 14px; padding: 13px 0;
+      border: none; border-radius: 14px; font-size: 0.95rem; font-weight: 700;
+      cursor: pointer; transition: transform 0.08s ease, filter 0.15s ease;
+    }
+    button.btn:active { transform: scale(0.97); }
+    .btn-primary { background: #a93226; color: #fff; }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-messenger { background: #fdecea; color: #a93226; }
+    .btn-ghost { background: transparent; color: #9b8f8d; font-weight: 600; font-size: 0.82rem; }
+    .hidden { display: none !important; }
+    .details { margin-top: 12px; font-size: 0.72rem; color: #b2a49f; }
+    .details code { font-size: 0.7rem; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon" id="icon">📍</div>
+    <h1 id="title">Getting your location…</h1>
+    <p class="msg" id="msg">Tap <b>Allow</b> when your browser asks to use your location.</p>
+    <div class="coords" id="coords"></div>
+    <div class="steps" id="steps"></div>
+    <button type="button" class="btn btn-primary hidden" id="retry-btn">↻ Try again</button>
+    <button type="button" class="btn btn-messenger hidden" id="msgr-btn">💬 Return to Messenger</button>
+    <button type="button" class="btn btn-ghost hidden" id="again-btn">Re-capture my location</button>
+    <div class="details" id="details"></div>
+  </div>
+
+  <script>
+      (function () {
+      'use strict';
+      var $ = function (id) { return document.getElementById(id); };
+      var params = new URLSearchParams(location.search);
+      var session = (params.get('session') || '').trim();
+      var saving = false;
+
+      function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function showCoords(lat, lng, acc) {
+        var el = $('coords');
+        el.innerHTML = '📍 ' + lat.toFixed(5) + ', ' + lng.toFixed(5) +
+          (Number.isFinite(acc) ? '<br>accuracy ±' + Math.round(acc) + ' m' : '');
+        el.style.display = 'block';
+      }
+
+      /* Chrome closes single-tab windows opened via a link tap; if the
+       * browser refuses, the saved UI simply stays (with its buttons). */
+      function tryAutoClose() {
+        setTimeout(function () { try { window.close(); } catch (e) {} }, 2200);
+      }
+
+      /* One render per outcome; states map 1:1 to what can go wrong. */
+      function setUI(state, opts) {
+        opts = opts || {};
+        var icon = $('icon'), title = $('title'), msg = $('msg'), steps = $('steps'),
+            retry = $('retry-btn'), msgr = $('msgr-btn'), again = $('again-btn'),
+            details = $('details');
+        icon.classList.remove('spin');
+        steps.style.display = 'none';
+        retry.classList.add('hidden'); msgr.classList.add('hidden');
+        again.classList.add('hidden'); details.innerHTML = '';
+
+        if (state === 'locating') {
+          icon.textContent = '📡'; icon.classList.add('spin');
+          title.textContent = 'Getting your location…';
+          msg.innerHTML = 'Tap <b>Allow</b> when your browser asks to use your location.';
+        } else if (state === 'saving') {
+          icon.textContent = '💾';
+          title.textContent = 'Saving your spot…';
+          msg.textContent = 'One moment — writing your location to your order profile.';
+        } else if (state === 'saved') {
+          icon.textContent = '✅';
+          title.textContent = 'Location saved!';
+          msg.innerHTML = 'Your delivery spot is set.<br>Switch back to <b>Messenger</b> and reopen the store — your pin and saved address are already there.';
+          msgr.classList.remove('hidden');
+          again.classList.remove('hidden');
+          tryAutoClose();
+        } else if (state === 'denied') {
+          icon.textContent = '🚫';
+          title.textContent = 'Location was blocked';
+          msg.innerHTML = 'You tapped <b>Block</b> — or the browser remembered an old \u201cBlock\u201d choice.';
+          steps.innerHTML = '<b>To unblock:</b><br>' +
+            '1. Tap the <b>🔒 padlock</b> (or <b>⋮</b>) beside the address bar<br>' +
+            '2. <b>Site settings</b> → <b>Location</b> → <b>Allow</b><br>' +
+            '3. Reload this page and tap Allow';
+          steps.style.display = 'block';
+          retry.classList.remove('hidden');
+          if (opts.detail) details.innerHTML = '<code>' + esc(opts.detail) + '</code>';
+        } else if (state === 'gps-off') {
+          icon.textContent = '📴';
+          title.textContent = 'Phone location is OFF';
+          msg.innerHTML = 'Turn it on:<br>swipe down from the top of the screen → tap <b>Location</b> (or Settings → Location) → try again.';
+          retry.classList.remove('hidden');
+          if (opts.detail) details.innerHTML = '<code>' + esc(opts.detail) + '</code>';
+        } else if (state === 'weak') {
+          icon.textContent = '🌫️';
+          title.textContent = 'Couldn\u2019t get a good signal';
+          msg.textContent = 'Move near a window or step outside, then try again. The first fix can take a few seconds.';
+          retry.classList.remove('hidden');
+          if (opts.detail) details.innerHTML = '<code>' + esc(opts.detail) + '</code>';
+        } else if (state === 'save-failed') {
+          icon.textContent = '⚠️';
+          title.textContent = 'Couldn\u2019t save your location';
+          msg.textContent = 'Your spot was found but the save failed — check your internet connection and tap Try again.';
+          retry.classList.remove('hidden');
+          if (opts.detail) details.innerHTML = '<code>' + esc(opts.detail) + '</code>';
+        } else if (state === 'no-session') {
+          icon.textContent = '🔗';
+          title.textContent = 'Open this from the store';
+          msg.innerHTML = 'No order session was passed to this page.<br>In Messenger, open the store and tap <b>\u201cSet my location in phone browser\u201d</b>.';
+        }
+      }
+            function locate() {
+        if (!navigator.geolocation) {
+          setUI('weak', { detail: 'navigator.geolocation unavailable' });
+          return;
+        }
+        setUI('locating');
+        navigator.geolocation.getCurrentPosition(onFix, onErr, {
+          enableHighAccuracy: true, timeout: 25000, maximumAge: 0,
+        });
+      }
+
+      function onErr(err) {
+        var code = err && err.code;
+        var detail = 'code=' + code + ' ' + ((err && err.message) || '');
+        if (code === 1) setUI('denied', { detail: detail });
+        else if (code === 2) setUI('gps-off', { detail: detail });
+        else setUI('weak', { detail: detail });
+      }
+
+      function onFix(pos) {
+        var c = (pos && pos.coords) || {};
+        var lat = Number(c.latitude), lng = Number(c.longitude), acc = Number(c.accuracy);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+          setUI('weak', { detail: 'fix was (0,0) or NaN' });
+          return;
+        }
+        showCoords(lat, lng, acc);
+        save(lat, lng, acc);
+      }
+
+      /* Best-effort street name for the saved-address label; resolves null
+       * on any failure/timeout so the coordinates always win. */
+      function reverseGeocode(lat, lng) {
+        var url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1'
+          + '&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
+        var timeout = new Promise(function (_, rej) { setTimeout(rej, 5000); });
+        return Promise.race([
+          fetch(url, { headers: { Accept: 'application/json' } })
+            .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(function (d) {
+              var a = (d && d.address) || {};
+              var parts = [a.house_number, a.road, a.neighbourhood || a.suburb || a.quarter,
+                a.city_district || a.village || a.barangay, a.city || a.municipality || a.town,
+                a.province].filter(Boolean);
+              return parts.join(', ') || null;
+            }),
+          timeout,
+        ]).catch(function () { return null; });
+      }
+
+      function save(lat, lng, acc) {
+        if (saving) return;
+        saving = true;
+        setUI('saving');
+        reverseGeocode(lat, lng)
+          .then(function (address) {
+            return fetch('/api/webview/location', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session: session, lat: lat, lng: lng, address: address || undefined }),
+            }).then(function (res) {
+              saving = false;
+              if (res.ok) { setUI('saved'); return; }
+              return res.json().catch(function () { return {}; }).then(function (e) {
+                setUI('save-failed', { detail: 'HTTP ' + res.status + ' ' + (e.error || '') });
+              });
+            });
+          })
+          .catch(function (e) {
+            saving = false;
+            setUI('save-failed', { detail: String((e && e.message) || e) });
+          });
+      }
+
+      $('retry-btn').addEventListener('click', locate);
+      $('again-btn').addEventListener('click', locate);
+      $('msgr-btn').addEventListener('click', function () {
+        // Deep-link into the Messenger app; if the scheme is unhandled the
+        // page simply stays open with its instructions visible.
+        window.location.href = 'fb-messenger://';
+      });
+
+      if (!session) setUI('no-session');
+      else locate();
+    })();
+  </script>
+</body>
+</html>

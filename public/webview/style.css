@@ -2694,6 +2694,13 @@ img.img-skel {
 .loc-chat-btn { margin-top: 8px; }
 .loc-chat-btn.hidden { display: none; }
 .loc-chat-btn.is-locating { display: none; }
+/* Small text link: backup path (Google Maps link share in chat) */
+.loc-chat-alt {
+  margin-top: 6px; background: none; border: none; color: #a93226;
+  font-size: 0.8rem; font-weight: 600; text-decoration: underline;
+  cursor: pointer; padding: 2px 0; font-family: inherit;
+}
+.loc-chat-alt.hidden { display: none; }
 .loc-chat-help {
   margin: 8px 0 0;
   padding: 10px 12px;

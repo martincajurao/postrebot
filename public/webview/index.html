@@ -330,21 +330,24 @@
           <span id="loc-gps-label">Use my current location</span>
         </button>
 
-        <!-- "Share my location in chat" — the GPS path that still works inside
-             Messenger (Meta removed native location sharing to Pages, but
-             sharing a Google Maps/Waze LINK still works and arrives here as a
-             link attachment/text). The bot parses the coordinates from the
-             link, saves them server-side, and the next gate open prefills. -->
-        <button type="button" class="loc-gps-btn loc-chat-btn hidden" id="loc-chat-btn" onclick="useChatLocation()">
-          <span class="loc-gps-icon" id="loc-chat-icon">📎</span>
-          <span id="loc-chat-label">Share my location in chat (link)</span>
+        <!-- "Set my location in phone browser" — THE GPS path inside Messenger:
+             Android's in-app browser can never show the location prompt (it's
+             gated behind the host app's native permission, which Meta doesn't
+             implement). This button jumps to the real browser running the
+             dedicated gps.html capture page: it grabs the fix, saves it
+             server-side for this session, and the store prefills on the next
+             visit. The chat link-share stays as a backup via the small link. -->
+        <button type="button" class="loc-gps-btn loc-chat-btn hidden" id="loc-chat-btn" onclick="openInChrome()">
+          <span class="loc-gps-icon" id="loc-chat-icon">🌐</span>
+          <span id="loc-chat-label">Set my location in phone browser</span>
         </button>
+        <button type="button" class="loc-chat-alt hidden" id="loc-chat-alt" onclick="useChatLocation()">or send a Google Maps link in chat ▸</button>
         <div id="loc-chat-help" class="loc-chat-help hidden">
-          <strong>How to share it (takes 10 seconds):</strong>
+          <strong>Or share a map link in chat (takes 10 seconds):</strong>
           <ol>
             <li>Open <b>Google Maps</b> or <b>Waze</b> on your phone</li>
             <li>Drop a pin on your spot → <b>Share</b> → <b>Copy link</b></li>
-            <li>Paste the link here in this chat and send it — the pin gets loaded automatically ✓</li>
+            <li>Paste the link in the chat and send it — the pin loads automatically ✓</li>
           </ol>
           <button type="button" id="loc-chat-check" class="loc-retry-btn" onclick="reloadChatLocation()">✔ I've sent it — check the store</button>
         </div>
@@ -378,7 +381,7 @@
             <button type="button" class="loc-perm-close" onclick="hidePermissionHelp()" aria-label="Dismiss">✕</button>
           </div>
           <ol id="loc-perm-steps" class="loc-perm-steps"></ol>
-          <button type="button" id="loc-chrome-btn" class="btn btn-primary loc-chrome-btn hidden" onclick="openInChrome()">🌐 Open in Chrome — enable GPS there</button>
+          <button type="button" id="loc-chrome-btn" class="btn btn-primary loc-chrome-btn hidden" onclick="openInChrome()">🌐 Open in Chrome — set &amp; save my location automatically</button>
           <p class="loc-perm-alt">In a hurry? Just tap your spot on the map below instead.</p>
         </div>
 
@@ -417,6 +420,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260912-9"></script>
+  <script src="app.js?v=20260912-10"></script>
 </body>
 </html>
