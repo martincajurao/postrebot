@@ -158,7 +158,7 @@ function getGPSPosition() {
       }
       const startedAt = Date.now();
       let settled = false;
-      let watchId = null;
+      let watchId = null; let tm = null;
       let best = null;
       const log = (m, c) => { try { if (window.__gpsLog) window.__gpsLog(m, c, 'WATCH'); } catch (e) {} };
       const ok = (coords, why) => {
@@ -234,12 +234,13 @@ function getGPSPosition() {
           { enableHighAccuracy: true, timeout: CONFIG.WATCH_WINDOW_MS, maximumAge: CONFIG.MAX_CACHED_AGE_MS }
         );
       } catch (e) { bad(classify({ code: 2, message: String((e && e.message) || e) }, 0)); return; }
-      const tm = setTimeout(() => {
+      tm = setTimeout(() => {
         if (best) { log('window ended - using best coarse fix acc=~' + Math.round(best.accuracy) + 'm', 'dbg-warn'); ok(best, 'best-coarse'); }
         else bad({ code: ErrorCodes.TIMEOUT, message: 'Getting your location took too long. Make sure Location is ON with a clear sky view, then try again - or tap your location on the map below.', canRetry: true, _rawCode: 3, _fastFail: false });
       }, CONFIG.WATCH_WINDOW_MS);
-    });
-  }
+      } // end startWatch
+    }); // end Promise executor
+  } // end getGPSPosition
   // Get approximate location via IP geolocation (fallback)
   async function getIPBasedLocation() {
     const services = [
