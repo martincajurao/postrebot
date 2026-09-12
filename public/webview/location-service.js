@@ -19,7 +19,8 @@ const LocationService = (() => {
   // routinely takes 20-30s, while desktop (WiFi-based) answers in ~1s.
   const CONFIG = {
     GPS_TIMEOUT_MS: 10000,          // legacy alias (kept for compat)
-    WATCH_WINDOW_MS: 30000,            // single persistent watch window (provider accumulates fix)
+    QUICK_TIMEOUT_MS: 10000,         // stage 1: one-shot low-accuracy (cell/WiFi) fix — fast indoors
+    WATCH_WINDOW_MS: 25000,            // stage 2: persistent watch window (provider accumulates fix)
     WATCH_ACCEPTABLE_M: 2500,          // mid-window coarse fix this good (or better) is usable
     MAX_CACHED_AGE_MS: 120000,         // accept a cached fix up to 2 min old (fast re-taps)
     MAX_ACCURACY_METERS: 3000,
@@ -193,7 +194,24 @@ function getGPSPosition() {
         return e;
       };
       _permissionState = 'checking';
-      log('watch started window=' + CONFIG.WATCH_WINDOW_MS + 'ms');
+      log('GPS stage 1/2: one-shot low-accuracy');
+      navigator.geolocation.getCurrentPosition(
+        function (position) {
+          var c = position.coords;
+          var atMs = Date.now() - startedAt;
+          log('GPS stage 1 OK acc=~' + Math.round(c.accuracy) + 'm elapsed=' + atMs + 'ms', 'dbg-ok');
+          ok(toCoords(position), 'quick');
+        },
+        function (raw) {
+          var atMs = Date.now() - startedAt;
+          log('GPS stage 1 ERR rawCode=' + (raw && raw.code) + ' elapsed=' + atMs + 'ms', 'dbg-err');
+          if (raw && raw.code === 1) { bad(classify(raw, atMs)); return; }
+          startWatch();
+        },
+        { enableHighAccuracy: false, timeout: CONFIG.QUICK_TIMEOUT_MS, maximumAge: CONFIG.MAX_CACHED_AGE_MS }
+      );
+      function startWatch() {
+      log('GPS stage 2/2: watch window=' + CONFIG.WATCH_WINDOW_MS + 'ms');
       try {
         watchId = navigator.geolocation.watchPosition(
           (pos) => {
