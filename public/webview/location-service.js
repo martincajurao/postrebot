@@ -19,9 +19,9 @@ const LocationService = (() => {
   // routinely takes 20-30s, while desktop (WiFi-based) answers in ~1s.
   const CONFIG = {
     GPS_TIMEOUT_MS: 10000,          // legacy alias (kept for compat)
-    HIGH_ACCURACY_TIMEOUT_MS: 25000, // stage 1: full GPS fix, phones need this long
-    LOW_ACCURACY_TIMEOUT_MS: 12000,  // stage 2: cell/WiFi fix, fast but coarse
-    SAFETY_NET_MS: 38000,            // hard ceiling so we never hang forever
+    WATCH_WINDOW_MS: 30000,            // single persistent watch window (provider accumulates fix)
+    WATCH_ACCEPTABLE_M: 2500,          // mid-window coarse fix this good (or better) is usable
+    MAX_CACHED_AGE_MS: 120000,         // accept a cached fix up to 2 min old (fast re-taps)
     MAX_ACCURACY_METERS: 3000,
     MAX_POSITION_AGE_MS: 60000,
     IP_GEOCODE_TIMEOUT_MS: 8000,
@@ -145,143 +145,83 @@ const LocationService = (() => {
   // GPS_OFF_FAST_FAIL_MS) is reported as GPS_DISABLED — the phone's master
   // Location switch is almost certainly OFF. There is no API that reads
   // that switch directly, so timing is the only signal browsers give us.
-  function getGPSPosition() {
+function getGPSPosition() {
     return new Promise((resolve, reject) => {
       if (!isGeolocationSupported()) {
-        reject({
-          code: ErrorCodes.API_UNSUPPORTED,
-          message: 'Your browser does not support geolocation. Tap the map below to set your location.',
-          canRetry: false,
-        });
+        reject({ code: ErrorCodes.API_UNSUPPORTED, message: 'Geolocation is not supported on this device.', canRetry: false });
         return;
       }
-
+      if (!isSecureContext()) {
+        reject({ code: ErrorCodes.SECURE_CONTEXT_REQUIRED, message: 'Location requires a secure (HTTPS) connection.', canRetry: false });
+        return;
+      }
+      const startedAt = Date.now();
       let settled = false;
-      let safetyNetTimer = null;
-      const startTime = Date.now();
-
-      const finish = (result, isError = false) => {
+      let watchId = null;
+      let best = null;
+      const log = (m, c) => { try { if (window.__gpsLog) window.__gpsLog(m, c, 'WATCH'); } catch (e) {} };
+      const ok = (coords, why) => {
         if (settled) return;
         settled = true;
-        clearTimeout(safetyNetTimer);
-        if (isError) reject(result);
-        else {
-          _lastGPSPosition = result;
-          resolve(result);
+        try { if (watchId !== null) navigator.geolocation.clearWatch(watchId); } catch (e) {}
+        clearTimeout(tm);
+        _permissionState = 'granted';
+        _lastGPSPosition = coords;
+        log('GPS fix OK lat=' + coords.lat + ' lng=' + coords.lng + ' acc=~' + Math.round(coords.accuracy) + 'm elapsed=' + (Date.now() - startedAt) + 'ms (' + why + ')', 'dbg-ok');
+        resolve(coords);
+      };
+      const bad = (err) => {
+        if (settled) return;
+        settled = true;
+        try { if (watchId !== null) navigator.geolocation.clearWatch(watchId); } catch (e) {}
+        clearTimeout(tm);
+        err._elapsedMs = Date.now() - startedAt;
+        _permissionState = err.code === ErrorCodes.PERMISSION_DENIED ? 'denied' : err.code === ErrorCodes.TIMEOUT ? 'timeout' : 'unavailable';
+        log('FAILED code=' + err.code + ' raw=' + (err._rawCode || '-') + ' fastFail=' + (err._fastFail || '-') + ' elapsed=' + err._elapsedMs + 'ms | ' + err.message, 'dbg-err');
+        reject(err);
+      };
+      const classify = (raw, elapsed) => {
+        const e = handleGeolocationError(raw);
+        const fast = elapsed < CONFIG.GPS_OFF_FAST_FAIL_MS;
+        e._rawCode = raw && raw.code;
+        e._fastFail = fast;
+        if (fast && (e.code === ErrorCodes.POSITION_UNAVAILABLE || e.code === ErrorCodes.PERMISSION_DENIED)) {
+          e.code = ErrorCodes.GPS_DISABLED;
+          e.message = 'Phone location looks OFF - turn on Location Services, then tap Retry. Or tap the map below.';
+          e.action = 'ENABLE_GPS';
         }
+        return e;
       };
-
-      // Classify a raw geolocation error. fastFail=true when the error
-      // arrived almost instantly. Either POSITION_UNAVAILABLE or a fast
-      // PERMISSION_DENIED means the phone's master Location switch is
-      // likely OFF (Android/iOS report "switch off" as code 1 or 2 —
-      // never as a distinct code), so both surface as GPS_DISABLED.
-      const classifyError = (error, fastFail) => {
-        const err = handleGeolocationError(error);
-        if (err.code === ErrorCodes.PERMISSION_DENIED && !fastFail) {
-          // Denied AFTER the user was actually prompted (slow = they saw
-          // the dialog and tapped Block, or a site-level block).
-          _permissionState = 'denied';
-        } else if (err.code === ErrorCodes.TIMEOUT) {
-          _permissionState = 'timeout';
-        } else if (fastFail && (err.code === ErrorCodes.POSITION_UNAVAILABLE ||
-                                err.code === ErrorCodes.PERMISSION_DENIED)) {
-          _permissionState = 'unavailable';
-          err.code = ErrorCodes.GPS_DISABLED;
-          err.message = 'Phone location looks OFF — turn on Location Services, then tap Retry. Or tap the map below to set your location.';
-          err.action = 'ENABLE_GPS';
-        } else {
-          _permissionState = 'unavailable';
-        }
-        return err;
-      };
-
-      // One attempt with the given accuracy mode. onFatal(error) is only
-      // called when this was the last attempt and it failed.
-      const attempt = (enableHighAccuracy, timeoutMs, onDone) => {
-        console.log('[LocationService] Trying GPS with highAccuracy:', enableHighAccuracy);
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const coords = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-              accuracy: position.coords.accuracy,
-              timestamp: position.timestamp,
-              source: 'gps',
-            };
-
-            if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
-              onDone(null, {
-                code: ErrorCodes.POSITION_UNAVAILABLE,
-                message: 'Could not determine your location. Please try again or tap the map below.',
-                canRetry: true,
-              });
-              return;
-            }
-
-            // Accept any valid GPS position (even low accuracy)
-            console.log('[LocationService] GPS success:', coords.lat, coords.lng, 'accuracy:', coords.accuracy);
-            _permissionState = 'granted';
-            if (typeof window !== "undefined" && typeof window.__gpsLog === "function") {
-              try { window.__gpsLog("GPS stage OK lat=" + coords.lat + " lng=" + coords.lng + " acc=" + coords.accuracy, "dbg-ok", enableHighAccuracy ? "STAGE1" : "STAGE2"); } catch (e) {}
-            }
-            onDone(coords, null);
-          },
-          (error) => {
-            console.log('[LocationService] GPS error:', error.code, error.message, 'highAccuracy:', enableHighAccuracy);
-            // Hand control back with the raw error and its arrival time —
-            // the caller classifies it (fast deny/unavailable = switch OFF
-            // is only visible once both stages have had their chance, and
-            // PERMISSION_DENIED must still fall through to stage 2 so the
-            // fast-fail timer can see it).
-            if (typeof window !== "undefined" && typeof window.__gpsLog === "function") {
-              try { window.__gpsLog("GPS stage ERR rawCode=" + (error && error.code) + " msg=" + (error && error.message), "dbg-err", enableHighAccuracy ? "STAGE1" : "STAGE2"); } catch (e) {}
-            }
-            onDone(null, { _rawError: error, _atMs: Date.now() });
-          },
-          {
-            enableHighAccuracy: enableHighAccuracy,
-            timeout: timeoutMs,
-            maximumAge: 60000, // Accept fixes up to 1 min old (fast on re-taps)
-          }
-        );
-      };
-
-      // Safety net: hard timeout to prevent hanging forever
-      safetyNetTimer = setTimeout(() => {
-        finish({
-          code: ErrorCodes.TIMEOUT,
-          message: 'Getting your location took too long. Make sure you have a clear sky view, then try again — or tap your location on the map below.',
-          canRetry: true,
-        }, true);
-      }, CONFIG.SAFETY_NET_MS);
-
       _permissionState = 'checking';
-
-      // Stage 1: full-accuracy GPS fix (needs patience on phones).
-      attempt(true, CONFIG.HIGH_ACCURACY_TIMEOUT_MS, (coords, err) => {
-        if (coords) return finish(coords, false);
-        if (!err._rawError) return finish(err, true); // invalid coords
-        // Fast PERMISSION_DENIED on stage 1 = OS-level block (switch OFF):
-        // fail immediately so the "location is OFF" error shows in ~1s
-        // instead of after both full timeouts (~37s of spinning).
-        const stage1Fast = (err._atMs - startTime) < CONFIG.GPS_OFF_FAST_FAIL_MS;
-        if (stage1Fast && err._rawError && err._rawError.code === 1) {
-          return finish(classifyError(err._rawError, true), true);
-        }
-        // Stage 1 failed on timeout/unavailable — fall back to the fast,
-        // low-accuracy mode rather than giving up (phones often answer here).
-        attempt(false, CONFIG.LOW_ACCURACY_TIMEOUT_MS, (coords2, err2) => {
-          if (coords2) return finish(coords2, false);
-          const raw = (err2 && err2._rawError) || err._rawError;
-          const atMs = (err2 && err2._atMs) || err._atMs || Date.now();
-          const fastFail = (atMs - startTime) < CONFIG.GPS_OFF_FAST_FAIL_MS;
-          finish(classifyError(raw, fastFail), true);
-        });
-      });
+      log('watch started window=' + CONFIG.WATCH_WINDOW_MS + 'ms');
+      try {
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            const el = Date.now() - startedAt;
+            const la = pos.coords.latitude, ln = pos.coords.longitude, ac = pos.coords.accuracy;
+            if (!Number.isFinite(la) || !Number.isFinite(ln)) return;
+            const c = { lat: la, lng: ln, accuracy: ac, timestamp: pos.timestamp, source: 'gps' };
+            log('fix update acc=~' + Math.round(ac) + 'm elapsed=' + el + 'ms');
+            if (Number.isFinite(ac) && ac <= 60) ok(c, 'precise');
+            else if (Number.isFinite(ac) && ac <= CONFIG.WATCH_ACCEPTABLE_M) {
+              if (!best || ac < best.accuracy) best = c;
+              log('coarse fix held acc=~' + Math.round(ac) + 'm (waiting for better or window end)', 'dbg-warn');
+            } else log('fix too coarse acc=~' + Math.round(ac) + 'm (ignored)', 'dbg-warn');
+          },
+          (raw) => {
+            const el = Date.now() - startedAt;
+            log('provider ERR rawCode=' + (raw && raw.code) + ' msg=' + (raw && raw.message) + ' elapsed=' + el + 'ms', 'dbg-err');
+            if (raw && raw.code === 1) bad(classify(raw, el));
+          },
+          { enableHighAccuracy: true, timeout: CONFIG.WATCH_WINDOW_MS, maximumAge: CONFIG.MAX_CACHED_AGE_MS }
+        );
+      } catch (e) { bad(classify({ code: 2, message: String((e && e.message) || e) }, 0)); return; }
+      const tm = setTimeout(() => {
+        if (best) { log('window ended - using best coarse fix acc=~' + Math.round(best.accuracy) + 'm', 'dbg-warn'); ok(best, 'best-coarse'); }
+        else bad({ code: ErrorCodes.TIMEOUT, message: 'Getting your location took too long. Make sure Location is ON with a clear sky view, then try again - or tap your location on the map below.', canRetry: true, _rawCode: 3, _fastFail: false });
+      }, CONFIG.WATCH_WINDOW_MS);
     });
   }
-
   // Get approximate location via IP geolocation (fallback)
   async function getIPBasedLocation() {
     const services = [
