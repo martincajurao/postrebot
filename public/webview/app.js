@@ -2818,7 +2818,7 @@ function showLocationGate() {
   // If this session already has a location saved server-side (browser capture
   // or an earlier confirm), prefill the pin so Android users don't have to
   // fiddle with GPS at all — just verify and Confirm.
-  loadChatLocationIntoGate(saved);
+  loadChatLocationIntoGate();
 
   // Load Leaflet dynamically (no-op if already loaded). Once ready, initialize
   // the map. If loading fails, fall back to address-only.
@@ -3466,20 +3466,22 @@ function setMapPin(latlng, fromGps) {
 
 /** Server-side saved location for this session — set by the gps.html browser
  *  capture page (the phone-browser escape hatch) or by an earlier gate
- *  confirm. This is the ONLY GPS fix that reliably works inside Messenger's
- *  Android webview, so the gate prefills it when it exists. */
-let serverPinLoaded = false;
-async function loadChatLocationIntoGate(saved) {
-  if (serverPinLoaded) return;
-  serverPinLoaded = true;
+ *  confirm (which PUTs here too), so this is always the customer's LATEST
+ *  location decision. Refetched on every gate open and whenever the webview
+ *  becomes visible again (returning from gps.html does NOT reload the page). */
+let lastServerPinKey = null;
+async function loadChatLocationIntoGate() {
   try {
     const loc = await api('/location?session=' + encodeURIComponent(sessionId));
     if (!loc) return;
     const lat = Number(loc.lat);
     const lng = Number(loc.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
-    // A location confirmed locally this session wins over the server copy.
-    if (saved && Number.isFinite(Number(saved.lat)) && Number.isFinite(Number(saved.lng))) return;
+    // Apply only when the server pin changed since we last applied it — keeps
+    // gate reopens and visibility refetches silent unless there's news.
+    const pinKey = lat.toFixed(5) + ',' + lng.toFixed(5);
+    if (pinKey === lastServerPinKey) return;
+    lastServerPinKey = pinKey;
     pendingCoords = { lat, lng };
     pinSource = 'pin';
     setMapPin({ lat, lng }, false);
@@ -3489,16 +3491,31 @@ async function loadChatLocationIntoGate(saved) {
     updateLocConfirmState();
     showToast('📍 Loaded your saved location — check the pin and confirm');
     // Register the server pin as a saved-location chip so browser-captured
-    // spots also appear under "Saved locations" (they must survive
-    // device/storage loss, which localStorage-only entries wouldn't).
+    // spots appear under "Saved locations" (they must survive device/storage
+    // loss, which localStorage-only entries wouldn't).
     try {
-      const serverEntry = { address: loc.address || 'Saved location', lat, lng, source: 'gps' };
+      const serverEntry = { address: loc.address || ('Pinned at ' + lat.toFixed(5) + ', ' + lng.toFixed(5)), lat, lng, source: 'gps' };
       if (!getSavedLocations().some((l) => samePlace(l, serverEntry))) saveLocation(serverEntry);
       renderSavedLocations();
     } catch (e) {}
     try { if (typeof gpsLog === 'function') gpsLog('server location prefilled lat=' + lat + ' lng=' + lng, 'dbg-ok'); } catch (e) {}
   } catch (e) { /* no record / offline — the gate stays fully usable */ }
 }
+
+/** Coming back from gps.html (or any app switch) does not reload the webview —
+ *  the page was merely hidden. So re-fetch the server pin whenever the page
+ *  becomes visible with the location gate open; the browser-captured spot
+ *  then appears instantly (pin + chip) without a manual reopen. */
+function refreshServerPinIfGateOpen() {
+  try {
+    const gate = $id('location-gate');
+    if (gate && !gate.classList.contains('hidden')) loadChatLocationIntoGate();
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  try { if (document.visibilityState === 'visible') refreshServerPinIfGateOpen(); } catch (e) {}
+});
+window.addEventListener('pageshow', () => { try { refreshServerPinIfGateOpen(); } catch (e) {} });
 
 /** Pan the map to the store and nudge the customer to tap their spot. */
 function focusMap() {
