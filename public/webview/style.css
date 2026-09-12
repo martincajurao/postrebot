@@ -2690,42 +2690,11 @@ img.img-skel {
 }
 .loc-chrome-btn.hidden { display: none; }
 
-/* Native chat-location share helper (the webview-GPS workaround for Android) */
-.loc-chat-btn { margin-top: 8px; }
-.loc-chat-btn.hidden { display: none; }
-.loc-chat-btn.is-locating { display: none; }
-/* Small text link: backup path (Google Maps link share in chat) */
-.loc-chat-alt {
-  margin-top: 6px; background: none; border: none; color: #a93226;
-  font-size: 0.8rem; font-weight: 600; text-decoration: underline;
-  cursor: pointer; padding: 2px 0; font-family: inherit;
-}
-.loc-chat-alt.hidden { display: none; }
-.loc-chat-help {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  border: 1px dashed #e4c4b8;
-  border-radius: 12px;
-  background: #fffbf8;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  text-align: left;
-}
-.loc-chat-help strong { color: #a93226; display: block; margin-bottom: 2px; }
-.loc-chat-help ol { margin: 2px 0 4px; padding-left: 18px; color: #6d3f3a; }
-.loc-chat-help.hidden { display: none; }
-#loc-chat-check {
-  display: inline-block;
-  width: 100%;
-  margin-top: 6px;
-  padding: 8px 0;
-  border: none;
-  border-radius: 10px;
-  background: #fdecea;
-  color: #a93226;
-  font-size: 0.8rem;
-  font-weight: 600;
-}
+/* "Set my location in phone browser" — the webview-GPS workaround for Android
+   (opens the gps.html capture page in the real browser) */
+.loc-browser-btn { margin-top: 8px; }
+.loc-browser-btn.hidden { display: none; }
+.loc-browser-btn.is-locating { display: none; }
 
 .loc-divider {
   display: flex;

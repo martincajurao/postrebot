@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260912-4">
+  <link rel="stylesheet" href="style.css?v=20260912-5">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -336,21 +336,11 @@
              implement). This button jumps to the real browser running the
              dedicated gps.html capture page: it grabs the fix, saves it
              server-side for this session, and the store prefills on the next
-             visit. The chat link-share stays as a backup via the small link. -->
-        <button type="button" class="loc-gps-btn loc-chat-btn hidden" id="loc-chat-btn" onclick="openInChrome()">
-          <span class="loc-gps-icon" id="loc-chat-icon">🌐</span>
-          <span id="loc-chat-label">Set my location in phone browser</span>
+             visit. -->
+        <button type="button" class="loc-gps-btn loc-browser-btn hidden" id="loc-browser-btn" onclick="openInChrome()">
+          <span class="loc-gps-icon" id="loc-browser-icon">🌐</span>
+          <span id="loc-browser-label">Set my location in phone browser</span>
         </button>
-        <button type="button" class="loc-chat-alt hidden" id="loc-chat-alt" onclick="useChatLocation()">or send a Google Maps link in chat ▸</button>
-        <div id="loc-chat-help" class="loc-chat-help hidden">
-          <strong>Or share a map link in chat (takes 10 seconds):</strong>
-          <ol>
-            <li>Open <b>Google Maps</b> or <b>Waze</b> on your phone</li>
-            <li>Drop a pin on your spot → <b>Share</b> → <b>Copy link</b></li>
-            <li>Paste the link in the chat and send it — the pin loads automatically ✓</li>
-          </ol>
-          <button type="button" id="loc-chat-check" class="loc-retry-btn" onclick="reloadChatLocation()">✔ I've sent it — check the store</button>
-        </div>
 
         <!-- Locate status bar: progress, success, accuracy readout (±m), retry, errors. -->
         <div id="loc-autodetect" class="loc-autodetect hidden">
@@ -420,6 +410,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260912-10"></script>
+  <script src="app.js?v=20260912-11"></script>
 </body>
 </html>

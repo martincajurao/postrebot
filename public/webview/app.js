@@ -2806,19 +2806,16 @@ function showLocationGate() {
 
   // Inside Messenger (and Android webviews above all) the browser GPS prompt
   // can never appear — surface "Set my location in phone browser" (the
-  // gps.html capture page) as a first-class alternative next to the GPS
-  // button, with the chat link-share as a small backup link.
+  // gps.html capture page) as a first-class alternative next to the GPS button.
   try {
-    const chatBtn = $id('loc-chat-btn');
-    const chatAlt = $id('loc-chat-alt');
-    if (chatBtn || chatAlt) {
+    const browserBtn = $id('loc-browser-btn');
+    if (browserBtn) {
       const inMessenger = (typeof detectMessengerUserAgent === 'function' && detectMessengerUserAgent()) || isAndroidWebView();
-      if (chatBtn) chatBtn.classList.toggle('hidden', !inMessenger);
-      if (chatAlt) chatAlt.classList.toggle('hidden', !inMessenger);
+      browserBtn.classList.toggle('hidden', !inMessenger);
     }
   } catch (e) {}
 
-  // If this chat already has a location saved server-side (native chat share
+  // If this session already has a location saved server-side (browser capture
   // or an earlier confirm), prefill the pin so Android users don't have to
   // fiddle with GPS at all — just verify and Confirm.
   loadChatLocationIntoGate(saved);
@@ -3475,14 +3472,14 @@ function setMapPin(latlng, fromGps) {
   }
 }
 
-/** Server-side saved location for this session — set by a chat link share
- *  (a Google Maps / Waze link pasted in chat, parsed by the bot webhook) or by
- *  an earlier gate confirm. This is the ONLY GPS fix that reliably works
- *  inside Messenger's Android webview, so the gate prefills it when it exists. */
-let chatLocationLoaded = false;
+/** Server-side saved location for this session — set by the gps.html browser
+ *  capture page (the phone-browser escape hatch) or by an earlier gate
+ *  confirm. This is the ONLY GPS fix that reliably works inside Messenger's
+ *  Android webview, so the gate prefills it when it exists. */
+let serverPinLoaded = false;
 async function loadChatLocationIntoGate(saved) {
-  if (chatLocationLoaded) return;
-  chatLocationLoaded = true;
+  if (serverPinLoaded) return;
+  serverPinLoaded = true;
   try {
     const loc = await api('/location?session=' + encodeURIComponent(sessionId));
     if (!loc) return;
@@ -3499,9 +3496,9 @@ async function loadChatLocationIntoGate(saved) {
     setCoordsDisplay(lat, lng);
     updateLocConfirmState();
     showToast('📍 Loaded your saved location — check the pin and confirm');
-    // Register the server pin as a saved-location chip so browser-captured /
-    // chat-shared spots also appear under "Saved locations" (they must
-    // survive device/storage loss, which localStorage-only entries wouldn't).
+    // Register the server pin as a saved-location chip so browser-captured
+    // spots also appear under "Saved locations" (they must survive
+    // device/storage loss, which localStorage-only entries wouldn't).
     try {
       const serverEntry = { address: loc.address || 'Saved location', lat, lng, source: 'gps' };
       if (!getSavedLocations().some((l) => samePlace(l, serverEntry))) saveLocation(serverEntry);
@@ -3509,26 +3506,6 @@ async function loadChatLocationIntoGate(saved) {
     } catch (e) {}
     try { if (typeof gpsLog === 'function') gpsLog('server location prefilled lat=' + lat + ' lng=' + lng, 'dbg-ok'); } catch (e) {}
   } catch (e) { /* no record / offline — the gate stays fully usable */ }
-}
-
-/** Backup path: toggle the Google-Maps link-share instructions (for when the
- *  phone-browser capture isn't available). The pasted link is parsed by the
- *  bot webhook, saved server-side, and prefilled on the next store open. */
-function useChatLocation() {
-  try {
-    const help = $id('loc-chat-help');
-    if (help) help.classList.toggle('hidden');
-  } catch (e) {}
-}
-
-/** Re-fetch the server location after the customer says they sent it. */
-async function reloadChatLocation() {
-  try {
-    chatLocationLoaded = false;
-    await loadChatLocationIntoGate(getSavedLocation());
-    const help = $id('loc-chat-help');
-    if (help) help.classList.add('hidden');
-  } catch (e) {}
 }
 
 /** Pan the map to the store and nudge the customer to tap their spot. */
