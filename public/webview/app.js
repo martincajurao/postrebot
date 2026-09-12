@@ -2325,7 +2325,9 @@ function showOpenInBrowserHelp() {
       }
     } catch (e) {}
     showLocError(isAndroid
-      ? 'No location popup appeared — Messenger is blocked from asking. Tap "Open in Chrome" below (link also copied), allow location there, and order. Or just tap your spot on the map.'
+      // Location help copies — the native share is gone, so copy mentions a Google
+// Maps link where relevant.
+      ? 'No GPS here — Messenger is blocked from asking for location. Share a Google Maps link in this chat (or tap "Open in Chrome" below), then reopen the store. Or just tap your spot on the map.'
       : 'GPS is blocked inside this in-app browser. Link copied — open Chrome, paste it there, and tap "Use my current location". Or just tap your spot on the map below.');
   } catch (e) {}
 }
@@ -2796,8 +2798,8 @@ function showLocationGate() {
   if (wrap) wrap.style.display = '';
 
   // Inside Messenger (and Android webviews above all) the browser GPS prompt
-  // can never appear — surface the native "+ → Location" chat share as a
-  // first-class alternative right next to the GPS button.
+  // can never appear — surface the chat link-share (Google Maps / Waze link
+  // pasted in chat) as a first-class alternative right next to the GPS button.
   try {
     const chatBtn = $id('loc-chat-btn');
     if (chatBtn) {
@@ -3216,7 +3218,7 @@ async function useCurrentLocation(viaAuto) {
       if (!alive) {
         try { if (typeof gpsLog === 'function') gpsLog('Android webview probe: provider silent — skipping GPS run', 'dbg-warn'); } catch (e) {}
         setGPSButtonState('idle');
-        setLocateBar('error', "📍 GPS is blocked in this in-app browser — tap 'Send my location in chat' below, or drop your pin on the map");
+        setLocateBar('error', "📍 GPS is blocked in this in-app browser — tap 'Share my location in chat' below, or drop your pin on the map");
         setRetryVisible(false);
         showOpenInBrowserHelp();
         focusMap();
@@ -3463,10 +3465,10 @@ function setMapPin(latlng, fromGps) {
   }
 }
 
-/** Server-side saved location for this session — set by a native chat share
- *  ("+ → Location → Send", handled by the bot webhook) or by an earlier gate
- *  confirm. This is the ONLY GPS fix that reliably works inside Messenger's
- *  Android webview, so the gate prefills it whenever it exists. */
+/** Server-side saved location for this session — set by a chat link share
+ *  (a Google Maps / Waze link pasted in chat, parsed by the bot webhook) or by
+ *  an earlier gate confirm. This is the ONLY GPS fix that reliably works
+ *  inside Messenger's Android webview, so the gate prefills it when it exists. */
 let chatLocationLoaded = false;
 async function loadChatLocationIntoGate(saved) {
   if (chatLocationLoaded) return;
@@ -3491,22 +3493,22 @@ async function loadChatLocationIntoGate(saved) {
   } catch (e) { /* no record / offline — the gate stays fully usable */ }
 }
 
-/** "Send my location in chat" — the one-tap GPS path that works inside
- *  Messenger's Android webview: shows the 3 steps, then closes the webview so
- *  the customer lands in the chat, taps ➕ → Location → Send. The bot saves it
- *  server-side; the next gate open prefills the pin. */
+/** "Share my location in chat" — the in-Messenger GPS path that still works:
+ *  Meta removed native location sharing to Pages, but a Google Maps / Waze
+ *  LINK can still be shared in chat — the bot parses the coordinates from the
+ *  link, saves them server-side, and the next gate open prefills the pin. */
 function useChatLocation() {
   try {
     const help = $id('loc-chat-help');
     if (help) help.classList.remove('hidden');
-    setLocateBar('neutral', 'Tap ➕ → Location → Send in the chat below, then reopen the store');
-    try { if (typeof gpsLog === 'function') gpsLog('chat-locate: native share instructions shown', 'dbg-warn'); } catch (e) {}
-    // Drop them back into the conversation where the ➕ button lives.
+    setLocateBar('neutral', 'Paste a Google Maps / Waze link in the chat below, then reopen the store');
+    try { if (typeof gpsLog === 'function') gpsLog('chat-locate: link-share instructions shown', 'dbg-warn'); } catch (e) {}
+    // Drop them back into the conversation where they can paste the map link.
     const ext = window.MessengerExtensions;
     if (ext && typeof ext.requestCloseBrowser === 'function') {
       try {
         ext.requestCloseBrowser(
-          () => console.log('[webview] closed to chat for location share'),
+          () => console.log('[webview] closed to chat for location link share'),
           () => {}
         );
       } catch (e) {}

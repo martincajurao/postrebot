@@ -330,21 +330,21 @@
           <span id="loc-gps-label">Use my current location</span>
         </button>
 
-        <!-- "Send my location in chat" — the GPS path that ALWAYS works inside
-             Messenger (Android especially). Messenger's Android webview blocks
-             the browser geolocation prompt at the OS/app level, so the native
-             "+ → Location → Send" share is the only real GPS route there. The
-             bot saves it server-side; the next gate open prefills this pin. -->
+        <!-- "Share my location in chat" — the GPS path that still works inside
+             Messenger (Meta removed native location sharing to Pages, but
+             sharing a Google Maps/Waze LINK still works and arrives here as a
+             link attachment/text). The bot parses the coordinates from the
+             link, saves them server-side, and the next gate open prefills. -->
         <button type="button" class="loc-gps-btn loc-chat-btn hidden" id="loc-chat-btn" onclick="useChatLocation()">
-          <span class="loc-gps-icon" id="loc-chat-icon">💬</span>
-          <span id="loc-chat-label">Send my location in chat</span>
+          <span class="loc-gps-icon" id="loc-chat-icon">📎</span>
+          <span id="loc-chat-label">Share my location in chat (link)</span>
         </button>
         <div id="loc-chat-help" class="loc-chat-help hidden">
-          <strong>How to send it (takes 5 seconds):</strong>
+          <strong>How to share it (takes 10 seconds):</strong>
           <ol>
-            <li>Tap <b>➕</b> next to the message box</li>
-            <li>Tap <b>Location</b>, then pick your exact spot</li>
-            <li>Tap <b>Send</b> — then reopen the store, your location is already set ✓</li>
+            <li>Open <b>Google Maps</b> or <b>Waze</b> on your phone</li>
+            <li>Drop a pin on your spot → <b>Share</b> → <b>Copy link</b></li>
+            <li>Paste the link here in this chat and send it — the pin gets loaded automatically ✓</li>
           </ol>
           <button type="button" id="loc-chat-check" class="loc-retry-btn" onclick="reloadChatLocation()">✔ I've sent it — check the store</button>
         </div>
@@ -417,6 +417,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260912-8"></script>
+  <script src="app.js?v=20260912-9"></script>
 </body>
 </html>

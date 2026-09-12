@@ -44,35 +44,131 @@ function safeSend(p: Promise<any>): Promise<void> {
   return p.catch((e) => { console.error('[webhook] send failed', e); return undefined; });
 }
 
-/** Extract {lat,lng,label} from a Messenger message's attachment array.
- *
- *  Handles the native "+ → Location" chat share that Messenger sends as:
- *    attachment.type === 'location'
- *    attachment.payload.coordinates = { lat, long }
- *  (also tolerant of 'latitude/longitude/lng' spellings and the generic
- *  'fallback' attachment type). Returns null when there is no location.
- *
- *  WHY THIS MATTERS: inside Messenger's Android webview the OS-level
- *  geolocation prompt never appears (Android gates it behind the HOST APP's
- *  native onGeolocationPermissionsShowPrompt, which Meta does not implement
- *  for webview origins). The chat location share uses Messenger's OWN
- *  OS-backed location picker, which DOES work on Android — it is the only
- *  reliable in-Messenger GPS path. */
-export function extractLocationFromAttachments(attachments: any[]): { lat: number; lng: number; label: string | null } | null {
+// ---------- Location extraction (chat → delivery pin) ----------
+// Meta REMOVED native location sharing to Pages: `type: 'location'`
+// attachments are no longer produced and the docs no longer list them. The
+// ONE chat path that still works is a shared LINK — Messenger sends
+// pasted/shared URLs as `fallback` attachments (or plain text). So we parse
+// Google Maps / Waze / geo: links.
+// WHY THIS MATTERS: inside Messenger's Android webview the OS-level
+// geolocation prompt never appears (Android gates it behind the HOST APP's
+// native onGeolocationPermissionsShowPrompt, which Meta does not implement
+// for webview origins), so chat links are the only in-Messenger real-GPS path.
+
+const MAP_URL_RE = /https?:\/\/[^\s"'<>]+/gi;
+
+/** Range/validity guard shared by every parser (rejects (0,0) Null Island). */
+export function isUsableCoordinate(lat: number, lng: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat === 0 && lng === 0) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return true;
+}
+
+/** Extract lat/lng pairs straight out of a Google Maps / Waze / geo: URL.
+ *  Google share links carry coordinates either literally
+ *   - /maps/@lat,lng,zoom          (share from the app)
+ *   - /maps?q=lat,lng  /maps?ll=lat,lng
+ *   - https://maps.google.com/maps?q=lat,lng
+ *  or as an opaque short code (goo.gl/maps/XXX, maps.app.goo.gl/XXX) that
+ *  must be resolved via redirect (see resolveShortMapLink). */
+export function parseCoordinatesFromUrl(rawUrl: string): { lat: number; lng: number } | null {
+  if (!rawUrl) return null;
+  // Some share links URL-encode parts of the query (Waze commonly sends
+  // ?ll=13.62%2C123.19) — decode first so the lat,lng patterns match.
+  // decodeURIComponent throws on stray '%' — fall back to the raw string.
+  let u = String(rawUrl).trim();
+  try { u = decodeURIComponent(u); } catch { /* keep raw */ }
+  // Maps place path: /maps/place/<anything>/@lat,lng,<zoom>
+  let m = u.match(/\/maps\/(?:place\/[^@/]+\/)?@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:[,z]|$)/i);
+  if (m) {
+    const lat = Number(m[1]), lng = Number(m[2]);
+    if (isUsableCoordinate(lat, lng)) return { lat, lng };
+  }
+  // Query params: ?q=lat,lng | ?ll=lat,lng | ?sll=lat,lng (Google), waze ?ll=
+  m = u.match(/[?&](?:q|ll|sll|destination)=(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/i);
+  if (m) {
+    const lat = Number(m[1]), lng = Number(m[2]);
+    if (isUsableCoordinate(lat, lng)) return { lat, lng };
+  }
+  // geo: scheme
+  m = u.match(/^geo:(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/i);
+  if (m) {
+    const lat = Number(m[1]), lng = Number(m[2]);
+    if (isUsableCoordinate(lat, lng)) return { lat, lng };
+  }
+  return null;
+}
+
+/** Best-effort resolve of a short Google Maps link (goo.gl/maps/…,
+ *  maps.app.goo.gl/…) by following its HTTP redirect. Best-effort: any
+ *  failure returns null and the caller just has no location. */
+export async function resolveShortMapLink(url: string): Promise<string | null> {
+  try {
+    if (!/goo\.gl\/maps|maps\.app\.goo\.gl/i.test(url)) return url;
+    const res = await fetch(url, { redirect: 'manual', headers: { 'User-Agent': 'postrebot-webhook/1.0' } });
+    const loc = res.headers.get('location');
+    return loc && loc.startsWith('http') ? loc : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract a location from a Messenger message's attachment array.
+ *  Accepts:
+ *   1. the legacy native share  — type 'location', payload.coordinates
+ *   2. shared/pasted links      — type 'fallback' with payload.url / title
+ *                                 carrying a Google Maps / Waze link.
+ *  Returns null when there is no usable location. */
+export async function extractLocationFromAttachments(attachments: any[]): Promise<{ lat: number; lng: number; label: string | null } | null> {
   const list = Array.isArray(attachments) ? attachments : [];
   for (const a of list) {
     const t = String((a && a.type) || '').toLowerCase();
-    if (t !== 'location' && t !== 'fallback') continue;
     const payload = (a && a.payload) || {};
+
+    // 1. Legacy native share (still honored if a client ever emits it).
     const c = payload.coordinates || {};
-    const lat = Number(c.lat ?? c.latitude);
-    const lng = Number(c.long ?? c.lng ?? c.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    if (lat === 0 && lng === 0) continue;
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) continue;
-    const rawLabel = payload.title || payload.name || '';
-    const label = rawLabel ? String(rawLabel).trim() : null;
-    return { lat, lng, label: label && label.length ? label.slice(0, 250) : null };
+    const clat = Number(c.lat ?? c.latitude);
+    const clng = Number(c.long ?? c.lng ?? c.longitude);
+    if (isUsableCoordinate(clat, clng)) {
+      const rawLabel = payload.title || payload.name || '';
+      const label = rawLabel ? String(rawLabel).trim() : null;
+      return { lat: clat, lng: clng, label: label && label.length ? label.slice(0, 250) : null };
+    }
+
+    // 2. Shared/pasted link (fallback/post/ig_post carry url + title).
+    if (t === 'location' || t === 'fallback' || t === 'post' || t === 'ig_post') {
+      const urls = [payload.url, payload.title, payload.original_url].filter(Boolean).map((x) => String(x));
+      for (const link of urls) {
+        const coords = parseCoordinatesFromUrl(link);
+        if (coords) {
+          const label = (payload.title && String(payload.title).length < 300) ? String(payload.title) : null;
+          return { ...coords, label };
+        }
+        const resolved = await resolveShortMapLink(link);
+        if (resolved) {
+          const coords2 = parseCoordinatesFromUrl(resolved);
+          if (coords2) return { ...coords2, label: null };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Extract a location from a plain text message (user pastes a Maps / Waze
+ *  link as text). Returns null when no recognizable link is present. */
+export async function extractLocationFromText(text: string): Promise<{ lat: number; lng: number; label: string | null } | null> {
+  if (!text) return null;
+  const links = String(text).match(MAP_URL_RE) || [];
+  for (const link of links) {
+    const coords = parseCoordinatesFromUrl(link);
+    if (coords) return { ...coords, label: null };
+    const resolved = await resolveShortMapLink(link);
+    if (resolved) {
+      const coords2 = parseCoordinatesFromUrl(resolved);
+      if (coords2) return { ...coords2, label: null };
+    }
   }
   return null;
 }
@@ -1328,26 +1424,36 @@ export async function handleMessage(messaging: any) {
   if (!psid) return;
   await ensureCustomer(psid);
 
-  // Native chat location share ("+ → Location → Send"). This is the ONLY
-  // reliable GPS path inside Messenger's Android webview (see
-  // extractLocationFromAttachments). Save it to the customer, confirm in chat,
-  // and hand them a one-tap way back into the store where the pin is prefilled.
+  // Chat location — saves it to the customer and hands them a one-tap way back
+  // into the store where the pin is prefilled. Two inputs are accepted:
+  //   1. a shared/pasted Google Maps / Waze LINK (fallback attachment or plain
+  //      text) — Meta removed native location share to Pages, but link sharing
+  //      still works;
+  //   2. the legacy "+ → Location" coordinates attachment, still honored if a
+  //      client ever emits it.
+  // This is the ONLY real-GPS path inside Messenger's Android webview (the
+  // OS-level geolocation prompt is blocked there — Meta never implements
+  // Android's onGeolocationPermissionsShowPrompt for webview origins).
+  let loc = null;
   if (messaging.message?.attachments) {
-    const loc = extractLocationFromAttachments(messaging.message.attachments);
-    if (loc) {
-      try {
-        await saveCustomerDeliveryLocation(psid, loc.lat, loc.lng, loc.label);
-        console.log(`[webhook] chat location saved for psid=${psid} lat=${loc.lat} lng=${loc.lng}`);
-        await safeSend(sendText(psid, '📍 Got your location! It is now set for your delivery.'));
-        await safeSend(sendQuickReplies(psid, 'Tap below to open the store — your location is already filled in:', [
-          { title: '🛒 Open the Store', payload: 'WEBVIEW' },
-        ]));
-      } catch (e: any) {
-        console.error('[webhook] could not save chat location', e?.message || e);
-        await safeSend(sendText(psid, '😅 We couldn\u2019t save that location — please try sending it again.'));
-      }
-      return;
+    loc = await extractLocationFromAttachments(messaging.message.attachments);
+  }
+  if (!loc && messaging.message?.text) {
+    loc = await extractLocationFromText(messaging.message.text);
+  }
+  if (loc) {
+    try {
+      await saveCustomerDeliveryLocation(psid, loc.lat, loc.lng, loc.label);
+      console.log(`[webhook] chat location saved for psid=${psid} lat=${loc.lat} lng=${loc.lng}`);
+      await safeSend(sendText(psid, '📍 Got your location! It is now set for your delivery.'));
+      await safeSend(sendQuickReplies(psid, 'Tap below to open the store — your location is already filled in:', [
+        { title: '🛒 Open the Store', payload: 'WEBVIEW' },
+      ]));
+    } catch (e: any) {
+      console.error('[webhook] could not save chat location', e?.message || e);
+      await safeSend(sendText(psid, '😅 We couldn\u2019t save that location — please try sending it again.'));
     }
+    return;
   }
 
   if (messaging.postback?.payload) {
