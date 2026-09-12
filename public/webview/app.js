@@ -3050,7 +3050,6 @@ function applyGPSFix(position, wasAuto) {
   }
 
   locationPermissionState = 'granted';
-  locationPermissionState = 'granted';
   pendingCoords = { lat: position.lat, lng: position.lng };
   pinSource = 'gps';
   const acc = Number(position.accuracy);
