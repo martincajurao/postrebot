@@ -2878,6 +2878,42 @@ function applyGPSFix(position, wasAuto) {
     });
 }
 
+/** TEMPORARY testing aid — timestamped GPS trace (REMOVE BEFORE PRODUCTION).
+ *  gpsLog(line, cls): append one line; toggleGPSDebugLog/clearGPSDebugLog
+ *  drive the collapsible panel. Auto-opens on the first logged line so the
+ *  user never has to hunt for it mid-test. */
+function gpsLog(line, cls) {
+  try {
+    const panel = $id('loc-debug');
+    const box = $id('loc-debug-log');
+    if (!box) return;
+    if (panel && panel.classList.contains('hidden')) panel.classList.remove('hidden');
+    const t = new Date();
+    const ts = String(t.getMinutes()).padStart(2, '0') + ':' + String(t.getSeconds()).padStart(2, '0') + '.' + String(t.getMilliseconds()).padStart(3, '0');
+    const div = document.createElement('div');
+    if (cls) div.className = cls;
+    div.textContent = '[' + ts + '] ' + line;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    // Cap at 200 lines so a pathological run can't grow the DOM forever.
+    while (box.children.length > 200) box.removeChild(box.firstChild);
+  } catch (e) { /* logging must never break locating */ }
+}
+function toggleGPSDebugLog() {
+  const panel = $id('loc-debug');
+  if (panel) panel.classList.toggle('hidden');
+}
+function clearGPSDebugLog() {
+  const box = $id('loc-debug-log');
+  if (box) box.innerHTML = '';
+}
+/** TEMP bridge — exposes the debug logger to location-service.js stage
+ *  traces (REMOVE WITH gpsLog BEFORE PRODUCTION). Signature:
+ *  __gpsLog(line, cls, stage). */
+window.__gpsLog = function (line, cls, stage) {
+  gpsLog((stage ? '[' + stage + '] ' : '') + line, cls || undefined);
+};
+
 /** Failure path: per-code messaging + recovery affordances. The map tap and
  *  manual address entry remain available no matter what failed here. */
 function handleGPSFailure(err, viaAuto) {
@@ -2963,6 +2999,12 @@ async function useCurrentLocation(viaAuto) {
   gpsLocateBusy = true;
   setGPSButtonState('locating');
   setLocateBar(null, viaAuto ? 'Finding your location…' : 'Getting your location…');
+  // TEMP debug trace (remove with gpsLog) — full request context.
+  gpsLog((viaAuto ? 'AUTO' : 'MANUAL') + ' locate start | api=' + (LocationService.isGeolocationSupported() ? 'YES' : 'NO')
+    + ' secure=' + (window.isSecureContext ? 'YES' : 'NO')
+    + ' proto=' + location.protocol + ' host=' + location.hostname
+    + ' perm=' + LocationService.permissionState
+    + ' online=' + (navigator.onLine ? 'YES' : 'NO'));
 
   try {
     // Manual taps force a real GPS attempt (never short-circuit on a stale
@@ -2970,6 +3012,8 @@ async function useCurrentLocation(viaAuto) {
     // polite when access is blocked.
     const position = await LocationService.getCurrentPosition(viaAuto ? undefined : { force: true });
     if (position && LocationService.isValidLocation(position)) {
+      gpsLog('FIX ACQUIRED lat=' + Number(position.lat).toFixed(6) + ' lng=' + Number(position.lng).toFixed(6)
+        + ' acc=±' + Math.round(Number(position.accuracy)) + 'm src=' + position.source, 'dbg-ok');
       applyGPSFix(position, viaAuto);
     } else {
       handleGPSFailure({
@@ -2978,6 +3022,11 @@ async function useCurrentLocation(viaAuto) {
       }, viaAuto);
     }
   } catch (err) {
+    // TEMP debug trace (remove with gpsLog) — full failure context.
+    gpsLog('FAILED code=' + ((err && err.code) || '?')
+      + ' raw=' + ((err && err._rawCode) || '-') + ' fastFail=' + ((err && err._fastFail) || '-')
+      + ' elapsed=' + ((err && err._elapsedMs) || '?') + 'ms'
+      + ' | ' + ((err && err.message) || 'no message'), 'dbg-err');
     handleGPSFailure(err, viaAuto);
   } finally {
     gpsLocateBusy = false;

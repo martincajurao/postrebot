@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260912-1">
+  <link rel="stylesheet" href="style.css?v=20260912-2">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -36,7 +36,7 @@
   <!-- Supabase JS: optional fallback data source (primary is the /api/webview REST API) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Location Service: production-grade geolocation handling with fallbacks -->
-  <script src="location-service.js?v=20260912-1"></script>
+  <script src="location-service.js?v=20260912-2"></script>
 </head>
 <body>
   <div id="app">
@@ -337,6 +337,19 @@
           <span id="loc-accuracy" class="loc-accuracy-chip hidden"></span>
           <button type="button" id="loc-retry-btn" class="loc-retry-btn hidden" onclick="useCurrentLocation()">↻ Retry</button>
         </div>
+
+        <!-- GPS debug log (TEMPORARY testing aid): timestamped trace of every
+             locate attempt — GPS API calls, permission state, raw error
+             codes, timings, coordinates. Toggle via the small "debug" link
+             under the status bar. REMOVE BEFORE PRODUCTION. -->
+        <div id="loc-debug" class="loc-debug hidden">
+          <div class="loc-debug-head">
+            <strong>GPS debug log</strong>
+            <button type="button" class="loc-debug-clear" onclick="clearGPSDebugLog()">clear</button>
+          </div>
+          <div id="loc-debug-log" class="loc-debug-log" aria-live="polite"></div>
+        </div>
+        <button type="button" id="loc-debug-toggle" class="loc-debug-toggle" onclick="toggleGPSDebugLog()">🔧 gps debug log</button>
 
         <!-- Blocked-permission help: per-platform steps to re-enable GPS
              (rendered by showPermissionHelp() from LocationService). -->

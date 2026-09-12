@@ -222,6 +222,9 @@ const LocationService = (() => {
             // Accept any valid GPS position (even low accuracy)
             console.log('[LocationService] GPS success:', coords.lat, coords.lng, 'accuracy:', coords.accuracy);
             _permissionState = 'granted';
+            if (typeof window !== "undefined" && typeof window.__gpsLog === "function") {
+              try { window.__gpsLog("GPS stage OK lat=" + coords.lat + " lng=" + coords.lng + " acc=" + coords.accuracy, "dbg-ok", enableHighAccuracy ? "STAGE1" : "STAGE2"); } catch (e) {}
+            }
             onDone(coords, null);
           },
           (error) => {
@@ -231,6 +234,9 @@ const LocationService = (() => {
             // is only visible once both stages have had their chance, and
             // PERMISSION_DENIED must still fall through to stage 2 so the
             // fast-fail timer can see it).
+            if (typeof window !== "undefined" && typeof window.__gpsLog === "function") {
+              try { window.__gpsLog("GPS stage ERR rawCode=" + (error && error.code) + " msg=" + (error && error.message), "dbg-err", enableHighAccuracy ? "STAGE1" : "STAGE2"); } catch (e) {}
+            }
             onDone(null, { _rawError: error, _atMs: Date.now() });
           },
           {
