@@ -2736,6 +2736,7 @@ const GPS_COARSE_METERS = (typeof LocationService !== 'undefined' && LocationSer
   ? LocationService.CONFIG.MAX_ACCURACY_METERS : 3000;
 
 let gpsLocateBusy = false;
+let gpsRerunManual = false; // manual tap that arrived while the auto attempt held the lock
 let gpsBarHideTimer = null;
 
 /** Sync the GPS button's visual state: idle | locating | success. */
@@ -2824,7 +2825,18 @@ function hidePermissionHelp() {
 
 /** Success path shared by the auto attempt and the button: remember the fix,
  *  pin + zoom the map, show accuracy, then reverse-geocode (best-effort). */
-function applyGPSFix(position) {
+function applyGPSFix(position, wasAuto) {
+  // Handoff (see useCurrentLocation): a manual tap arrived while the quiet
+  // auto attempt was running — the auto fix just landed, so immediately run
+  // one REAL manual attempt so the customer gets their explicit result
+  // (fresh fix, full success/error UI) instead of a stale-looking outcome.
+  if (wasAuto && gpsRerunManual) {
+    gpsRerunManual = false;
+    useCurrentLocation(false);
+    return;
+  }
+
+  locationPermissionState = 'granted';
   locationPermissionState = 'granted';
   pendingCoords = { lat: position.lat, lng: position.lng };
   pinSource = 'gps';
@@ -2869,6 +2881,15 @@ function applyGPSFix(position) {
 /** Failure path: per-code messaging + recovery affordances. The map tap and
  *  manual address entry remain available no matter what failed here. */
 function handleGPSFailure(err, viaAuto) {
+  // A manual "locate me" tap that arrived while the gate-open auto attempt
+  // still held the lock is silently swallowed by the busy guard below — rerun
+  // it as a REAL manual attempt (force:true + full error surface) instead of
+  // leaving the customer staring at "Getting your location…" forever.
+  if (viaAuto && gpsRerunManual) {
+    gpsRerunManual = false;
+    viaAuto = false;
+  }
+
   const code = (err && err.code) || 'UNKNOWN_ERROR';
   const E = LocationService.ErrorCodes;
   locationPermissionState = code === E.PERMISSION_DENIED ? 'denied' : 'unavailable';
@@ -2915,7 +2936,14 @@ async function useCurrentLocation(viaAuto) {
   hideLocError();
   hidePermissionHelp();
   setRetryVisible(false);
-  if (gpsLocateBusy) return; // one locator at a time
+  // One locator at a time — but never silently drop a MANUAL tap that
+  // arrives while the quiet gate-open auto attempt is still running:
+  // remember it and let the finishing auto attempt rerun it as a manual
+  // one (see the handoff in handleGPSFailure/applyGPSFix).
+  if (gpsLocateBusy) {
+    if (!viaAuto) gpsRerunManual = true;
+    return;
+  }
 
   // On the automatic attempt keep a restored/saved pin — don't wipe what the
   // returning customer already has while GPS takes its shot. Manual requests
@@ -2942,7 +2970,7 @@ async function useCurrentLocation(viaAuto) {
     // polite when access is blocked.
     const position = await LocationService.getCurrentPosition(viaAuto ? undefined : { force: true });
     if (position && LocationService.isValidLocation(position)) {
-      applyGPSFix(position);
+      applyGPSFix(position, viaAuto);
     } else {
       handleGPSFailure({
         code: LocationService.ErrorCodes.POSITION_UNAVAILABLE,
