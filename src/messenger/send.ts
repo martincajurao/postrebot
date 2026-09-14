@@ -78,6 +78,20 @@ export function sendText(psid: string, text: string): Promise<SendResult> {
   return sendApi({ recipient: { id: psid }, message: { text } });
 }
 
+/** Send a single image as a standalone attachment — renders as a full-size
+ *  photo in Messenger (more reliable than generic-template image_urls). */
+export function sendImage(psid: string, url: string): Promise<SendResult> {
+  return sendApi({
+    recipient: { id: psid },
+    message: {
+      attachment: {
+        type: 'image',
+        payload: { url },
+      },
+    },
+  });
+}
+
 export function sendQuickReplies(psid: string, text: string, replies: { title: string; payload: string }[]): Promise<SendResult> {
   return sendApi({
     recipient: { id: psid },
@@ -700,7 +714,7 @@ export async function sendRatingRequest(psid: string, orderNumber: string, order
   ]);
 }
 
-/** Send catering menu - text details followed by image carousel */
+/** Send catering menu - text details followed by the uploaded photos */
 export async function sendCateringMenu(psid: string): Promise<void> {
   console.log(`[sendCateringMenu] triggered for psid=${psid}`);
 
@@ -731,22 +745,42 @@ export async function sendCateringMenu(psid: string): Promise<void> {
     console.warn('[sendCateringMenu] Could not fetch uploaded images:', e);
   }
 
-  // Build carousel elements with images only (no buttons)
-  const cateringElements = cateringImages.length > 0
-    ? cateringImages.map((url, index) => ({
-        title: index === 0 ? '🧁 Our Catering' : `Catering Image ${index + 1}`,
-        subtitle: index === 0 ? 'Beautiful food for your events' : '',
-        image_url: url,
-      }))
-    : [
-        {
-          title: '🧁 Catering Services',
-          subtitle: 'We offer delicious catering for your events!\n\n📞 Message us to inquire!',
-          image_url: undefined,
-        },
-      ];
+  // Pre-flight: drop any image URL that Messenger could not fetch itself.
+  // (Supabase /storage/v1/object/ URLs are trusted and pass immediately.)
+  const validImages: string[] = [];
+  await Promise.all(cateringImages.map(async (url) => {
+    const ok = await imageUrlOk(url);
+    console.log(`[sendCateringMenu] image pre-flight ${ok ? 'OK' : 'FAIL'}: ${url}`);
+    if (ok) validImages.push(url);
+  }));
 
-  console.log(`[sendCateringMenu] sending carousel with ${cateringElements.length} elements`);
-  console.log(`[sendCateringMenu] elements:`, JSON.stringify(cateringElements, null, 2));
-  await sendCarousel(psid, cateringElements);
+  if (validImages.length === 0) {
+    // No uploads (or all unreachable) — fall back to a text card so the
+    // customer still receives the catering info.
+    console.log('[sendCateringMenu] no valid images — sending fallback card');
+    await sendCarousel(psid, [{
+      title: '🧁 Catering Services',
+      subtitle: 'We offer delicious catering for your events!\n\n📞 Message us to inquire!',
+      image_url: undefined,
+    }]);
+    return;
+  }
+
+  // Send each photo AFTER the catering details. Standalone image attachments
+  // render reliably as full-size photos in Messenger, unlike generic-template
+  // image_urls which are sometimes silently dropped. A short delay between
+  // photos prevents Messenger from dropping rapid consecutive messages.
+  console.log(`[sendCateringMenu] sending ${validImages.length} photo(s) after the catering details`);
+  for (let i = 0; i < validImages.length; i++) {
+    if (i > 0) await new Promise(resolve => setTimeout(resolve, 650));
+    const result = await sendImage(psid, validImages[i]);
+    console.log(`[sendCateringMenu] photo ${i + 1}/${validImages.length} ok=${result.ok} status=${result.status} body=${result.body?.slice(0, 200) || ''}`);
+    if (!result.ok) {
+      console.warn(`[sendCateringMenu] photo ${i + 1} failed: ${validImages[i]}`);
+    }
+  }
+
+  // Small pointer so the customer knows the photo album is finished.
+  await new Promise(resolve => setTimeout(resolve, 500));
+  await sendText(psid, 'That’s all our catering photos! 🧁 Type “catering” anytime to see the catering details again.');
 }
