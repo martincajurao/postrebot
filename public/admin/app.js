@@ -504,13 +504,21 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-async function uploadImage(file) {
+async function uploadImage(file, namePrefix) {
   // Compress image before upload
   const originalSize = file.size;
   file = await compressImage(file);
 
   const fd = new FormData();
   fd.append('image', file);
+  // Optional name prefix ("catering-") tags the upload for a specific
+  // purpose — the bot's catering menu only sends catering- prefixed files.
+  if (namePrefix) {
+    const ext = (file.name && file.name.includes('.'))
+      ? '.' + String(file.name.split('.').pop()).toLowerCase().replace(/[^a-z0-9]/g, '')
+      : '.jpg';
+    fd.append('name', namePrefix + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext);
+  }
   const res = await fetch(API + '/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN }, body: fd });
   if (res.status === 401) { if (!loggedOut) { recoverSession().catch(() => {}); throw new Error('Session expired'); } return ''; }
   const data = await res.json();
@@ -3045,22 +3053,22 @@ views.services = async (main) => {
       <p class="muted" style="font-size:12px;margin-top:8px">Changes go live immediately.</p>
     </div>
     <div class="tab-pane${activeTab === 'images' ? ' active' : ''}" data-pane="images">
-      <div class="card"><h3 style="margin-bottom:8px">⬆️ Upload Catering Images</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:8px">Upload images for the catering carousel.</p>
+      <div class="card"><h3 style="margin-bottom:8px">⬆️ Upload a Catering Image</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Uploaded files are tagged 🧁 <b>catering-</b> — only tagged images appear in the Messenger "catering" menu.</p>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="file" id="sc-img-file" accept="image/*" style="flex:1;min-width:180px">
           <button class="btn sm" id="sc-img-upload">Upload</button>
         </div>
       </div>
-      <div class="card"><h3 style="margin-bottom:8px">📦 Bulk Upload</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:8px">Select multiple images at once.</p>
+      <div class="card"><h3 style="margin-bottom:8px">📦 Bulk Upload (catering)</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Select many images at once — every file is tagged for the catering carousel.</p>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="file" id="sc-img-batch" accept="image/*" multiple style="flex:1;min-width:180px">
           <button class="btn sm" id="sc-img-batch-upload">Upload All</button>
         </div>
       </div>
       <div class="card">
-        <h3 style="margin-bottom:8px">🖼️ Uploaded Images (${uploads.length})</h3>
+        <h3 style="margin-bottom:8px">🖼️ Images (${uploads.length}) — 🧁 tagged ones appear in Messenger first</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px" id="sc-img-grid"></div>
       </div>
     </div>
@@ -3086,22 +3094,54 @@ views.services = async (main) => {
   main.querySelector('#sc-preview').addEventListener('click', () => {
     toast('Open the bot in Messenger and type "catering" to preview', false);
   });
-  main.querySelector('#sc-img-upload').addEventListener('click', async () => {
+  main.querySelector('#sc-img-upload').addEventListener('click', async (e) => {
     const file = main.querySelector('#sc-img-file').files[0];
     if (!file) return toast('Choose a file first', true);
-    try { await uploadImage(file); toast('Image uploaded!'); navigate('services'); }
-    catch (err) { toast(err.message, true); }
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try { await uploadImage(file, 'catering-'); toast('Image uploaded 🧁'); navigate('services'); }
+    catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = 'Upload'; }
   });
-  main.querySelector('#sc-img-batch-upload').addEventListener('click', async () => {
+  main.querySelector('#sc-img-batch-upload').addEventListener('click', async (e) => {
     const files = main.querySelector('#sc-img-batch').files;
     if (!files || files.length === 0) return toast('Choose files first', true);
+    const btn = e.currentTarget;
+    btn.disabled = true;
     let uploaded = 0, failed = 0;
     for (let i = 0; i < files.length; i++) {
-      try { await uploadImage(files[i]); uploaded++; } catch { failed++; }
+      btn.textContent = `Uploading ${i + 1}/${files.length}…`;
+      try { await uploadImage(files[i], 'catering-'); uploaded++; } catch { failed++; }
     }
     toast(`Uploaded ${uploaded}, failed ${failed}`);
-    if (uploaded > 0) setTimeout(() => navigate('services'), 1500);
+    if (uploaded > 0) setTimeout(() => navigate('services'), 1200);
+    else { btn.disabled = false; btn.textContent = 'Upload All'; }
   });
+
+  // ---- Uploaded-images grid (was a dead div before) ----
+  const gridEl = main.querySelector('#sc-img-grid');
+  const isCatering = (f) => String(f.name || '').startsWith('catering-');
+  function renderScGrid() {
+    if (!gridEl) return;
+    const sorted = [...uploads].sort((a, b) => {
+      const ac = isCatering(a) ? 0 : 1, bc = isCatering(b) ? 0 : 1;
+      return ac - bc || String(b.updated_at || b.name).localeCompare(String(a.updated_at || a.name));
+    });
+    gridEl.innerHTML = sorted.map((f) => `
+      <div style="position:relative;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+        <img src="${esc(f.url)}" style="width:100%;height:110px;object-fit:cover;display:block">
+        ${isCatering(f) ? '<span style="position:absolute;top:6px;left:6px;background:#16a34a;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px">🧁 CATERING</span>' : ''}
+        <button class="btn danger sm" style="width:100%;border-radius:0" data-sc-del="${esc(f.name)}">Delete</button>
+      </div>`).join('') || '<p class="muted">No images uploaded yet.</p>';
+    gridEl.querySelectorAll('[data-sc-del]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Delete this image?')) return;
+      try {
+        await api('/uploads/' + encodeURIComponent(b.dataset.scDel), { method: 'DELETE' });
+        toast('Image deleted');
+        navigate('services');
+      } catch (err) { toast(err.message, true); }
+    }));
+  }
+  renderScGrid();
 };
 
 /* ================= SERVICES (Catering Content & Images) ================= */

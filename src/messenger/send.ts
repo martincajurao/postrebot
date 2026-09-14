@@ -688,12 +688,16 @@ export async function sendCateringMenu(psid: string): Promise<void> {
 
   await sendText(psid, content.catering_intro_text);
 
-  // Fetch uploaded catering images from Supabase Storage bucket
+  // Fetch uploaded catering images from Supabase Storage bucket.
+  // P0 for the trigger: ONLY catering-tagged uploads (filenames prefixed
+  // "catering-", uploaded via Admin → Services → Images) — the bucket also
+  // holds product/package photos that must NOT appear in the catering menu.
   let cateringImages: string[] = [];
   try {
     const images = await listImages();
-    // Get the most recent 10 images
     cateringImages = images
+      .filter((img) => String((img as any).name || '').startsWith('catering-'))
+      .sort((a, b) => String((b as any).updated_at || (b as any).name).localeCompare(String((a as any).updated_at || (a as any).name)))
       .slice(0, 10)
       .map((img) => img.url)
       .filter(Boolean);
