@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router } from 'express';
 import { supa } from '../db/supabase';
 import {
@@ -1591,11 +1592,34 @@ export async function handleMessage(messaging: any) {
 }
 
 // ---------- Meta webhook verification (GET) ----------
+/** P0 hardening — verify Meta's X-Hub-Signature-256 header: HMAC-SHA256 over
+ *  the exact raw request body using the Messenger app's APP_SECRET. Forged or
+ *  unsigned POSTs are rejected so outsiders can't inject fake orders/messages
+ *  into the bot. Returns true when APP_SECRET is not configured (dev mode —
+ *  server.ts logs a loud warning at boot) so local testing keeps working. */
+function verifyMetaSignature(req: any): boolean {
+  const secret = (process.env.APP_SECRET || '').trim();
+  if (!secret) return true;
+  const raw: Buffer | undefined = req.rawBody;
+  const header = String((req.headers && req.headers['x-hub-signature-256']) || '');
+  if (!raw || !header.startsWith('sha256=')) return false;
+  const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+  const given = header.slice(7).toLowerCase();
+  const a = Buffer.from(given, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 r.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === process.env.VERIFY_TOKEN) {
+  // Timing-safe compare so the verify endpoint can't be probed byte-by-byte.
+  const expected = process.env.VERIFY_TOKEN || '';
+  const tokenOk = typeof token === 'string' && expected.length > 0
+    && token.length === expected.length
+    && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  if (mode === 'subscribe' && tokenOk) {
     console.log('[webhook] verified');
     return res.status(200).send(challenge);
   }
@@ -1604,6 +1628,11 @@ r.get('/', (req, res) => {
 
 // ---------- Meta webhook events (POST) ----------
 r.post('/', (req, res) => {
+  // P0 hardening: reject unsigned/forged deliveries BEFORE any processing.
+  if (!verifyMetaSignature(req)) {
+    console.warn('[webhook] REJECTED POST — missing or invalid X-Hub-Signature-256');
+    return res.status(401).send('signature verification failed');
+  }
   // Remember the public origin of this request so relative /uploads/... image
   // URLs can be turned into absolute https URLs for Messenger (see
   // setRequestOrigin). Must run before any handler sends a carousel.

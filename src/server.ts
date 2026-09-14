@@ -9,12 +9,25 @@ import messengerWebhook from './messenger/webhook';
 import webviewApi from './api/webview';
 import { whitelistWebviewDomain, setPersistentMenu, fetchWhitelistedDomains, originOf } from './messenger/send';
 import { configurePush } from './services/push';
+import { rateLimit } from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
+
+// P0 hardening — per-IP abuse guards (trust proxy=1 → req.ip is the real
+// client behind Render's proxy). Login is tight (bcrypt brute-force surface),
+// webview requests are bounded (session ids are client-claimed, so writes
+// must not be free), webhook is generous (Meta is the only legitimate caller,
+// and the X-Hub-Signature-256 check does the real gatekeeping there).
+const webviewLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 200, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests — please slow down.' } });
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts — try again later.' } });
+const webhookLimiter = rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false });
+app.use('/api/webview', webviewLimiter);
+app.use('/api/login', loginLimiter);
+app.use('/webhook', webhookLimiter);
 
 migrate()
   .then(() => console.log('[db] migration complete (supabase)'))
@@ -137,6 +150,9 @@ app.listen(PORT, async () => {
   console.log(`Postre server listening on http://localhost:${PORT} (db: supabase)`);
   console.log(`Web ordering URL: ${base}/webview`);
   console.log(`[boot] BASE_URL=${process.env.BASE_URL || '(not set)'} | RENDER_EXTERNAL_URL=${process.env.RENDER_EXTERNAL_URL || '(not set)'} | resolved base=${base} | PAGE_ACCESS_TOKEN=${hasToken ? 'set' : 'NOT SET'}`);
+  if (!process.env.APP_SECRET) {
+    console.warn('[security] APP_SECRET is NOT set — webhook signature verification is DISABLED (any POST to /webhook is accepted). Set APP_SECRET to the Messenger app secret from the Meta developer console!');
+  }
 
   // Register the webview domain with the Messenger Profile API so the
   // "Open Web Store" button (messenger_extensions) opens INSIDE Messenger's
