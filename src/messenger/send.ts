@@ -2,6 +2,7 @@
 import { supa } from '../db/supabase';
 import { getReservationByOrderId } from '../services/reservations';
 import { getOrderItems } from '../services/orders';
+import { getServiceContent } from '../services/service-content';
 import { listImages } from '../api/supabase-storage';
 import { ENV_BASE_URL, requestBaseUrl } from './webhook';
 
@@ -691,9 +692,15 @@ export async function sendRatingRequest(psid: string, orderNumber: string, order
   ]);
 }
 
-/** Send catering menu - displays images only (no text, no buttons) */
+/** Send catering menu - text details followed by image carousel */
 export async function sendCateringMenu(psid: string): Promise<void> {
   console.log(`[sendCateringMenu] triggered for psid=${psid}`);
+
+  // Get the editable catering content from service-content
+  const content = await getServiceContent();
+
+  // Send catering text details first
+  await sendText(psid, content.catering_intro_text);
 
   // Fetch uploaded catering images from Supabase Storage bucket.
   // ONLY catering-tagged uploads (filenames prefixed "catering-") appear here.

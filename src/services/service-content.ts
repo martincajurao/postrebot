@@ -30,10 +30,7 @@ We offer catering for events, parties, and special occasions!
 ✔️ Delivery or pickup available
 ✔️ Bulk orders welcome
 
-Interested in our catering packages? Reply with:
-• "packages" - to see available packages
-• "custom" - to request a custom catering order
-• "quote" - for a price estimate`,
+📞 Message us to inquire about our catering services!`,
     catering_packages_text: `📦 CATERING PACKAGES
 
 Choose from our pre-configured packages for your event:
