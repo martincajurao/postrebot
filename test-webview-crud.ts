@@ -266,6 +266,46 @@ const server = app.listen(0, async () => {
     failed++;
   } finally {
     server.close();
+    // Self-cleanup: remove every trace this test (and past runs) left in the
+    // live DB — test_session_* / TEST_PSID_1 customers, their carts, orders
+    // and conversation states. Without this, Admin → Customers fills with
+    // "Test Customer" rows on every run.
+    try {
+      const { supa } = await import('./src/db/supabase');
+      const db = supa();
+      const { data: custs } = await db.from('customers')
+        .select('id, psid')
+        .or('psid.like.test_session_%,psid.eq.TEST_PSID_1');
+      const ids = (custs || []).map((c: any) => Number(c.id));
+      const psids = (custs || []).map((c: any) => String(c.psid));
+      if (ids.length > 0) {
+        const { data: ords } = await db.from('orders').select('id').in('customer_id', ids);
+        const orderIds = (ords || []).map((o: any) => Number(o.id));
+        if (orderIds.length > 0) {
+          await db.from('order_items').delete().in('order_id', orderIds);
+          await db.from('order_package_items').delete().in('order_id', orderIds);
+          await db.from('order_status_history').delete().in('order_id', orderIds);
+          await db.from('order_ratings').delete().in('order_id', orderIds);
+          await db.from('reservations').delete().in('order_id', orderIds);
+          await db.from('payments').delete().in('order_id', orderIds);
+          await db.from('orders').delete().in('id', orderIds);
+        }
+        // cart_items hang off carts(id), and carts are keyed by psid — there is
+        // no customer_id column on cart_items (the old cleanup silently failed
+        // on this, which is how test rows piled up in the admin panel).
+        const { data: cartRows } = await db.from('carts').select('id').in('psid', psids);
+        const cartIds = (cartRows || []).map((c: any) => Number(c.id));
+        if (cartIds.length > 0) {
+          await db.from('cart_items').delete().in('cart_id', cartIds);
+          await db.from('carts').delete().in('id', cartIds);
+        }
+        await db.from('conversation_states').delete().in('psid', psids);
+        await db.from('customers').delete().in('id', ids);
+        console.log('Cleanup: removed ' + ids.length + ' test customer row(s) and related data');
+      }
+    } catch (cleanErr: any) {
+      console.warn('Cleanup failed (non-fatal):', cleanErr && cleanErr.message);
+    }
     process.exit(failed > 0 ? 1 : 0);
   }
 });
