@@ -69,6 +69,13 @@ let allFoodPacks = [];
 let branchCatalog = [];
 let activeBranch = null;
 let cart = { items: [], totals: { subtotal: 0, delivery: 0, discount: 0, total: 0, breakdown: [] } };
+// Live delivery-fee estimate for the CURRENT saved location, shown in the cart
+// and checkout. Re-computed reactively whenever the location changes (saved
+// chip / GPS / map pin / chat share) — server-authoritative via /delivery-fee
+// with the local tiered mirror as an offline fallback. null = not known yet.
+let deliveryEstimate = null;
+let deliveryFetchTimer = null;   // debounce so a burst of location saves = one fetch
+let deliveryFetchSeq = 0;        // guards against stale responses racing each other
 let orders = [];
 let config = { payment: {}, contact: {} };
 let isInsideMessenger = false;
@@ -522,7 +529,7 @@ async function detectBranchFromDeviceGps() {
 const LOCAL_CART_KEY = () => 'webview_cart_' + sessionId;
 
 function emptyCart() {
-  return { items: [], nextId: 1, totals: { subtotal: 0, delivery: 0, discount: 0, total: 0, breakdown: [] } };
+  return { items: [], nextId: 1, totals: { subtotal: 0, delivery: 0, deliveryKnown: false, discount: 0, total: 0, breakdown: [] } };
 }
 
 async function loadCart() {
@@ -588,7 +595,9 @@ function localAddItem(kind, id, quantity, size, slotChoices) {
 }
 
 /** Recompute display totals: every line is priced NET (package discount already
- *  applied and shown dashed on the item itself), so subtotal = total directly. */
+ *  applied and shown dashed on the item itself), so subtotal is the net menu
+ *  total. The delivery-fee ESTIMATE for the customer's current saved location
+ *  is folded in reactively (re-priced authoritatively at checkout by the server). */
 function recalcCartTotals() {
   let subtotal = 0;
   let discount = 0;
@@ -604,8 +613,18 @@ function recalcCartTotals() {
       if (gross !== null && gross > unit + 0.001) discount += (gross - unit) * it.quantity;
     }
   }
-  // Lines are already discounted — no separate deduction applied to the total.
-  cart.totals = { subtotal, delivery: 0, discount, total: subtotal, breakdown };
+  // The delivery fee only applies to a non-empty delivery cart — with no items
+  // there is nothing to deliver (and no fare to show).
+  const hasItems = cart.items.length > 0;
+  const delivery = (hasItems && deliveryEstimate) ? Number(deliveryEstimate.fee) || 0 : 0;
+  cart.totals = {
+    subtotal,
+    delivery,
+    deliveryKnown: hasItems && !!deliveryEstimate,
+    discount,
+    total: subtotal + delivery,
+    breakdown,
+  };
 }
 
 function clearLocalCart() {
@@ -670,6 +689,8 @@ async function loadConfig() {
   renderConfig();
   const link = $id('messenger-link-disabled');
   if (link) link.href = 'https://m.me/postrefoodproducts';
+  // Admin-editable tiers arrived — the current location's fee may have changed.
+  refreshDeliveryEstimate();
 }
 
 async function loadOrders() {
@@ -1803,7 +1824,19 @@ function showCart() {
   }
   lines += `<div class="total-row"><span>Subtotal${cart.items.length > 0 ? ` (${cart.items.reduce((s, i) => s + i.quantity, 0)} item${cart.items.reduce((s, i) => s + i.quantity, 0) === 1 ? '' : 's'})` : ''}</span><span>${formatMoney(t.subtotal)}</span></div>`;
   if (Number(t.discount) > 0) lines += `<div class="total-row discount"><span>Package Savings (already applied)</span><span>−${formatMoney(t.discount)}</span></div>`;
-  lines += `<div class="total-row"><span>Delivery</span><span>${Number(t.delivery) > 0 ? formatMoney(t.delivery) : 'To be decided'}</span></div>`;
+  // Delivery line — LIVE estimate for the current saved location; updates
+  // automatically when the customer changes their location (chip/GPS/pin/share).
+  const feeKnown = !!deliveryEstimate;
+  const feeKm = (deliveryEstimate && deliveryEstimate.km != null) ? ' (est. ' + deliveryEstimate.km + ' km)' : '';
+  let deliveryHtml;
+  if (Number(t.delivery) > 0) {
+    deliveryHtml = `${formatMoney(t.delivery)}${feeKm ? `<span class="total-note">est. ${deliveryEstimate.km} km</span>` : ''}`;
+  } else if (feeKnown) {
+    deliveryHtml = `<span class="total-free">FREE${feeKm}</span>`;
+  } else {
+    deliveryHtml = '<span class="total-note">Set location for exact fee</span>';
+  }
+  lines += `<div class="total-row"><span>🛵 Delivery</span><span>${deliveryHtml}</span></div>`;
   lines += `<div class="total-row grand"><span>Total</span><span class="value">${formatMoney(t.total)}</span></div>`;
   totals.innerHTML = lines;
 
@@ -1880,6 +1913,15 @@ function syncCheckoutAddress(addr, force) {
   } catch (e) { /* never block the gate flow */ }
 }
 
+// Payment-method icons — inline SVG so they always render (no external logo
+// hotlinks = offline-safe inside Messenger's webview). Badge backgrounds are
+// painted in CSS (.pay-badge-cod / -gcash / -bank) with the brand hue.
+const PAY_ICONS = {
+  cod: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5.5" width="20" height="13" rx="2.5"/><circle cx="12" cy="12" r="3"/><path d="M6 9.5v.01M18 14.5v.01"/></svg>',
+  gcash: '<svg viewBox="0 0 24 24"><text x="12" y="17.5" text-anchor="middle" font-size="15" font-weight="800" fill="#fff" font-family="Arial, Helvetica, sans-serif">G</text></svg>',
+  bank: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5 12 3l9.5 6.5"/><path d="M4.5 9.5v9M9.75 9.5v9M14.25 9.5v9M19.5 9.5v9M2.5 20.5h19"/></svg>',
+};
+
 function startCheckout() {
   if (cart.items.length === 0) return showToast('Your cart is empty');
   const container = $id('checkout-form');
@@ -1891,62 +1933,118 @@ function startCheckout() {
 
   const pay = config.payment || {};
   const methods = [
-    { id: 'cod', label: 'Cash on Delivery', desc: pay.cod || 'Pay in cash when your order arrives.' },
-    { id: 'gcash', label: 'GCash', desc: pay.gcash || 'Pay via GCash.' },
-    { id: 'bank', label: 'Bank Transfer', desc: pay.bank || 'Pay via bank transfer.' },
+    { id: 'cod', label: 'Cash on Delivery', tag: 'Pay cash on arrival', desc: pay.cod || 'Pay in cash when your order arrives.' },
+    { id: 'gcash', label: 'GCash', tag: 'Pay via the GCash app', desc: pay.gcash || 'Pay via GCash.' },
+    { id: 'bank', label: 'Bank Transfer', tag: 'Transfer to our bank account', desc: pay.bank || 'Pay via bank transfer.' },
   ];
 
+  const qty = cart.items.reduce((s, i) => s + i.quantity, 0);
+  const qtyText = qty > 0 ? ` (${qty} item${qty === 1 ? '' : 's'})` : '';
+  const discountRow = Number(cart.totals.discount) > 0
+    ? `<div class="total-row discount"><span>Package savings</span><span>−${formatMoney(cart.totals.discount)}</span></div>`
+    : '';
+
   container.innerHTML = `
-    <div class="form-group">
-      <label>Full Name</label>
-      <input type="text" id="co-name" placeholder="Juan Dela Cruz" value="${esc(remembered?.name || '')}">
+    <div class="co-section">
+      <div class="co-section-title"><span class="co-step">1</span>Contact &amp; Delivery</div>
+      <div class="co-card">
+        <div class="form-group">
+          <label for="co-name">Full Name</label>
+          <input type="text" id="co-name" placeholder="Juan Dela Cruz" value="${esc(remembered?.name || '')}" autocomplete="name">
+        </div>
+        <div class="form-group">
+          <label>Order Type</label>
+          <input type="hidden" id="order-type" value="delivery">
+          <div class="co-seg" id="order-type-seg" role="tablist" aria-label="Order type">
+            <button type="button" class="active" data-value="delivery">🚚 Delivery</button>
+            <button type="button" data-value="pickup">🏬 Pickup</button>
+          </div>
+        </div>
+        <div class="form-group" id="address-group">
+          <label for="address">Delivery Address</label>
+          <textarea id="address" placeholder="House #, street, barangay, city">${esc((savedLoc && savedLoc.address) || remembered?.address || '')}</textarea>
+          <div class="field-hint">📍 Using your confirmed location — you can change it from the menu anytime.</div>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label for="phone">Contact Number</label>
+          <input type="tel" id="phone" placeholder="09XX-XXX-XXXX" value="${esc(remembered?.phone || '')}" autocomplete="tel">
+        </div>
+      </div>
     </div>
-    <div class="form-group">
-      <label>Order Type</label>
-      <select id="order-type">
-        <option value="delivery">Delivery</option>
-        <option value="pickup">Pickup</option>
-      </select>
+
+    <div class="co-section">
+      <div class="co-section-title"><span class="co-step">2</span>Schedule</div>
+      <div class="co-card">
+        <div class="co-grid-2">
+          <div class="form-group">
+            <label for="fulfill-date">Date</label>
+            <input type="date" id="fulfill-date">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label for="time-slot">Time Slot</label>
+            <select id="time-slot"><option value="">Select a date first</option></select>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="form-group" id="address-group">
-      <label>Delivery Address</label>
-      <textarea id="address" placeholder="House #, street, barangay, city">${esc((savedLoc && savedLoc.address) || remembered?.address || '')}</textarea>
+    <div class="co-section">
+      <div class="co-section-title"><span class="co-step">3</span>Payment</div>
+      <div class="co-card">
+        <div class="pay-options" role="radiogroup" aria-label="Payment method">
+          ${methods.map((m, i) => `
+            <div class="payment-option pay-${m.id}${i === 0 ? ' selected' : ''}" role="radio" aria-checked="${i === 0}" tabindex="0"
+                 onclick="selectPayment('${m.id}', this)"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectPayment('${m.id}', this);}">
+              <input type="radio" name="payment" value="${m.id}" ${i === 0 ? 'checked' : ''} class="pay-radio-input" aria-hidden="true" tabindex="-1">
+              <span class="pay-badge pay-badge-${m.id}">${PAY_ICONS[m.id]}</span>
+              <span class="pay-meta">
+                <span class="pay-name">${esc(m.label)}</span>
+                <span class="pay-tag">${esc(m.tag)}</span>
+              </span>
+              <span class="pay-dot"></span>
+            </div>`).join('')}
+        </div>
+        <div id="payment-info" class="pay-info pay-info-cod">${esc(methods[0].desc)}</div>
+      </div>
     </div>
-    <div class="form-group">
-      <label>Contact Number</label>
-      <input type="tel" id="phone" placeholder="09XX-XXX-XXXX" value="${esc(remembered?.phone || '')}">
+
+    <div class="co-section">
+      <div class="co-section-title"><span class="co-step">4</span>Notes <span class="co-optional">optional</span></div>
+      <div class="co-card">
+        <div class="form-group" style="margin-bottom:0">
+          <label for="notes">Delivery instructions / landmarks</label>
+          <textarea id="notes" placeholder="Optional: landmarks, drop-off instructions…"></textarea>
+        </div>
+      </div>
     </div>
-    <div class="form-group">
-      <label>Fulfillment Date</label>
-      <input type="date" id="fulfill-date">
+
+    <div class="co-summary">
+      <div class="co-summary-head">Order Summary</div>
+      <div class="total-row"><span>Subtotal${qtyText}</span><span>${formatMoney(cart.totals.subtotal)}</span></div>
+      ${discountRow}
+      <div class="total-row" id="delivery-fee-group"><span>🛵 Delivery</span><span id="delivery-fee-val">—</span></div>
+      <div class="total-row grand"><span>Total</span><span class="value" id="co-total-val">${formatMoney(cart.totals.total)}</span></div>
     </div>
-    <div class="form-group">
-      <label>Time Slot</label>
-      <select id="time-slot"><option value="">Select a date first</option></select>
-    </div>
-    <div class="form-group">
-      <label>Payment Method</label>
-      ${methods.map((m, i) => `
-        <div class="payment-option${i === 0 ? ' selected' : ''}" onclick="selectPayment('${m.id}', this)">
-          <input type="radio" name="payment" value="${m.id}"${i === 0 ? ' checked' : ''}> ${esc(m.label)}
-        </div>`).join('')}
-    </div>
-    <div id="payment-info" class="detail-desc">${esc(methods[0].desc)}</div>
-    <div class="form-group">
-      <label>Notes (optional)</label>
-      <textarea id="notes" placeholder="Landmarks, delivery instructions…"></textarea>
-    </div>
-    <div class="form-group" id="delivery-fee-group" style="display:none">
-      <div class="total-row"><span>🛵 Delivery Fee</span><span class="value" id="delivery-fee-val">—</span></div>
-    </div>
-    <div class="total-row grand" style="margin:12px 0"><span>Order Total</span><span class="value" id="co-total-val">${formatMoney(cart.totals.total)}</span></div>
+
     <button class="btn btn-primary btn-checkout" id="place-order-btn" onclick="placeOrder()">Place Order</button>
   `;
 
-  $id('order-type').addEventListener('change', function () {
-    $id('address-group').style.display = this.value === 'delivery' ? 'block' : 'none';
-    updateDeliveryFeeRow();
-  });
+  // Order-type segmented toggle keeps a hidden <input id="order-type"> so the
+  // existing checkout logic (placeOrder / updateDeliveryFeeRow) works unchanged.
+  const seg = $id('order-type-seg');
+  if (seg) {
+    seg.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', function () {
+        seg.querySelectorAll('button').forEach((x) => x.classList.remove('active'));
+        this.classList.add('active');
+        const hidden = $id('order-type');
+        if (hidden) hidden.value = this.dataset.value;
+        const addrGroup = $id('address-group');
+        if (addrGroup) addrGroup.style.display = this.dataset.value === 'delivery' ? 'block' : 'none';
+        updateDeliveryFeeRow();
+      });
+    });
+  }
   $id('fulfill-date').addEventListener('change', function () { loadTimeSlots(this.value); });
 
   // Reactive address: track hand-edits so auto-sync never stomps them, and
@@ -1960,13 +2058,68 @@ function startCheckout() {
   showView('view-checkout');
 }
 
-// ---------- Delivery fee estimate (client mirror of the server engine in
-// src/services/branches.ts) ----------
-// Tiers are ADMIN-EDITABLE (Admin → Settings → 🛵 Delivery) and arrive via
-// GET /config (`delivery`); these defaults apply only until config loads.
+// ---------- Delivery fee estimate (reactive) ----------
+// The estimate shown in the CART and CHECKOUT mirrors the server engine in
+// src/services/branches.ts (distance from the nearest branch origin to the
+// customer's saved pin, admin-editable tiers from GET /config). It refreshes
+// automatically whenever the customer changes location — saved chip, GPS fix,
+// map pin, or a chat-shared pin — so the fare is always current.
 // ≤ freeRadiusM → FREE · ≤ flatRadiusM → flatFee · beyond → flatFee + per100mFee/100 m.
 const DELIVERY_TIERS_DEFAULTS = { freeRadiusM: 1500, flatRadiusM: 2000, flatFee: 50, per100mFee: 1 };
 let deliveryTiers = null; // refreshed from /config on load
+
+/** Schedule a delivery-estimate refresh (debounced — a burst of location saves
+ *  must only trigger one fetch). Fires from saveLocation(), cart opens, config
+ *  refreshes, and after the branch catalog loads. */
+function refreshDeliveryEstimate() {
+  try {
+    if (deliveryFetchTimer) clearTimeout(deliveryFetchTimer);
+    deliveryFetchTimer = setTimeout(() => {
+      deliveryFetchTimer = null;
+      doRefreshDeliveryEstimate();
+    }, 200);
+  } catch (e) { /* never block the checkout flow */ }
+}
+
+async function doRefreshDeliveryEstimate() {
+  const seq = ++deliveryFetchSeq;
+  const loc = getSavedLocation();
+  const coords = locationCoords(loc || {});
+  if (!coords) { // no location / address-only (no pin) → fee is unknown
+    deliveryEstimate = null;
+    commitDeliveryEstimate(seq);
+    return;
+  }
+  // Server-authoritative first: same tiers/origins the checkout charges.
+  let est = null;
+  try {
+    const data = await api('/delivery-fee?lat=' + encodeURIComponent(coords.lat) + '&lng=' + encodeURIComponent(coords.lng));
+    if (data && Number.isFinite(Number(data.fee))) {
+      est = { fee: Number(data.fee), km: Number(data.distanceKm) || null };
+    }
+  } catch (e) {
+    console.warn('[webview] /delivery-fee failed — using local estimate:', e && e.message);
+  }
+  if (seq !== deliveryFetchSeq) return; // superseded by a newer save → drop
+  if (!est) est = estimateDeliveryFee(); // offline fallback (needs branchCatalog)
+  deliveryEstimate = est;
+  commitDeliveryEstimate(seq);
+}
+
+/** Recalc + persist + re-render totals now that the delivery estimate changed. */
+function commitDeliveryEstimate(seq) {
+  if (seq !== deliveryFetchSeq) return;
+  recalcCartTotals();
+  try {
+    storageSet(LOCAL_CART_KEY(), JSON.stringify(cart));
+  } catch (e) { /* non-fatal */ }
+  updateCartBadge();
+  refreshCartUI();       // cart view re-renders its Delivery/Total rows
+  updateDeliveryFeeRow(); // checkout view re-renders its fee row + grand total
+}
+
+/** Local fallback mirror of the server fee engine — used only when /delivery-fee
+ *  is unreachable (offline). Returns { fee, km } or null when not computable. */
 function estimateDeliveryFee() {
   const loc = getSavedLocation();
   if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return null;
@@ -1990,38 +2143,49 @@ function estimateDeliveryFee() {
   return { fee, km: Math.round(meters / 100) / 10 };
 }
 
-/** Show/hide the delivery-fee row and refresh the grand total in checkout. */
+/** Show/hide the delivery-fee row and refresh the grand total in checkout.
+ *  Uses the same reactive estimate as the cart (cart.totals already includes it). */
 function updateDeliveryFeeRow() {
   const group = $id('delivery-fee-group');
   const val = $id('delivery-fee-val');
   const total = $id('co-total-val');
   if (!group || !val || !total) return;
   const type = $id('order-type') ? $id('order-type').value : 'delivery';
+  const t = cart.totals || {};
   if (type !== 'delivery') {
     group.style.display = 'none';
-    total.textContent = formatMoney(cart.totals.total);
+    total.textContent = formatMoney(t.subtotal); // pickup = menu total, no fee
     return;
   }
-  const est = estimateDeliveryFee();
   group.style.display = '';
+  const est = deliveryEstimate;
   if (est) {
     val.textContent = est.fee === 0
       ? 'FREE (est. ' + est.km + ' km)'
       : formatMoney(est.fee) + ' (est. ' + est.km + ' km)';
-    total.textContent = formatMoney(cart.totals.total + est.fee);
+    total.textContent = formatMoney(t.total); // already includes the delivery fee
   } else {
     val.textContent = 'Set location first';
-    total.textContent = formatMoney(cart.totals.total);
+    total.textContent = formatMoney(t.subtotal);
   }
 }
 
 function selectPayment(method, el) {
-  document.querySelectorAll('.payment-option').forEach((p) => p.classList.remove('selected'));
+  document.querySelectorAll('.payment-option').forEach((p) => {
+    p.classList.remove('selected');
+    p.setAttribute('aria-checked', 'false');
+  });
   el.classList.add('selected');
-  const input = el.querySelector('input');
+  el.setAttribute('aria-checked', 'true');
+  const input = el.querySelector('input[name="payment"]');
   if (input) input.checked = true;
   const info = $id('payment-info');
-  if (info) info.textContent = (config.payment || {})[method] || '';
+  if (info) {
+    info.textContent = (config.payment || {})[method] || '';
+    // Color the instructions notice to match the chosen method (COD green,
+    // GCash blue, bank indigo).
+    info.className = 'pay-info pay-info-' + method;
+  }
 }
 
 /** Load the reservation slots for the chosen fulfillment date. */
@@ -2612,6 +2776,9 @@ function saveLocation(loc) {
     }
     storageSet(LOCATIONS_KEY(), JSON.stringify(deduped.slice(0, MAX_SAVED_LOCATIONS)));
   } catch { /* non-fatal */ }
+  // The delivery fee in the cart/checkout depends on this location — refresh it
+  // reactively (debounced server fetch with a local fallback).
+  refreshDeliveryEstimate();
 }
 
 /** Persist a label for a saved location ("Home", "Office", …). */
@@ -3985,6 +4152,11 @@ function clearAllSavedLocations() {
     activeBranch = null;
     pendingCoords = null;
     pinSource = null;
+    deliveryEstimate = null; // drop the cached fare for the now-cleared location
+    recalcCartTotals();
+    try { storageSet(LOCAL_CART_KEY(), JSON.stringify(cart)); } catch { /* non-fatal */ }
+    updateCartBadge();
+    refreshCartUI();
     console.log('[webview] All saved locations cleared');
     showToast('🗑️ All saved locations cleared');
   } catch (e) {
@@ -4041,7 +4213,11 @@ async function loadAppData() {
   } catch (e) {
     console.warn('[webview] /branches failed — branch filter still works from item data:', e && e.message);
   }
-  
+
+  // Branch centers (and the saved location) are ready — compute the live
+  // delivery-fee estimate so the cart/checkout show the real fare immediately.
+  refreshDeliveryEstimate();
+
   hideLoading();
   
   console.log('[webview] App data loaded:', {

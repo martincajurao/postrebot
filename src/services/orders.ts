@@ -2,7 +2,7 @@
 import { computeCartTotals, choiceUpgrade, normalizeChoices, priceFoodPack, pricePackage, priceProduct } from './pricing';
 import { clearCart, getCart } from './cart';
 import { syncReservationFromOrder } from './reservations';
-import { buildWazeAppUrl, buildWazeUrl, computeDeliveryFee, getBranchCatalog, getBranchCoords, getDeliveryTiers, nearestBranchKey } from './branches';
+import { buildWazeAppUrl, estimateDeliveryFee } from './branches';
 
 /**
  * Resolve a webview client-side cart into priced order items.
@@ -127,22 +127,17 @@ export async function createOrderFromCart(
   if (details.order_type === 'delivery' && hasCoords) {
     const lat = Number(details.delivery_lat);
     const lng = Number(details.delivery_lng);
-    const [origins, tiers] = await Promise.all([getBranchCoords(), getDeliveryTiers()]);
-    const branchKey = nearestBranchKey(lat, lng, await getBranchCatalog());
-    const origin = origins[branchKey || ''] || Object.values(origins)[0];
-    if (origin) {
-      const calc = computeDeliveryFee(origin.lat, origin.lng, lat, lng, tiers);
-      deliveryFee = calc.fee;
-      // Attach the Waze link to the delivery address so the rider can navigate
-      // with one tap straight from the admin order view. The custom scheme
-      // (waze://) opens the APP directly — even from inside Messenger's webview.
-      const wazeApp = buildWazeAppUrl(lat, lng);
-      const base = (details.address || '').trim();
-      const navLines = `📍 Navigate (opens Waze app): ${wazeApp}`;
-      addressWithWaze = base
-        ? (base.includes('waze://') ? base : `${base}\n${navLines}`)
-        : navLines;
-    }
+    const est = await estimateDeliveryFee(lat, lng);
+    deliveryFee = est.fee;
+    // Attach the Waze link to the delivery address so the rider can navigate
+    // with one tap straight from the admin order view. The custom scheme
+    // (waze://) opens the APP directly — even from inside Messenger's webview.
+    const wazeApp = buildWazeAppUrl(lat, lng);
+    const base = (details.address || '').trim();
+    const navLines = `📍 Navigate (opens Waze app): ${wazeApp}`;
+    addressWithWaze = base
+      ? (base.includes('waze://') ? base : `${base}\n${navLines}`)
+      : navLines;
   }
   // (Without coordinates the legacy behavior applies: admin enters the actual
   // fare when confirming the order.)

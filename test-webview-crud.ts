@@ -237,6 +237,19 @@ const server = app.listen(0, async () => {
     const delAgain = await req('/location?session=' + session, { method: 'DELETE' });
     assert('DELETE /location (idempotent)', delAgain.status === 200 && delAgain.data.ok === true, String(delAgain.data?.error || ''));
 
+    // 6d. Delivery-fee estimate (authoritative — same engine as checkout).
+    const feeNoCoords = await req('/delivery-fee');
+    assert('GET /delivery-fee (missing coords → 400)', feeNoCoords.status === 400);
+    const feeBad = await req('/delivery-fee?lat=999&lng=999');
+    assert('GET /delivery-fee (out of range → 400)', feeBad.status === 400);
+    const feeRes = await req('/delivery-fee?lat=' + 13.660 + '&lng=' + 123.177); // near Naga store
+    assert('GET /delivery-fee (valid)', feeRes.status === 200 && typeof feeRes.data.fee === 'number' && Number(feeRes.data.fee) >= 0,
+      'got ' + JSON.stringify(feeRes.data));
+    assert('GET /delivery-fee has distance', Number.isFinite(Number(feeRes.data?.distanceMeters)) && Number(feeRes.data.distanceMeters) >= 0);
+    const feePickup = await req('/delivery-fee?lat=' + 13.660 + '&lng=' + 123.177 + '&order_type=pickup');
+    assert('GET /delivery-fee (pickup → fee 0)', feePickup.status === 200 && Number(feePickup.data.fee) === 0,
+      'got ' + JSON.stringify(feePickup.data));
+
     // 7. Config, Enabled, Slots
     const cfg = await req('/config');
     assert('GET /config', cfg.status === 200 && cfg.data.payment && cfg.data.contact);

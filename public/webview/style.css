@@ -1071,40 +1071,230 @@ body {
   min-height: 60px;
 }
 
-.payment-option {
+/* === Checkout: numbered sections / cards === */
+.co-section {
+  margin-bottom: 20px;
+}
+
+.co-section-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px;
-  border: 2px solid #e9ecef;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #2d3436;
+  margin-bottom: 10px;
+}
+
+.co-step {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.co-optional {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: #95a5a6;
+}
+
+.co-card {
+  background: #fff;
+  border: 1px solid #eff1f3;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 1px 2px rgba(45, 52, 54, 0.04);
+}
+
+.co-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 380px) {
+  .co-grid-2 { grid-template-columns: 1fr; }
+}
+
+.field-hint {
+  font-size: 0.72rem;
+  color: #95a5a6;
+  margin-top: 5px;
+}
+
+/* Order-type segmented toggle */
+.co-seg {
+  display: flex;
+  background: #f1f3f5;
   border-radius: 12px;
+  padding: 4px;
+  gap: 4px;
+}
+
+.co-seg button {
+  flex: 1;
+  padding: 10px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #636e72;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.co-seg button.active {
+  background: #fff;
+  color: #e74c3c;
+  box-shadow: 0 2px 6px rgba(45, 52, 54, 0.14);
+}
+
+/* Payment options with brand badges */
+.pay-options {
+  display: flex;
+  flex-direction: column;
+}
+
+.payment-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 2px solid #eef0f2;
+  border-radius: 14px;
   cursor: pointer;
   margin-bottom: 10px;
-  transition: all 0.2s ease;
+  background: #fff;
+  transition: border-color 0.18s ease, background 0.18s ease,
+              box-shadow 0.18s ease, transform 0.12s ease;
   font-family: inherit;
 }
 
-.payment-option:active {
-  transform: scale(0.98);
-}
+.payment-option:last-child { margin-bottom: 0; }
+.payment-option:active { transform: scale(0.985); }
 
 .payment-option.selected {
   border-color: #e74c3c;
-  background: #fef5f4;
+  background: #fff8f7;
+  box-shadow: 0 4px 14px rgba(231, 76, 60, 0.12);
 }
 
-.payment-option input[type="radio"] {
-  accent-color: #e74c3c;
+.pay-badge {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: #fff;
+  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.12);
 }
 
-#payment-info {
-  margin-top: 10px;
-  padding: 12px;
+.pay-badge svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.pay-badge-cod   { background: linear-gradient(135deg, #2ecc71, #1e8449); }
+.pay-badge-gcash { background: linear-gradient(135deg, #1c6ef0, #0055c8); }
+.pay-badge-bank  { background: linear-gradient(135deg, #5b6fbf, #3b4f96); }
+
+.pay-meta {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.pay-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #2d3436;
+}
+
+.pay-tag {
+  font-size: 0.78rem;
+  color: #95a5a6;
+  margin-top: 2px;
+}
+
+.pay-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #d0d5d9;
+  flex: none;
+  position: relative;
+  transition: border-color 0.18s ease;
+}
+
+.payment-option.selected .pay-dot {
+  border-color: #e74c3c;
+}
+
+.payment-option.selected .pay-dot::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: #e74c3c;
+}
+
+/* Hidden native radio — kept so the existing placeOrder() reads the choice. */
+.pay-radio-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Payment instructions (admin-configured details), tinted per method */
+.pay-info {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
   background: #f8f9fa;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  color: #636e72;
-  line-height: 1.4;
+  border: 1px dashed #d5dbe0;
+  font-size: 0.84rem;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
+.pay-info-cod   { background: #ecf9f0; border-color: #a7e2bd; color: #166534; }
+.pay-info-gcash { background: #eef7ff; border-color: #7cc0ff; color: #0b4f8a; }
+.pay-info-bank  { background: #f0f3ff; border-color: #b9c6f0; color: #2d3e7a; }
+
+/* Order summary card */
+.co-summary {
+  background: #fff;
+  border: 2px solid #eef0f2;
+  border-radius: 16px;
+  padding: 16px;
+  margin-top: 4px;
+}
+
+.co-summary-head {
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: #2d3436;
+  margin-bottom: 8px;
+}
+
+.co-summary .total-row.grand .value {
+  color: #e74c3c;
+  font-size: 1.15rem;
 }
 
 /* === Orders === */
@@ -1475,6 +1665,19 @@ body {
 .total-row.discount {
   color: #27ae60;
   font-weight: 600;
+}
+
+/* Delivery line in the cart totals — LIVE estimate with an "est." note and a
+   highlighted FREE state so the (often free within radius) fare is obvious. */
+.total-note {
+  color: #95a5a6;
+  font-size: 0.8rem;
+  font-weight: 400;
+  margin-left: 6px;
+}
+.total-free {
+  color: #27ae60;
+  font-weight: 700;
 }
 
 .total-row.grand {

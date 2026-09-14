@@ -14,7 +14,7 @@ import { sendPushToAdmins } from '../services/push';
 import { sendText } from '../messenger/send';
 import { packageDefaults } from '../services/pricing';
 import { getStoreInfo } from '../services/store-info';
-import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey, getDeliveryTiers } from '../services/branches';
+import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey, getDeliveryTiers, estimateDeliveryFee } from '../services/branches';
 
 const r = Router();
 
@@ -639,6 +639,29 @@ r.get('/branches/nearest', async (req, res) => {
     }
     const catalog = await getBranchCatalog();
     res.json({ branch: nearestBranchKey(lat, lng, catalog) });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Authoritative delivery-fee estimate for a customer pin — the SAME fees the
+ *  checkout stores on the order, so the webview cart can show the real fare
+ *  (re-reading it on every location change) instead of a guessing client copy. */
+r.get('/delivery-fee', async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+      return res.status(400).json({ error: 'Valid lat and lng are required' });
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({ error: 'Coordinates out of range' });
+    }
+    const orderType = String(req.query.order_type || 'delivery');
+    if (orderType !== 'delivery') {
+      return res.json({ fee: 0, distanceMeters: 0, distanceKm: 0, branch: null });
+    }
+    res.json(await estimateDeliveryFee(lat, lng));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

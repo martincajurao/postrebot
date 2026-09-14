@@ -7,7 +7,7 @@ import {
   getVariantByProductAndSize, getFoodPacks, getFoodPackById, getPackageById,
   getPackages, getPackageSlots, getPackageSlotByNumber, getSlotOptions,
   getCustomSlotOptions, getPackageOptionBySlotAndProduct,
-  saveCustomerDeliveryLocation,
+  saveCustomerDeliveryLocation, getCustomerDeliveryLocation,
 } from '../db';
 import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarousel, sendUrlButton, SendResult, sendOrderConfirmation, sendOrderStatus, sendOrderHistory, sendRatingRequest, GRAPH_API_VERSION, ensureWebviewWhitelisted, sendCateringMenu } from './send';
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
@@ -15,6 +15,7 @@ import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, ge
 import { sendPushToAdmins } from '../services/push';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
+import { estimateDeliveryFee } from '../services/branches';
 import { signWebviewPsid } from '../api/auth';
 import { getStoreInfo, StoreInfo } from '../services/store-info';
 
@@ -494,12 +495,27 @@ async function showCart(psid: string) {
     return mainMenu(psid);
   }
   let totals: any;
+  let deliveryKnown = false;
   try {
     // If the customer already chose a delivery area during checkout, show its fee.
     const stateNow = await getState(psid);
-    const fee = (stateNow.ctx?.delivery_type === 'delivery' && stateNow.ctx?.delivery_fee)
+    let fee = (stateNow.ctx?.delivery_type === 'delivery' && stateNow.ctx?.delivery_fee)
       ? stateNow.ctx.delivery_fee
       : 0;
+    deliveryKnown = stateNow.ctx?.delivery_type === 'delivery' && Number.isFinite(Number(stateNow.ctx?.delivery_fee));
+    if (!fee) {
+      // No fee chosen yet — show the LIVE estimate for the customer's saved pin
+      // (chat-shared location or the last webview-confirmed location). Re-read on
+      // every cart view, so sharing a new location updates the fare immediately.
+      try {
+        const loc = await getCustomerDeliveryLocation(psid);
+        if (loc) {
+          const est = await estimateDeliveryFee(loc.lat, loc.lng);
+          deliveryKnown = est.hasOrigin;
+          if (est.hasOrigin) fee = est.fee;
+        }
+      } catch { /* fees stay 0 → admin sets the fare at confirmation */ }
+    }
     totals = await cartTotals(psid, fee);
   } catch {
     // A stale item (dish no longer allowed in its slot, changed price, etc.)
@@ -525,6 +541,7 @@ async function showCart(psid: string) {
       await sendText(psid, `⚠️ ${broken} item(s) in your cart are no longer available and were removed.`);
     }
     totals = { subtotal, delivery: 0, discount, total: Math.max(0, subtotal - discount) };
+    deliveryKnown = false; // fallback totals exclude the fee → don't claim Free either
     if (keep.length === 0) {
       await sendText(psid, '🛒 Your cart is empty.\n\nBrowse our menu to add items!');
       return mainMenu(psid);
@@ -542,6 +559,10 @@ async function showCart(psid: string) {
     try { lineTotal = (await computeCartTotals([i], 0)).subtotal; } catch { lineTotal = 0; }
     return `• ${label} — ${money(lineTotal)}`;
   })).then(l => l.join('\n'));
+  // Delivery line: live estimate when known (fee > 0 OR free within the radius).
+  const deliveryLine = totals.delivery > 0
+    ? `📦 Delivery: ${money(totals.delivery)}\n`
+    : (deliveryKnown ? `📦 Delivery: Free 🎉\n` : '');
   await sendText(psid,
     `🛒 YOUR CART\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
@@ -549,7 +570,7 @@ async function showCart(psid: string) {
     `━━━━━━━━━━━━━━━━━━━\n` +
     `📋 Subtotal: ${money(totals.subtotal)}\n` +
     `${totals.discount > 0 ? `🏷️ Discount: -${money(totals.discount)}\n` : ''}` +
-    `${totals.delivery > 0 ? `📦 Delivery: ${money(totals.delivery)}\n` : ''}` +
+    deliveryLine +
     `💰 TOTAL: ${money(totals.total)}`
   );
   return sendQuickReplies(psid, 'What would you like to do?', [

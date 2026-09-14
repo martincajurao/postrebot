@@ -243,6 +243,22 @@ export function computeDeliveryFee(fromLat: number, fromLng: number, toLat: numb
   return { fee, distanceMeters: Math.round(distanceMeters), distanceKm: Math.round(distanceMeters / 100) / 10 };
 }
 
+/** Authoritative distance-based delivery estimate for a customer coordinate —
+ *  computed from the NEAREST branch origin (same fee the order will be charged).
+ *  Returns hasOrigin=false when no branch with coordinates exists yet (fee stays
+ *  0 and the admin sets the fare manually at confirmation, as before). */
+export async function estimateDeliveryFee(
+  lat: number,
+  lng: number
+): Promise<{ fee: number; distanceMeters: number; distanceKm: number; branch: string | null; hasOrigin: boolean }> {
+  const [origins, tiers, catalog] = await Promise.all([getBranchCoords(), getDeliveryTiers(), getBranchCatalog()]);
+  const branchKey = nearestBranchKey(lat, lng, catalog);
+  const origin = origins[branchKey || ''] || Object.values(origins)[0];
+  if (!origin) return { fee: 0, distanceMeters: 0, distanceKm: 0, branch: branchKey, hasOrigin: false };
+  const calc = computeDeliveryFee(origin.lat, origin.lng, lat, lng, tiers);
+  return { fee: calc.fee, distanceMeters: calc.distanceMeters, distanceKm: calc.distanceKm, branch: branchKey, hasOrigin: true };
+}
+
 /** Waze deep link so the rider can one-tap navigate to the drop-off pin. */
 export function buildWazeUrl(lat: number, lng: number): string {
   return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
