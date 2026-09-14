@@ -2600,13 +2600,16 @@ function removeSavedLocation(id) {
       if (c && lastServerPin && coordsDistanceMeters(c, lastServerPin) <= DEDUPE_RADIUS_METERS) {
         lastServerPin = null;
         lastServerPinKey = null;
+        markChipFresh(null); // chip gone → no green highlight either
         api('/location?session=' + encodeURIComponent(sessionId), { method: 'DELETE' }).catch(() => {});
       }
     } catch (e) { /* server sync is best-effort — the chip is already gone locally */ }
   } catch { /* non-fatal */ }
 }
 
-/** Render the saved-location chips inside the gate. Tap = use immediately. */
+/** Render the saved-location chips inside the gate. Tap = use immediately.
+ *  A chip that was just captured via the phone-browser page gets the green
+ *  .fresh treatment so the customer visibly sees their location landed. */
 function renderSavedLocations() {
   const wrap = $id('loc-saved');
   const listEl = $id('loc-saved-list');
@@ -2617,12 +2620,20 @@ function renderSavedLocations() {
   listEl.innerHTML = list.map((l) => {
     const title = esc(l.label || l.address);
     const sub = l.label ? esc(l.address) : '';
-    return `<div class="loc-saved-chip" onclick="useSavedLocation('${esc(l.id)}')">
-      <span class="loc-saved-icon">📍</span>
+    const fresh = l.id === freshServerPinId;
+    return `<div class="loc-saved-chip${fresh ? ' fresh' : ''}" onclick="useSavedLocation('${esc(l.id)}')">
+      <span class="loc-saved-icon">${fresh ? '✅' : '📍'}</span>
       <span class="loc-saved-text"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</span>
       <button type="button" class="loc-saved-del" aria-label="Remove" onclick="event.stopPropagation(); removeSavedLocation('${esc(l.id)}')">✕</button>
     </div>`;
   }).join('');
+  // A just-captured chip should be impossible to miss — scroll it into view.
+  if (freshServerPinId) {
+    try {
+      const el = listEl.querySelector('.loc-saved-chip.fresh');
+      if (el && el.scrollIntoView) setTimeout(() => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 350);
+    } catch (e) {}
+  }
 }
 
 // Menu is revealed ONLY after the customer's branch is known — the catalogs
@@ -3514,6 +3525,20 @@ function setMapPin(latlng, fromGps) {
  *  becomes visible again (returning from gps.html does NOT reload the page). */
 let lastServerPinKey = null;
 let lastServerPin = null; // raw coords of the applied server pin (for removal sync)
+/** Chip id of the just-captured server pin — renders it green until dismissed. */
+let freshServerPinId = null;
+let freshServerPinTimer = null;
+function markChipFresh(id) {
+  freshServerPinId = id || null;
+  try { if (freshServerPinTimer) clearTimeout(freshServerPinTimer); } catch (e) {}
+  if (freshServerPinId) {
+    // Green highlight holds ~15s, then settles back to a normal chip.
+    freshServerPinTimer = setTimeout(() => {
+      freshServerPinId = null;
+      renderSavedLocations();
+    }, 15000);
+  }
+}
 async function loadChatLocationIntoGate() {
   try {
     const loc = await api('/location?session=' + encodeURIComponent(sessionId));
@@ -3534,13 +3559,20 @@ async function loadChatLocationIntoGate() {
     try { if (locMap && typeof locMap.flyTo === 'function') locMap.flyTo([lat, lng], 16, { duration: 0.6 }); } catch (e) {}
     setCoordsDisplay(lat, lng);
     updateLocConfirmState();
-    showToast('📍 Loaded your saved location — check the pin and confirm');
+    showToast('✅ Location captured! Tap the green card below to use it');
     // Register the server pin as a saved-location chip so browser-captured
     // spots appear under "Saved locations" (they must survive device/storage
     // loss, which localStorage-only entries wouldn't).
     try {
       const serverEntry = { address: loc.address || ('Pinned at ' + lat.toFixed(5) + ', ' + lng.toFixed(5)), lat, lng, source: 'gps' };
-      if (!getSavedLocations().some((l) => samePlace(l, serverEntry))) saveLocation(serverEntry);
+      let chipId = null;
+      const existing = getSavedLocations().find((l) => samePlace(l, serverEntry));
+      if (existing) chipId = existing.id;
+      else {
+        saveLocation(serverEntry);
+        chipId = (getSavedLocations().find((l) => samePlace(l, serverEntry)) || {}).id || null;
+      }
+      markChipFresh(chipId); // green ✅ chip — visible proof the capture landed
       renderSavedLocations();
     } catch (e) {}
     try { if (typeof gpsLog === 'function') gpsLog('server location prefilled lat=' + lat + ' lng=' + lng, 'dbg-ok'); } catch (e) {}
