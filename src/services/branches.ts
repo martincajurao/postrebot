@@ -153,10 +153,10 @@ export function nearestBranchKey(lat: number, lng: number, catalog: BranchCatalo
 
 // ---------- Delivery fee engine ----------
 // Tiered, distance-based from the store (branch origin) to the customer's pin:
-//   ≤ 800 m    → FREE (₱0)
-//   800 m–2 km → ₱50 fixed
+//   ≤ 1.5 km   → FREE (₱0)
+//   1.5–2 km   → ₱50 fixed
 //   > 2 km     → ₱50 + ₱1 per 100 m (each partial 100 m rounds up)
-export const DELIVERY_FREE_RADIUS_M = 800;
+export const DELIVERY_FREE_RADIUS_M = 1500;
 export const DELIVERY_FIXED_RADIUS_M = 2000;
 export const DELIVERY_BASE_FEE = 50;
 export const DELIVERY_FEE_PER_100M = 1;
@@ -174,7 +174,7 @@ export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: 
 }
 
 /** Tiered distance-based delivery fee:
- *  ≤ 800 m → ₱0 · 800 m–2 km → ₱50 fixed · > 2 km → ₱50 + ₱1/100 m. */
+ *  ≤ 1.5 km → ₱0 · 1.5–2 km → ₱50 fixed · > 2 km → ₱50 + ₱1/100 m. */
 export function computeDeliveryFee(fromLat: number, fromLng: number, toLat: number, toLng: number): {
   fee: number; distanceMeters: number; distanceKm: number;
 } {

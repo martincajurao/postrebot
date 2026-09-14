@@ -117,8 +117,9 @@ export async function createOrderFromCart(
   },
   clientItems?: any[]
 ) {
-  // Delivery fee: distance-based (₱50 base + ₱1 per 100 m) computed from the
-  // nearest store origin to the customer's confirmed pin. Without coords the
+  // Delivery fee: distance-based from the nearest store origin to the
+  // customer's confirmed pin (tiers in src/services/branches.ts:
+  // ≤1.5 km free · 1.5–2 km ₱50 · >2 km ₱50 + ₱1/100 m). Without coords the
   // fee stays 0 and the admin still sets the fare manually at confirmation.
   const hasCoords = Number.isFinite(details.delivery_lat) && Number.isFinite(details.delivery_lng);
   let deliveryFee = 0;

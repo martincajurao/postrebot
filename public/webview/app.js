@@ -1930,8 +1930,13 @@ function startCheckout() {
   showView('view-checkout');
 }
 
-// ---------- Delivery fee estimate (client mirror of the server engine) ----------
-// ₱50 base + ₱1 per 100 m from the nearest store origin to the confirmed pin.
+// ---------- Delivery fee estimate (client mirror of the server engine in
+// src/services/branches.ts — keep the tiers in sync!) ----------
+// ≤ 1.5 km → FREE · 1.5–2 km → ₱50 flat · > 2 km → ₱50 + ₱1 per 100 m.
+const DELIVERY_FREE_M = 1500;
+const DELIVERY_FLAT_M = 2000;
+const DELIVERY_FLAT_FEE = 50;
+const DELIVERY_PER_100M = 1;
 function estimateDeliveryFee() {
   const loc = getSavedLocation();
   if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return null;
@@ -1947,7 +1952,11 @@ function estimateDeliveryFee() {
   const dx = (best.lng - loc.lng) * 111320 * Math.cos((loc.lat * Math.PI) / 180);
   const dy = (best.lat - loc.lat) * 110574;
   const meters = Math.sqrt(dx * dx + dy * dy);
-  return { fee: 50 + Math.ceil(meters / 100), km: Math.round(meters / 100) / 10 };
+  let fee;
+  if (meters <= DELIVERY_FREE_M) fee = 0;
+  else if (meters <= DELIVERY_FLAT_M) fee = DELIVERY_FLAT_FEE;
+  else fee = DELIVERY_FLAT_FEE + Math.ceil(meters / 100) * DELIVERY_PER_100M;
+  return { fee, km: Math.round(meters / 100) / 10 };
 }
 
 /** Show/hide the delivery-fee row and refresh the grand total in checkout. */
@@ -1965,7 +1974,9 @@ function updateDeliveryFeeRow() {
   const est = estimateDeliveryFee();
   group.style.display = '';
   if (est) {
-    val.textContent = formatMoney(est.fee) + ' (est. ' + est.km + ' km)';
+    val.textContent = est.fee === 0
+      ? 'FREE (est. ' + est.km + ' km)'
+      : formatMoney(est.fee) + ' (est. ' + est.km + ' km)';
     total.textContent = formatMoney(cart.totals.total + est.fee);
   } else {
     val.textContent = 'Set location first';
