@@ -3068,17 +3068,48 @@ function showLocationGate() {
   const wrap = document.querySelector('.loc-map-wrap');
   if (wrap) wrap.style.display = '';
 
-  // Inside Messenger (and Android webviews above all) the browser GPS prompt
-  // can never appear — surface "Set my location in phone browser" (the
-  // gps.html capture page) as a first-class alternative next to the GPS button.
+  // OS CHECK FIRST — Android vs iOS. On Android inside Messenger (or any
+  // in-app webview) the GPS prompt can never appear (it's gated behind the
+  // host app's native permission, which Meta doesn't implement), so REPLACE
+  // the "Use my current location" button with "Set my location in phone
+  // browser" (the gps.html capture page) — the only path that actually works.
+  // On iOS the WKWebView prompt DOES work, so the GPS button stays primary and
+  // the browser fallback only appears via the failure paths if GPS fails.
   try {
+    const ua = navigator.userAgent || '';
+    const isAndroidDevice = /Android/i.test(ua);
+    const isIOSDevice = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && 'ontouchend' in document);
+    const gpsBtn = $id('loc-gps-btn');
     const browserBtn = $id('loc-browser-btn');
-    if (browserBtn) {
-      const inMessenger = (typeof detectMessengerUserAgent === 'function' && detectMessengerUserAgent()) || isAndroidWebView();
-      browserBtn.classList.toggle('hidden', !inMessenger);
+    const browserInstr = $id('loc-browser-instr');
+    const chromeBtn = $id('loc-chrome-btn');
+    // Android + in-app browser (Messenger UA or a system WebView) = GPS dead.
+    // NOTE: full Chrome on Android is NOT an in-app browser — its prompt works,
+    // so it keeps the GPS button.
+    const androidInApp = isAndroidDevice && (
+      (typeof detectMessengerUserAgent === 'function' && detectMessengerUserAgent()) ||
+      isAndroidWebView()
+    );
+    if (androidInApp) {
+      // REPLACE locate-me with the phone-browser capture CTA.
+      if (gpsBtn) gpsBtn.classList.add('hidden');
+      if (browserBtn) browserBtn.classList.remove('hidden');
+      if (browserInstr) browserInstr.classList.remove('hidden');
+      if (chromeBtn) chromeBtn.classList.remove('hidden');
+    } else {
+      // iOS (WKWebView answers the prompt) / desktop / Android Chrome: GPS
+      // button stays primary; fallbacks reveal via failure paths if needed.
+      if (gpsBtn) gpsBtn.classList.remove('hidden');
+      if (browserBtn) browserBtn.classList.add('hidden');
+      if (browserInstr) browserInstr.classList.add('hidden');
+      if (chromeBtn) chromeBtn.classList.add('hidden');
     }
+    // Observability for the OS-detection decision (visible with GPS_DEBUG on).
+    try { if (typeof gpsLog === 'function') gpsLog('gate: android=' + isAndroidDevice + ' ios=' + isIOSDevice + ' inApp=' + androidInApp + ' → ' + (androidInApp ? 'GPS button REPLACED by browser capture' : 'GPS button primary')); } catch (e2) {}
   } catch (e) {}
-  hideBrowserInstruction(); // fresh open always starts with the locate button
+  // NOTE: hideBrowserInstruction() is intentionally NOT called here — it would
+  // re-show the GPS button and undo the Android replacement above. On the GPS
+  // success path applyGPSFix() calls it, which is correct (GPS worked there).
 
   // If this session already has a location saved server-side (browser capture
   // or an earlier confirm), prefill the pin so Android users don't have to
@@ -3485,7 +3516,7 @@ async function useCurrentLocation(viaAuto) {
       if (!alive) {
         try { if (typeof gpsLog === 'function') gpsLog('Android webview probe: provider silent — skipping GPS run', 'dbg-warn'); } catch (e) {}
         setGPSButtonState('idle');
-        setLocateBar('error', "📍 GPS is blocked here — tap 'Set my location in phone browser' below, or drop your pin on the map");
+        setLocateBar('error', "📍 GPS is blocked here — tap 'Set my location in phone browser' above, or drop your pin on the map");
         setRetryVisible(false);
         showOpenInBrowserHelp();
         showBrowserInstruction();
