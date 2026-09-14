@@ -12,7 +12,7 @@ import {
 import { choiceUpgrade, computeCartTotals, packageDefaults, priceProduct } from '../services/pricing';
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
 import { getServiceContent, SERVICE_CONTENT_KEYS, invalidateServiceCache } from '../services/service-content';
-import { getBranches, saveBranches, parseBranches, serializeBranches, getBranchCoords, saveBranchCoords } from '../services/branches';
+import { getBranches, saveBranches, parseBranches, serializeBranches, getBranchCoords, saveBranchCoords, getDeliveryTiers, saveDeliveryTiers } from '../services/branches';
 import { notifyOrderStatus, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
 
 const r = Router();
@@ -1309,6 +1309,24 @@ r.put('/store-info', async (req, res) => {
     }
     invalidateStoreInfoCache();
     res.json({ ok: true, updated: updates });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Delivery fee tiers (Admin → Settings → 🛵 Delivery) ----
+// Stored in app_settings['delivery_tiers']; 60s in-process cache is
+// invalidated on save, so checkout fees update immediately.
+r.get('/delivery-tiers', async (_req, res) => {
+  try { res.json(await getDeliveryTiers()); } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+r.put('/delivery-tiers', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.freeRadiusM == null && b.flatRadiusM == null && b.flatFee == null && b.per100mFee == null) {
+      return res.status(400).json({ error: 'Nothing to update' });
+    }
+    const tiers = await saveDeliveryTiers(b);
+    res.json({ ok: true, tiers });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

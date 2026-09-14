@@ -663,6 +663,7 @@ async function loadConfig() {
     const data = await api('/config');
     if (data && data.payment) config.payment = data.payment;
     if (data && data.contact) config.contact = data.contact;
+    if (data && data.delivery) deliveryTiers = { ...DELIVERY_TIERS_DEFAULTS, ...data.delivery };
   } catch (e) {
     console.warn('[webview] /config failed:', e && e.message);
   }
@@ -1931,12 +1932,12 @@ function startCheckout() {
 }
 
 // ---------- Delivery fee estimate (client mirror of the server engine in
-// src/services/branches.ts — keep the tiers in sync!) ----------
-// ≤ 1.5 km → FREE · 1.5–2 km → ₱50 flat · > 2 km → ₱50 + ₱1 per 100 m.
-const DELIVERY_FREE_M = 1500;
-const DELIVERY_FLAT_M = 2000;
-const DELIVERY_FLAT_FEE = 50;
-const DELIVERY_PER_100M = 1;
+// src/services/branches.ts) ----------
+// Tiers are ADMIN-EDITABLE (Admin → Settings → 🛵 Delivery) and arrive via
+// GET /config (`delivery`); these defaults apply only until config loads.
+// ≤ freeRadiusM → FREE · ≤ flatRadiusM → flatFee · beyond → flatFee + per100mFee/100 m.
+const DELIVERY_TIERS_DEFAULTS = { freeRadiusM: 1500, flatRadiusM: 2000, flatFee: 50, per100mFee: 1 };
+let deliveryTiers = null; // refreshed from /config on load
 function estimateDeliveryFee() {
   const loc = getSavedLocation();
   if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return null;
@@ -1952,10 +1953,11 @@ function estimateDeliveryFee() {
   const dx = (best.lng - loc.lng) * 111320 * Math.cos((loc.lat * Math.PI) / 180);
   const dy = (best.lat - loc.lat) * 110574;
   const meters = Math.sqrt(dx * dx + dy * dy);
+  const T = deliveryTiers || DELIVERY_TIERS_DEFAULTS;
   let fee;
-  if (meters <= DELIVERY_FREE_M) fee = 0;
-  else if (meters <= DELIVERY_FLAT_M) fee = DELIVERY_FLAT_FEE;
-  else fee = DELIVERY_FLAT_FEE + Math.ceil(meters / 100) * DELIVERY_PER_100M;
+  if (meters <= T.freeRadiusM) fee = 0;
+  else if (meters <= T.flatRadiusM) fee = T.flatFee;
+  else fee = T.flatFee + Math.ceil(meters / 100) * T.per100mFee;
   return { fee, km: Math.round(meters / 100) / 10 };
 }
 

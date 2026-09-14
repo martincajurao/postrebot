@@ -14,7 +14,7 @@ import { sendPushToAdmins } from '../services/push';
 import { sendText } from '../messenger/send';
 import { packageDefaults } from '../services/pricing';
 import { getStoreInfo } from '../services/store-info';
-import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey } from '../services/branches';
+import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey, getDeliveryTiers } from '../services/branches';
 
 const r = Router();
 
@@ -648,6 +648,8 @@ r.get('/branches/nearest', async (req, res) => {
 
 r.get('/config', async (_req, res) => {
   const v = await getStoreInfo();
+  let delivery = null;
+  try { delivery = await getDeliveryTiers(); } catch { /* client keeps its defaults */ }
   res.json({
     payment: {
       cod: 'Pay in cash when your order arrives.',
@@ -660,6 +662,7 @@ r.get('/config', async (_req, res) => {
       address: v.contact_address,
       hours: v.contact_hours,
     },
+    delivery,
   });
 });
 

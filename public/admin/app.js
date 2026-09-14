@@ -2694,8 +2694,9 @@ async function renderPushCard() {
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 views.settings = async (main) => {
-  const [hours, blocked, slots, storeInfo, branchData] = await Promise.all([
+  const [hours, blocked, slots, storeInfo, branchData, tiers] = await Promise.all([
     api('/business-hours'), api('/blocked-dates'), api('/time-slots'), api('/store-info'), api('/branches'),
+    api('/delivery-tiers').catch(() => null),
   ]);
   if (branchData?.branches?.length) BRANCHES = branchData.branches;
   const activeTab = sessionStorage.getItem('settingsTab') || 'notifications';
@@ -2705,6 +2706,7 @@ views.settings = async (main) => {
       <button class="tab-btn${activeTab === 'notifications' ? ' active' : ''}" data-tab="notifications">🔔 Notifications</button>
       <button class="tab-btn${activeTab === 'schedule' ? ' active' : ''}" data-tab="schedule">🕐 Schedule</button>
       <button class="tab-btn${activeTab === 'store' ? ' active' : ''}" data-tab="store">💳 Payment &amp; Contact</button>
+      <button class="tab-btn${activeTab === 'delivery' ? ' active' : ''}" data-tab="delivery">🛵 Delivery</button>
     </div>
     <div class="tab-pane${activeTab === 'notifications' ? ' active' : ''}" data-pane="notifications">
     <div class="card"><h3>🔔 Push Notifications &amp; Sound</h3>
@@ -2775,6 +2777,17 @@ views.settings = async (main) => {
         <input id="br-list" value="${esc(BRANCHES.join(', '))}"></div>
       <p class="muted" style="font-size:12px;margin-top:8px">Used by <b>Menu → Products</b> and <b>Packages</b> so you can make an item available at specific branches only. Items with no branch restriction stay available everywhere. Renaming a branch does <b>not</b> update items that already have restrictions — edit those items to re-select the new branch name.</p>
       <button class="btn" id="br-save">Save branches</button>
+    </div>
+    </div>
+    <div class="tab-pane${activeTab === 'delivery' ? ' active' : ''}" data-pane="delivery">
+    <div class="card"><h3>🛵 Delivery Fee Tiers</h3>
+      <p class="muted" style="font-size:12.5px;margin-bottom:10px">Distance is measured from the nearest store branch to the customer's confirmed pin. These tiers drive checkout estimates <b>and</b> the fee stored on the order (bot + web store). Takes effect immediately after saving.</p>
+      <div class="slot-row"><span>Free delivery within (meters)</span><input type="number" id="dt-free" min="0" step="100" style="width:120px"></div>
+      <div class="slot-row"><span>Flat fee charged up to (meters)</span><input type="number" id="dt-flat" min="0" step="100" style="width:120px"></div>
+      <div class="slot-row"><span>Flat fee amount (₱)</span><input type="number" id="dt-fee" min="0" step="1" style="width:120px"></div>
+      <div class="slot-row"><span>₱ per 100 m beyond the flat radius</span><input type="number" id="dt-per" min="0" step="1" style="width:120px"></div>
+      <p class="muted" style="font-size:12.5px;margin-top:10px" id="dt-preview"></p>
+      <button class="btn" id="dt-save">Save delivery tiers</button>
     </div>
     </div>`;
 
@@ -2890,6 +2903,37 @@ views.settings = async (main) => {
     BRANCHES = (res.branches || BRANCHES).map((b) => String(b).toLowerCase());
     document.getElementById('br-list').value = BRANCHES.join(', ');
     toast('Branches saved — Menu & Packages now use this list');
+  }));
+
+  // ---- 🛵 Delivery fee tiers ----
+  const T = tiers || { freeRadiusM: 1500, flatRadiusM: 2000, flatFee: 50, per100mFee: 1 };
+  const dtFree = main.querySelector('#dt-free'), dtFlat = main.querySelector('#dt-flat'),
+        dtFee = main.querySelector('#dt-fee'), dtPer = main.querySelector('#dt-per'),
+        dtPreviewEl = main.querySelector('#dt-preview');
+  dtFree.value = T.freeRadiusM; dtFlat.value = T.flatRadiusM;
+  dtFee.value = T.flatFee; dtPer.value = T.per100mFee;
+  const dtPreview = () => {
+    const fr = Number(dtFree.value) || 0, fl = Math.max(Number(dtFlat.value) || 0, fr),
+          fee = Number(dtFee.value) || 0, per = Number(dtPer.value) || 0;
+    const ex = (m) => m <= fr ? 'FREE' : (m <= fl ? '₱' + fee : '₱' + (fee + Math.ceil(m / 100) * per));
+    if (dtPreviewEl) dtPreviewEl.textContent =
+      `Preview — 1 km: ${ex(1000)} · 1.8 km: ${ex(1800)} · 3 km: ${ex(3000)} · 5 km: ${ex(5000)}`;
+  };
+  [dtFree, dtFlat, dtFee, dtPer].forEach((el) => el.addEventListener('input', dtPreview));
+  dtPreview();
+  main.querySelector('#dt-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
+    const res = await api('/delivery-tiers', { method: 'PUT', body: {
+      freeRadiusM: Number(dtFree.value) || 0,
+      flatRadiusM: Number(dtFlat.value) || 0,
+      flatFee: Number(dtFee.value) || 0,
+      per100mFee: Number(dtPer.value) || 0,
+    } });
+    if (res.tiers) {
+      dtFree.value = res.tiers.freeRadiusM; dtFlat.value = res.tiers.flatRadiusM;
+      dtFee.value = res.tiers.flatFee; dtPer.value = res.tiers.per100mFee;
+      dtPreview();
+    }
+    toast('Delivery tiers saved — live immediately');
   }));
 };
 

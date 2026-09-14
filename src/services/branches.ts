@@ -152,14 +152,66 @@ export function nearestBranchKey(lat: number, lng: number, catalog: BranchCatalo
 }
 
 // ---------- Delivery fee engine ----------
-// Tiered, distance-based from the store (branch origin) to the customer's pin:
-//   ≤ 1.5 km   → FREE (₱0)
-//   1.5–2 km   → ₱50 fixed
-//   > 2 km     → ₱50 + ₱1 per 100 m (each partial 100 m rounds up)
+// Tiered, distance-based from the store (branch origin) to the customer's pin.
+// The constants below are the DEFAULTS — Admin → Settings → 🛵 Delivery stores
+// overrides in app_settings['delivery_tiers'] (60s in-process cache).
+//   ≤ freeRadiusM           → FREE (₱0)
+//   freeRadiusM–flatRadiusM → flatFee fixed
+//   > flatRadiusM           → flatFee + per100mFee per 100 m (partial rounds up)
 export const DELIVERY_FREE_RADIUS_M = 1500;
 export const DELIVERY_FIXED_RADIUS_M = 2000;
 export const DELIVERY_BASE_FEE = 50;
 export const DELIVERY_FEE_PER_100M = 1;
+
+export interface DeliveryTiers { freeRadiusM: number; flatRadiusM: number; flatFee: number; per100mFee: number; }
+export const DEFAULT_DELIVERY_TIERS: DeliveryTiers = {
+  freeRadiusM: DELIVERY_FREE_RADIUS_M,
+  flatRadiusM: DELIVERY_FIXED_RADIUS_M,
+  flatFee: DELIVERY_BASE_FEE,
+  per100mFee: DELIVERY_FEE_PER_100M,
+};
+const TIERS_KEY = 'delivery_tiers';
+let tiersCache: { at: number; tiers: DeliveryTiers } | null = null;
+const TIERS_CACHE_TTL = 60 * 1000;
+export function invalidateDeliveryTiersCache(): void { tiersCache = null; }
+
+const numAtLeast0 = (v: any): number | null => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? x : null; };
+
+/** Admin-configured tiers (app_settings['delivery_tiers']) merged over defaults. */
+export async function getDeliveryTiers(): Promise<DeliveryTiers> {
+  if (tiersCache && Date.now() - tiersCache.at < TIERS_CACHE_TTL) return tiersCache.tiers;
+  const tiers: DeliveryTiers = { ...DEFAULT_DELIVERY_TIERS };
+  try {
+    const { data } = await supa().from('app_settings').select('value').eq('key', TIERS_KEY).maybeSingle();
+    const parsed = data?.value ? JSON.parse(data.value) : null;
+    if (parsed && typeof parsed === 'object') {
+      const fr = numAtLeast0(parsed.freeRadiusM); if (fr !== null) tiers.freeRadiusM = fr;
+      const flr = numAtLeast0(parsed.flatRadiusM); if (flr !== null) tiers.flatRadiusM = flr;
+      const ff = numAtLeast0(parsed.flatFee); if (ff !== null) tiers.flatFee = ff;
+      const per = numAtLeast0(parsed.per100mFee); if (per !== null) tiers.per100mFee = per;
+    }
+  } catch { /* defaults remain */ }
+  if (tiers.flatRadiusM < tiers.freeRadiusM) tiers.flatRadiusM = tiers.freeRadiusM;
+  tiersCache = { at: Date.now(), tiers };
+  return tiers;
+}
+
+/** Persist admin tier overrides (validated; garbage values keep the current ones). */
+export async function saveDeliveryTiers(input: Partial<DeliveryTiers>): Promise<DeliveryTiers> {
+  const merged: DeliveryTiers = { ...(await getDeliveryTiers()) };
+  const fr = numAtLeast0(input.freeRadiusM); if (fr !== null) merged.freeRadiusM = fr;
+  const flr = numAtLeast0(input.flatRadiusM); if (flr !== null) merged.flatRadiusM = flr;
+  const ff = numAtLeast0(input.flatFee); if (ff !== null) merged.flatFee = ff;
+  const per = numAtLeast0(input.per100mFee); if (per !== null) merged.per100mFee = per;
+  if (merged.flatRadiusM < merged.freeRadiusM) merged.flatRadiusM = merged.freeRadiusM;
+  const value = JSON.stringify(merged);
+  const now = new Date().toISOString();
+  const { data: existing } = await supa().from('app_settings').select('key').eq('key', TIERS_KEY).maybeSingle();
+  if (existing) await supa().from('app_settings').update({ value, updated_at: now }).eq('key', TIERS_KEY);
+  else await supa().from('app_settings').insert({ key: TIERS_KEY, value, updated_at: now });
+  invalidateDeliveryTiersCache();
+  return merged;
+}
 
 /** Great-circle distance between two points in meters. */
 export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -173,19 +225,20 @@ export function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: 
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Tiered distance-based delivery fee:
- *  ≤ 1.5 km → ₱0 · 1.5–2 km → ₱50 fixed · > 2 km → ₱50 + ₱1/100 m. */
-export function computeDeliveryFee(fromLat: number, fromLng: number, toLat: number, toLng: number): {
+/** Tiered distance-based delivery fee. Tiers come from Admin → Settings →
+ *  🛵 Delivery (getDeliveryTiers) — pass them in, or defaults are used. */
+export function computeDeliveryFee(fromLat: number, fromLng: number, toLat: number, toLng: number, tiers?: DeliveryTiers): {
   fee: number; distanceMeters: number; distanceKm: number;
 } {
+  const t = tiers || DEFAULT_DELIVERY_TIERS;
   const distanceMeters = haversineMeters(fromLat, fromLng, toLat, toLng);
   let fee: number;
-  if (distanceMeters <= DELIVERY_FREE_RADIUS_M) {
+  if (distanceMeters <= t.freeRadiusM) {
     fee = 0;
-  } else if (distanceMeters <= DELIVERY_FIXED_RADIUS_M) {
-    fee = DELIVERY_BASE_FEE;
+  } else if (distanceMeters <= t.flatRadiusM) {
+    fee = t.flatFee;
   } else {
-    fee = DELIVERY_BASE_FEE + Math.ceil(distanceMeters / 100) * DELIVERY_FEE_PER_100M;
+    fee = t.flatFee + Math.ceil(distanceMeters / 100) * t.per100mFee;
   }
   return { fee, distanceMeters: Math.round(distanceMeters), distanceKm: Math.round(distanceMeters / 100) / 10 };
 }
