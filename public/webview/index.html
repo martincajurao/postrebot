@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Postre Food Products - Order Online</title>
-  <link rel="stylesheet" href="style.css?v=20260912-6">
+  <link rel="stylesheet" href="style.css?v=20260912-7">
   <!-- Open Graph / Messenger Preview -->
   <meta property="og:title" content="Postre Food Products - Order Online">
   <meta property="og:description" content="Browse our menu and order your favorite dishes!">
@@ -93,9 +93,20 @@
     <!-- Scrollable content area -->
     <div id="scroll-container" class="scroll-container">
 
-    <!-- Loading state -->
+    <!-- Loading state: skeleton menu cards (matches .card-media img height) -->
     <div id="loading-view" class="view active" style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:60px 20px">
-      <div class="spinner"></div>
+      <div class="menu-skeleton" aria-hidden="true">
+        <div class="ms-card">
+          <div class="ms-media skeleton"></div>
+          <div class="ms-line skeleton"></div>
+          <div class="ms-line short skeleton"></div>
+        </div>
+        <div class="ms-card">
+          <div class="ms-media skeleton"></div>
+          <div class="ms-line skeleton"></div>
+          <div class="ms-line short skeleton"></div>
+        </div>
+      </div>
       <p id="loading-text" style="color:#999;font-size:0.9rem">Loading menu...</p>
     </div>
 

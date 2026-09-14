@@ -482,7 +482,7 @@ body {
 
 .packages-grid .product-card img,
 .pkg-card-tall img {
-  height: 280px;
+  height: 220px;
 }
 
 /* Staggered entrance for the first 8 cards; the rest appear together. */
@@ -530,7 +530,7 @@ body {
 
 .card-media img {
   width: 100%;
-  height: 120px;
+  height: 96px;
   object-fit: cover;
   display: block;
   background: #f6f4f3;
@@ -1903,6 +1903,35 @@ body {
   100% { background-position: -200% 0; }
 }
 
+/* Page-load skeleton: menu-card placeholders shown by #loading-view while the
+   catalog fetches (replaces the old circle spinner). Media block mirrors the
+   .card-media img height so the hand-off to real cards doesn't jump. */
+.menu-skeleton {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: 340px;
+}
+.menu-skeleton .ms-card {
+  background: #fff;
+  border: 1px solid #f3eeee;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(45, 52, 54, 0.06);
+  padding-bottom: 12px;
+}
+.menu-skeleton .ms-media {
+  height: 96px;
+  border-radius: 0;
+}
+.menu-skeleton .ms-line {
+  height: 12px;
+  margin: 10px 10px 0;
+  border-radius: 6px;
+}
+.menu-skeleton .ms-line.short { width: 55%; }
+
 /* Image shimmer: .img-skel sits on the <img> itself while its bitmap fetches and
    is removed on load/error (see imageHtml() / lightbox / opt-thumb in app.js).
    Reuses the .skeleton colors + skeleton-loading keyframes above. */
@@ -3023,12 +3052,12 @@ img.img-skel {
 /* Photo rounding/clipping comes from .card-media — only size lives here. */
 .fp-card img {
   width: 100%;
-  height: 130px;
+  height: 104px;
   object-fit: cover;
 }
 
 .fp-card.fp-card-tall img {
-  height: 170px;
+  height: 140px;
 }
 
 /* Wider screens: show more of the rail, larger circular categories */
