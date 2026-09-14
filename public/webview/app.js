@@ -1899,6 +1899,11 @@ function loadCustomerData() {
  *  in the field, auto-sync stops until the next EXPLICIT choice (gate confirm
  *  / chip tap), which is authoritative and overwrites. */
 let coAddressDirty = false;
+// True while the customer is on the pickup flow ("I'll pick-up my order" →
+// branch chosen): checkout opens on the Pickup tab and the header bar shows
+// "Pickup · <branch>". Cleared by any explicit delivery choice (gate confirm,
+// saved-location chip, or tapping 🚚 Delivery in checkout).
+let pickupOrderFlow = false;
 function syncCheckoutAddress(addr, force) {
   try {
     const text = (addr && String(addr).trim()) || '';
@@ -2039,11 +2044,19 @@ function startCheckout() {
         this.classList.add('active');
         const hidden = $id('order-type');
         if (hidden) hidden.value = this.dataset.value;
+        // An explicit 🚚 Delivery tap overrides the pickup-flow default.
+        if (this.dataset.value === 'delivery') pickupOrderFlow = false;
         const addrGroup = $id('address-group');
         if (addrGroup) addrGroup.style.display = this.dataset.value === 'delivery' ? 'block' : 'none';
         updateDeliveryFeeRow();
       });
     });
+    // Customers who entered via "I'll pick-up my order" land on the Pickup
+    // tab (address group hidden, fee row zeroed) — they can still switch.
+    if (pickupOrderFlow) {
+      const pickupBtn = seg.querySelector('button[data-value="pickup"]');
+      if (pickupBtn) pickupBtn.click();
+    }
   }
   $id('fulfill-date').addEventListener('change', function () { loadTimeSlots(this.value); });
 
@@ -2951,7 +2964,12 @@ function updateLocationBar() {
   if (!bar || !addrEl) return;
   const loc = getSavedLocation();
   const text = locationDisplayText(loc);
-  if (text) {
+  // Pickup flow leads the bar — the branch is what the customer actually chose.
+  if (pickupOrderFlow && activeBranch) {
+    addrEl.textContent = 'Pick up at ' + (activeBranchName() || activeBranch);
+    if (labelEl) labelEl.textContent = 'Pickup';
+    bar.classList.add('has-location');
+  } else if (text) {
     addrEl.textContent = text;
     if (labelEl) labelEl.textContent = 'Deliver to';
     bar.classList.add('has-location');
@@ -2976,6 +2994,7 @@ async function useSavedLocation(id) {
   saveLocation(loc); // bumps lastUsedAt + sets it as the in-use location
   // Explicit choice → the checkout address follows immediately.
   coAddressDirty = false;
+  pickupOrderFlow = false; // a delivery chip choice ends the pickup flow
   syncCheckoutAddress(loc.address, true);
   pendingCoords = (Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) ? { lat: loc.lat, lng: loc.lng } : null;
   pinSource = pendingCoords ? (loc.source === 'gps' ? 'gps' : 'pin') : null;
@@ -3061,6 +3080,9 @@ function showLocationGate() {
   setPendingAddress((saved && saved.address) || (remembered && remembered.address) || null);
   // Returning customer → show their saved addresses for one-tap selection.
   renderSavedLocations();
+  // The gate always reopens on the delivery side; the pickup branch chooser is
+  // entered explicitly via "I'll pick-up my order".
+  setGatePickupMode(false);
   forceHeaderVisible(); // never let the header hide while the gate is open
   gate.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
@@ -3639,10 +3661,90 @@ function initLeafletMap() {
 function hideLocationGate() {
   const gate = $id('location-gate');
   if (gate) gate.classList.add('hidden');
+  setGatePickupMode(false); // the gate always reopens on the delivery side
   forceHeaderVisible(); // header returns after choosing/changing a location
   const mainContent = $id('main-content');
   if (mainContent) mainContent.classList.remove('hidden');
   document.body.style.overflow = '';
+}
+
+// ---------- Pickup flow: branch chooser in the location gate ----------
+// "I'll pick-up my order" swaps the gate's delivery controls for a branch
+// chooser (Naga / Calbayog). Picking a branch filters the menu to that
+// branch's catalog and opens the store — no delivery address needed; checkout
+// defaults to the Pickup tab (placeOrder only requires an address for
+// delivery). Mode is CSS-driven (.gate-pickup on #location-gate hides every
+// .loc-delivery-only element), so async location work (auto-detect, map
+// callbacks) can't leak controls back into the pickup view.
+const GATE_TITLE_DELIVERY = 'Where should we deliver?';
+const GATE_SUB_DELIVERY = 'Set your location so your order reaches the right place. Or pick one of your saved locations below.';
+
+/** Toggle the gate between the delivery side and the pickup branch chooser. */
+function setGatePickupMode(on) {
+  const gate = $id('location-gate');
+  if (!gate) return;
+  gate.classList.toggle('gate-pickup', !!on);
+  const title = $id('loc-gate-title');
+  const sub = gate.querySelector('.loc-gate-sub');
+  if (on) {
+    if (title) title.textContent = 'Which branch are you ordering from?';
+    if (sub) sub.textContent = 'Pick the store you\'ll pick up from — the menu will show only what that branch offers.';
+    renderPickupBranchChoices();
+  } else {
+    if (title) title.textContent = GATE_TITLE_DELIVERY;
+    if (sub) sub.textContent = GATE_SUB_DELIVERY;
+  }
+}
+
+/** Render the branch chips (from /branches; Naga/Calbayog as the offline
+ *  fallback so the chooser works even if the catalog request failed). */
+function renderPickupBranchChoices() {
+  const wrap = $id('loc-pickup-branches');
+  const list = $id('loc-pickup-branch-list');
+  if (!wrap || !list) return;
+  let catalog = (Array.isArray(branchCatalog) ? branchCatalog : []).filter((b) => b && b.key);
+  if (catalog.length === 0) {
+    catalog = [{ key: 'naga', name: 'Naga' }, { key: 'calbayog', name: 'Calbayog' }];
+  }
+  list.innerHTML = catalog.map((b) => `
+    <button type="button" class="loc-branch-chip${activeBranch === b.key ? ' active' : ''}" onclick="choosePickupBranch('${esc(b.key)}')">
+      <span class="loc-branch-icon" aria-hidden="true">🏬</span>
+      <span class="loc-branch-name">${esc(b.name || b.key)}</span>
+      <span class="loc-branch-sub">Pick up here</span>
+    </button>`).join('');
+  wrap.classList.remove('hidden');
+}
+
+/** "I'll pick-up my order" — switch the open gate to the branch chooser. */
+function showPickupBranchChoice() {
+  hideLocError();
+  setGatePickupMode(true);
+}
+
+/** Back link in the chooser → return to the delivery side of the gate. */
+function backToDeliveryFromPickup() {
+  hideLocError();
+  setGatePickupMode(false);
+}
+
+/** Branch chip tapped → filter the menu to that branch and open the store. */
+async function choosePickupBranch(key) {
+  const branch = String(key || '').trim().toLowerCase();
+  if (!branch) return;
+  activeBranch = branch;
+  try { storageSet('webview_branch_' + sessionId, branch); } catch (e) { /* non-fatal */ }
+  pickupOrderFlow = true; // checkout opens on the Pickup tab
+  coAddressDirty = false;
+  hideLocationGate();
+  updateLocationBar();
+  showToast('🏬 ' + (activeBranchName() || branch) + ' — pickup menu');
+  // First visit: the catalogs may not be loaded yet (init only opens the gate;
+  // loading normally happens after a delivery location is confirmed).
+  if (categories.length === 0 && products.length === 0) {
+    await loadAppData();
+  }
+  applyBranchFilter(); // loaders reset products = allProducts → filter after
+  revealMenu();
 }
 
 function showLocError(msg) {
@@ -4046,6 +4148,7 @@ async function confirmLocation() {
   showToast('📍 Location saved!');
   // Explicit choice → the checkout address follows immediately.
   coAddressDirty = false;
+  pickupOrderFlow = false; // a delivery confirm ends the pickup flow
   syncCheckoutAddress(address, true);
   
   // Detect branch AFTER user confirms location

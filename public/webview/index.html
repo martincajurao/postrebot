@@ -336,7 +336,7 @@
 
         <!-- GPS button — explicit "locate me" control for the robust locator.
              Idle/locating/success states are managed by setGPSButtonState(). -->
-        <button type="button" class="loc-gps-btn" id="loc-gps-btn" onclick="useCurrentLocation()">
+        <button type="button" class="loc-gps-btn loc-delivery-only" id="loc-gps-btn" onclick="useCurrentLocation()">
           <span class="loc-gps-icon" id="loc-gps-icon">📍</span>
           <span id="loc-gps-label">Use my current location</span>
         </button>
@@ -348,15 +348,30 @@
              dedicated gps.html capture page: it grabs the fix, saves it
              server-side for this session, and the store prefills on the next
              visit. -->
-        <button type="button" class="loc-gps-btn loc-browser-btn hidden" id="loc-browser-btn" onclick="openInChrome()">
+        <button type="button" class="loc-gps-btn loc-browser-btn loc-delivery-only hidden" id="loc-browser-btn" onclick="openInChrome()">
           <span class="loc-gps-icon" id="loc-browser-icon">🌐</span>
           <span id="loc-browser-label">Set my location in phone browser</span>
         </button>
 
+        <!-- "I'll pick-up my order" — skips the delivery-address side of the
+             gate entirely: the customer picks WHICH branch (Naga / Calbayog)
+             and the menu filters to that branch's catalog. The chooser below
+             replaces the delivery controls while .gate-pickup is on the gate. -->
+        <button type="button" class="loc-gps-btn loc-pickup-btn loc-delivery-only" id="loc-pickup-btn" onclick="showPickupBranchChoice()">
+          <span class="loc-gps-icon" aria-hidden="true">🏬</span>
+          <span>I'll pick-up my order</span>
+        </button>
+
+        <div id="loc-pickup-branches" class="loc-pickup-branches hidden">
+          <p class="loc-pickup-branches-title">Pick your branch</p>
+          <div id="loc-pickup-branch-list" class="loc-pickup-branch-list"></div>
+          <button type="button" class="loc-pickup-back" onclick="backToDeliveryFromPickup()">← I want delivery instead</button>
+        </div>
+
         <!-- Shown when webview GPS fails: the locate button is replaced by
              these steps (the capture page saves the spot server-side and it
              shows up in the Saved locations chips below). -->
-        <div id="loc-browser-instr" class="loc-browser-instr hidden">
+        <div id="loc-browser-instr" class="loc-browser-instr loc-delivery-only hidden">
           <p class="loc-browser-instr-title">📍 GPS can't run inside this app</p>
           <ol>
             <li>Tap <b>Set my location in phone browser</b> below</li>
@@ -366,7 +381,7 @@
         </div>
 
         <!-- Locate status bar: progress, success, accuracy readout (±m), retry, errors. -->
-        <div id="loc-autodetect" class="loc-autodetect hidden">
+        <div id="loc-autodetect" class="loc-autodetect loc-delivery-only hidden">
           <span class="loc-autodetect-icon">📍</span>
           <span id="loc-autodetect-label" class="loc-autodetect-label">Finding your location…</span>
           <span id="loc-accuracy" class="loc-accuracy-chip hidden"></span>
@@ -375,7 +390,7 @@
 
         <!-- Blocked-permission help: per-platform steps to re-enable GPS
              (rendered by showPermissionHelp() from LocationService). -->
-        <div id="loc-perm-help" class="loc-perm-help hidden">
+        <div id="loc-perm-help" class="loc-perm-help loc-delivery-only hidden">
           <div class="loc-perm-head">
             <strong id="loc-perm-title">Enable location access</strong>
             <button type="button" class="loc-perm-close" onclick="hidePermissionHelp()" aria-label="Dismiss">✕</button>
@@ -387,32 +402,32 @@
 
         <!-- Saved locations — previously confirmed addresses. Tap one to use it
              right away (no re-typing). Managed by renderSavedLocations(). -->
-        <div id="loc-saved" class="loc-saved hidden">
+        <div id="loc-saved" class="loc-saved loc-delivery-only hidden">
           <p class="loc-saved-title">Saved locations</p>
           <div id="loc-saved-list" class="loc-saved-list"></div>
         </div>
 
-        <div class="loc-search-wrap">
+        <div class="loc-search-wrap loc-delivery-only">
           <input type="text" id="loc-search" placeholder="&#128269; Search your address or place..." autocomplete="off" />
         </div>
 
-        <div class="loc-map-wrap" id="loc-map-wrap">
+        <div class="loc-map-wrap loc-delivery-only" id="loc-map-wrap">
           <div id="loc-map" aria-label="Tap the map to set your delivery location"></div>
           <div id="loc-coords" class="loc-coords hidden" aria-live="polite"></div>
           <div id="loc-resolved" class="loc-resolved hidden" aria-live="polite"></div>
           <p class="loc-map-hint" id="loc-status">📍 Tap the map to drop your pin — or search above</p>
         </div>
 
-        <div class="loc-divider"><span>add a landmark to help your rider (optional)</span></div>
+        <div class="loc-divider loc-delivery-only"><span>add a landmark to help your rider (optional)</span></div>
 
-        <div class="form-group">
+        <div class="form-group loc-delivery-only">
           <label for="loc-landmark">Landmark / delivery notes (optional)</label>
           <input type="text" id="loc-landmark" placeholder="e.g. near Sto. Tomas Chapel, blue gate">
         </div>
 
         <p id="loc-gate-error" class="loc-gate-error hidden"></p>
 
-        <button type="button" class="btn btn-primary loc-confirm-btn" id="loc-confirm-btn" onclick="confirmLocation()">Confirm Location</button>
+        <button type="button" class="btn btn-primary loc-confirm-btn loc-delivery-only" id="loc-confirm-btn" onclick="confirmLocation()">Confirm Location</button>
       </div>
     </div>
 
@@ -420,6 +435,6 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260912-22"></script>
+  <script src="app.js?v=20260914-1"></script>
 </body>
 </html>

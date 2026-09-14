@@ -2758,6 +2758,55 @@ img.img-skel {
   50% { opacity: 0.55; }
 }
 
+/* ---------- Pickup flow: branch chooser inside the location gate ----------
+   "I'll pick-up my order" switches the gate to pickup mode (JS toggles
+   .gate-pickup on #location-gate): every delivery-only control disappears and
+   the branch chips take over. One tap on a branch = menu filtered + store
+   opens — no delivery address needed. */
+#location-gate.gate-pickup .loc-delivery-only { display: none !important; }
+.loc-pickup-branches { display: none; }
+#location-gate.gate-pickup .loc-pickup-branches { display: block; }
+/* The pickup entry button itself is delivery-only: in pickup mode only the
+   chips remain (title + chips + back link — no redundant CTA). */
+.loc-pickup-btn { border-color: #e8b04b; color: #a06b12; background: linear-gradient(135deg, #fff, #fffaf0); box-shadow: 0 5px 14px rgba(232, 176, 75, 0.12); }
+.loc-pickup-btn:hover { background: #fff4dd; box-shadow: 0 7px 18px rgba(232, 176, 75, 0.18); }
+.loc-pickup-branches { margin: 2px 0 14px; }
+.loc-pickup-branches-title { font-size: 0.85rem; font-weight: 700; color: #8a6d52; margin: 0 0 8px; letter-spacing: 0.02em; text-transform: uppercase; }
+.loc-pickup-branch-list { display: flex; flex-direction: column; gap: 10px; }
+.loc-branch-chip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1.5px solid #f0e2cf;
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+.loc-branch-chip:hover { border-color: #e8b04b; background: #fffaf0; box-shadow: 0 5px 14px rgba(232, 176, 75, 0.14); }
+.loc-branch-chip:active { transform: scale(0.98); }
+.loc-branch-chip.active { border-color: #e8b04b; background: #fff7e8; }
+.loc-branch-icon { font-size: 1.4rem; line-height: 1; }
+.loc-branch-name { flex: 1; font-weight: 700; font-size: 1rem; color: #3d3222; }
+.loc-branch-sub { font-size: 0.78rem; color: #a08a5e; }
+.loc-pickup-back {
+  margin-top: 12px;
+  padding: 4px 0;
+  background: none;
+  border: none;
+  color: #a06b12;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+
 /* Locate status bar label + variants */
 .loc-autodetect-label {
   flex: 1;
