@@ -362,7 +362,6 @@ const NAV = [
   { view: 'delivery', icon: '🚚', label: 'Delivery', bottom: 'Deliv.' },
   { view: 'settings', icon: '⚙️', label: 'Settings', bottom: 'Settings' },
   { view: 'services', icon: '🧁', label: 'Services', bottom: 'Services', role: 'ADMIN' },
-  { view: 'images', icon: '🖼️', label: 'Images', bottom: 'Images', role: 'ADMIN' },
 ];
 
 function buildNav() {
@@ -3054,21 +3053,28 @@ views.services = async (main) => {
     </div>
     <div class="tab-pane${activeTab === 'images' ? ' active' : ''}" data-pane="images">
       <div class="card"><h3 style="margin-bottom:8px">⬆️ Upload a Catering Image</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:8px">Uploaded files are tagged 🧁 <b>catering-</b> — only tagged images appear in the Messenger "catering" menu.</p>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Uploaded files are tagged 🧁 <b>catering-</b> — only tagged images appear when a customer types "cater" or "catering" in Messenger.</p>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="file" id="sc-img-file" accept="image/*" style="flex:1;min-width:180px">
           <button class="btn sm" id="sc-img-upload">Upload</button>
         </div>
       </div>
-      <div class="card"><h3 style="margin-bottom:8px">📦 Bulk Upload (catering)</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:8px">Select many images at once — every file is tagged for the catering carousel.</p>
+      <div class="card"><h3 style="margin-bottom:8px">📦 Bulk Upload (catering only)</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">Select many images at once — every file is automatically tagged for the catering carousel.</p>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="file" id="sc-img-batch" accept="image/*" multiple style="flex:1;min-width:180px">
           <button class="btn sm" id="sc-img-batch-upload">Upload All</button>
         </div>
+        <div id="sc-batch-progress" style="margin-top:10px;display:none">
+          <div style="background:#e5e7eb;border-radius:8px;height:8px;overflow:hidden">
+            <div id="sc-batch-progress-bar" style="background:var(--brand);height:100%;width:0%;transition:width 0.3s"></div>
+          </div>
+          <p class="muted" id="sc-batch-progress-text" style="margin-top:4px;font-size:12px">Uploading...</p>
+        </div>
       </div>
       <div class="card">
-        <h3 style="margin-bottom:8px">🖼️ Images (${uploads.length}) — 🧁 tagged ones appear in Messenger first</h3>
+        <h3 style="margin-bottom:8px">🖼️ Catering Images (${uploads.filter(f => String(f.name || '').startsWith('catering-')).length})</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:8px">These images appear in Messenger when a customer types <b>"cater"</b> or <b>"catering"</b>. Max 10 images shown (newest first).</p>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px" id="sc-img-grid"></div>
       </div>
     </div>
@@ -3106,155 +3112,50 @@ views.services = async (main) => {
     const files = main.querySelector('#sc-img-batch').files;
     if (!files || files.length === 0) return toast('Choose files first', true);
     const btn = e.currentTarget;
+    const progressDiv = main.querySelector('#sc-batch-progress');
+    const progressBar = main.querySelector('#sc-batch-progress-bar');
+    const progressText = main.querySelector('#sc-batch-progress-text');
     btn.disabled = true;
+    progressDiv.style.display = 'block';
     let uploaded = 0, failed = 0;
     for (let i = 0; i < files.length; i++) {
-      btn.textContent = `Uploading ${i + 1}/${files.length}…`;
+      progressText.textContent = `Uploading ${i + 1} of ${files.length}: ${files[i].name}`;
+      progressBar.style.width = `${((i) / files.length) * 100}%`;
       try { await uploadImage(files[i], 'catering-'); uploaded++; } catch { failed++; }
     }
+    progressBar.style.width = '100%';
+    progressText.textContent = `Complete! ${uploaded} uploaded, ${failed} failed`;
     toast(`Uploaded ${uploaded}, failed ${failed}`);
-    if (uploaded > 0) setTimeout(() => navigate('services'), 1200);
-    else { btn.disabled = false; btn.textContent = 'Upload All'; }
+    if (uploaded > 0) setTimeout(() => navigate('services'), 1500);
+    else { btn.disabled = false; progressDiv.style.display = 'none'; }
   });
 
-  // ---- Uploaded-images grid (was a dead div before) ----
+  // ---- Catering images grid (exclusive — only catering-tagged images shown) ----
   const gridEl = main.querySelector('#sc-img-grid');
   const isCatering = (f) => String(f.name || '').startsWith('catering-');
   function renderScGrid() {
     if (!gridEl) return;
-    const sorted = [...uploads].sort((a, b) => {
-      const ac = isCatering(a) ? 0 : 1, bc = isCatering(b) ? 0 : 1;
-      return ac - bc || String(b.updated_at || b.name).localeCompare(String(a.updated_at || a.name));
-    });
-    gridEl.innerHTML = sorted.map((f) => `
-      <div style="position:relative;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+    // Only show catering-tagged images — this is the exclusive catering manager
+    const cateringFiles = uploads.filter(isCatering).sort((a, b) =>
+      String(b.updated_at || b.name).localeCompare(String(a.updated_at || a.name))
+    );
+    gridEl.innerHTML = cateringFiles.map((f) => `
+      <div style="position:relative;border:2px solid #16a34a;border-radius:10px;overflow:hidden;background:#f0fdf4">
         <img src="${esc(f.url)}" style="width:100%;height:110px;object-fit:cover;display:block">
-        ${isCatering(f) ? '<span style="position:absolute;top:6px;left:6px;background:#16a34a;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px">🧁 CATERING</span>' : ''}
+        <span style="position:absolute;top:6px;left:6px;background:#16a34a;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px">🧁 CATERING</span>
+        <div style="padding:6px;font-size:10px;color:var(--muted);word-break:break-all">${esc(f.name.replace('catering-', ''))}</div>
         <button class="btn danger sm" style="width:100%;border-radius:0" data-sc-del="${esc(f.name)}">Delete</button>
-      </div>`).join('') || '<p class="muted">No images uploaded yet.</p>';
+      </div>`).join('') || '<p class="muted">No catering images yet. Upload some above — they will appear in Messenger when a customer types "cater" or "catering".</p>';
     gridEl.querySelectorAll('[data-sc-del]').forEach((b) => b.addEventListener('click', async () => {
-      if (!confirm('Delete this image?')) return;
+      if (!confirm('Delete this catering image? It will no longer appear in Messenger.')) return;
       try {
         await api('/uploads/' + encodeURIComponent(b.dataset.scDel), { method: 'DELETE' });
-        toast('Image deleted');
+        toast('Catering image deleted');
         navigate('services');
       } catch (err) { toast(err.message, true); }
     }));
   }
   renderScGrid();
-};
-
-/* ================= SERVICES (Catering Content & Images) ================= */
-views.images = async (main) => {
-  let files = [];
-  try { files = await api('/uploads-list'); }
-  catch (err) { toast(err.message, true); }
-  main.innerHTML = `
-    <h2 class="page-title">Images</h2>
-    <p class="muted" style="margin-bottom:14px">Stored in Supabase Storage bucket. Upload, replace and delete images — URLs stay public for Messenger.</p>
-    <div class="card">
-      <h3>⬆️ Upload new image</h3>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="file" id="img-file" accept="image/*" style="flex:1;min-width:180px">
-        <button class="btn sm" id="img-upload">Upload</button>
-      </div>
-      <p class="muted" style="margin-top:6px">JPG, PNG, WebP or GIF · max 5 MB. Cropping available when used via Menu/Packages photo fields.</p>
-    </div>
-    <div class="card">
-      <h3>📦 Batch upload</h3>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="file" id="img-batch-file" accept="image/*" multiple style="flex:1;min-width:180px">
-        <button class="btn sm" id="img-batch-upload">Upload All</button>
-      </div>
-      <p class="muted" style="margin-top:6px">Select multiple images at once. Files are uploaded sequentially.</p>
-      <div id="batch-progress" style="margin-top:10px;display:none">
-        <div style="background:#e5e7eb;border-radius:8px;height:8px;overflow:hidden">
-          <div id="batch-progress-bar" style="background:var(--brand);height:100%;width:0%;transition:width 0.3s"></div>
-        </div>
-        <p class="muted" id="batch-progress-text" style="margin-top:4px;font-size:12px">Uploading...</p>
-      </div>
-    </div>
-    <div class="card"><h3>🖼️ Library (${files.length})</h3>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px" id="img-grid">
-        ${files.map((f) => `
-          <div style="background:#fafbfc;border-radius:12px;padding:10px;text-align:center">
-            <img class="img-skel" src="${esc(f.url)}" style="width:100%;height:100px;object-fit:cover;border-radius:8px" loading="lazy" onload="this.classList.remove('img-skel')" onerror="this.classList.remove('img-skel')">
-            <p class="muted" style="margin:6px 0 4px;word-break:break-all;font-size:11px">${esc(f.name)}</p>
-            <div class="row-actions" style="justify-content:center">
-              <button class="btn ghost sm" data-img-copy="${esc(f.url)}">Copy URL</button>
-              <button class="btn danger sm" data-img-del="${esc(f.name)}">Delete</button>
-            </div>
-          </div>`).join('') || '<p class="muted">No images yet.</p>'}
-      </div>
-    </div>`;
-  main.querySelector('#img-upload').addEventListener('click', async () => {
-    const file = main.querySelector('#img-file').files[0];
-    if (!file) return toast('Choose a file first', true);
-    try {
-      const originalSize = file.size;
-      toast(`Compressing ${formatFileSize(originalSize)}...`);
-      const compressedFile = await compressImage(file);
-      const saved = originalSize - compressedFile.size;
-      await uploadImage(compressedFile);
-      const savedText = saved > 0 ? ` · Saved ${formatFileSize(saved)}` : '';
-      toast(`Image uploaded${savedText}`);
-      navigate('images');
-    } catch (err) { toast(err.message, true); }
-  });
-  // Batch upload handler
-  main.querySelector('#img-batch-upload').addEventListener('click', async () => {
-    const fileInput = main.querySelector('#img-batch-file');
-    const files = fileInput.files;
-    if (!files || files.length === 0) return toast('Choose files first', true);
-
-    const progressDiv = main.querySelector('#batch-progress');
-    const progressBar = main.querySelector('#batch-progress-bar');
-    const progressText = main.querySelector('#batch-progress-text');
-    progressDiv.style.display = 'block';
-
-    let uploaded = 0;
-    let failed = 0;
-    let totalSaved = 0;
-    const total = files.length;
-
-    for (let i = 0; i < total; i++) {
-      const file = files[i];
-      const originalSize = file.size;
-      progressText.textContent = `Processing ${i + 1} of ${total}: ${file.name} (${formatFileSize(originalSize)})`;
-      progressBar.style.width = `${((i) / total) * 100}%`;
-      try {
-        const compressedFile = await compressImage(file);
-        totalSaved += (originalSize - compressedFile.size);
-        await uploadImage(compressedFile);
-        uploaded++;
-      } catch (err) {
-        failed++;
-        console.error('Upload failed for', file.name, err);
-      }
-    }
-
-    progressBar.style.width = '100%';
-    const savedText = totalSaved > 0 ? ` · Saved ${formatFileSize(totalSaved)}` : '';
-    progressText.textContent = `Complete! ${uploaded} uploaded, ${failed} failed${savedText}`;
-
-    if (uploaded > 0) {
-      toast(`Batch upload complete: ${uploaded} uploaded${failed > 0 ? `, ${failed} failed` : ''}${savedText}`);
-      setTimeout(() => navigate('images'), 1500);
-    } else {
-      toast('All uploads failed', true);
-    }
-  });
-  main.querySelectorAll('[data-img-copy]').forEach((b) => b.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(b.dataset.imgCopy); toast('URL copied'); }
-    catch { toast('Copy failed', true); }
-  }));
-  main.querySelectorAll('[data-img-del]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Delete this image from Supabase Storage? Products/packages using it will lose their photo.')) return;
-    try {
-      await api('/uploads/' + encodeURIComponent(b.dataset.imgDel), { method: 'DELETE' });
-      toast('Image deleted'); navigate('images');
-    } catch (err) { toast(err.message, true); }
-  }));
 };
 
 /* ================= APP BOOT =================
