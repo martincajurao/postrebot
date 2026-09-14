@@ -2884,7 +2884,10 @@ function showLocationGate() {
   const saved = getSavedLocation();
   pendingAddress = null;
   pendingAddressFromUser = false;
-  setPendingAddress((remembered && remembered.address) || (saved && saved.address) || null);
+  // The CHOSEN location wins over the old remembered address — same rule as
+  // the reactive checkout field. Otherwise a header-driven change would
+  // prefill (and on Confirm re-save) a stale typed address.
+  setPendingAddress((saved && saved.address) || (remembered && remembered.address) || null);
   // Returning customer → show their saved addresses for one-tap selection.
   renderSavedLocations();
   forceHeaderVisible(); // never let the header hide while the gate is open
