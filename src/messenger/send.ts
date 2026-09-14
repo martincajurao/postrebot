@@ -2,7 +2,6 @@
 import { supa } from '../db/supabase';
 import { getReservationByOrderId } from '../services/reservations';
 import { getOrderItems } from '../services/orders';
-import { getServiceContent } from '../services/service-content';
 import { listImages } from '../api/supabase-storage';
 import { ENV_BASE_URL, requestBaseUrl } from './webhook';
 
@@ -692,19 +691,12 @@ export async function sendRatingRequest(psid: string, orderNumber: string, order
   ]);
 }
 
-/** Send catering menu - displays images for viewing only (no buttons) */
+/** Send catering menu - displays images only (no text, no buttons) */
 export async function sendCateringMenu(psid: string): Promise<void> {
   console.log(`[sendCateringMenu] triggered for psid=${psid}`);
 
-  // Get the editable catering content from service-content
-  const content = await getServiceContent();
-
-  await sendText(psid, content.catering_intro_text);
-
   // Fetch uploaded catering images from Supabase Storage bucket.
-  // P0 for the trigger: ONLY catering-tagged uploads (filenames prefixed
-  // "catering-", uploaded via Admin → Services → Images) — the bucket also
-  // holds product/package photos that must NOT appear in the catering menu.
+  // ONLY catering-tagged uploads (filenames prefixed "catering-") appear here.
   let cateringImages: string[] = [];
   try {
     const images = await listImages();
@@ -731,14 +723,12 @@ export async function sendCateringMenu(psid: string): Promise<void> {
         title: index === 0 ? '🧁 Our Catering' : `Catering Image ${index + 1}`,
         subtitle: index === 0 ? 'Beautiful food for your events' : '',
         image_url: url,
-        // No buttons - just for viewing
       }))
     : [
         {
           title: '🧁 Catering Services',
           subtitle: 'We offer delicious catering for your events!',
           image_url: defaultImageUrl || undefined,
-          // No buttons - just for viewing
         },
       ];
 
