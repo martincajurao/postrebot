@@ -495,11 +495,16 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
     })),
   }));
 
+  console.log(`[sendCarousel] psid=${psid} elements=${els.length} withImages=${els.filter(e => e.image_url).length}`);
+
   // Pre-flight: verify every image URL is publicly reachable, drop the broken ones.
   await Promise.all(els.map(async (e) => {
-    if (e.image_url && !(await imageUrlOk(e.image_url))) {
-      console.warn(`[messenger] dropping unreachable carousel image: ${e.image_url}`);
-      e.image_url = undefined;
+    if (e.image_url) {
+      const ok = await imageUrlOk(e.image_url);
+      console.log(`[sendCarousel] pre-flight ${ok ? 'OK' : 'FAIL'}: ${e.image_url}`);
+      if (!ok) {
+        e.image_url = undefined;
+      }
     }
   }));
 
@@ -514,6 +519,7 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
   });
 
   let result = await send(els);
+  console.log(`[sendCarousel] send result: ok=${result.ok} status=${result.status}`);
   // Never lose the whole carousel because of a bad image - retry without images.
   if (!result.ok && els.some((e) => e.image_url)) {
     console.warn('[messenger] carousel with images failed - retrying without images');

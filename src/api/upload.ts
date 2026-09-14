@@ -34,8 +34,11 @@ r.post('/upload', upload.single('image'), async (req, res) => {
     : `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`;
   const mime = MIME[ext] || req.file.mimetype || 'application/octet-stream';
 
+  console.log(`[upload] originalname="${req.file.originalname}" reqName="${reqName}" final name="${name}"`);
+
   try {
     const url = await uploadImage(name, mime, req.file.buffer);
+    console.log(`[upload] success: ${name} → ${url}`);
     return res.json({ url, name, storage: 'supabase' });
   } catch (e: any) {
     console.error('[upload] supabase error:', e.message);

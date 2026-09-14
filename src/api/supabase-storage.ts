@@ -65,16 +65,19 @@ export async function listImages(): Promise<{ name: string; url: string; updated
       sortBy: { column: 'created_at', order: 'desc' },
     });
     if (error) throw new Error(`Supabase list failed: ${error.message}`);
+    console.log(`[listImages] prefix="${prefix}" found ${data?.length || 0} items`);
     for (const item of data || []) {
       const full = prefix ? `${prefix}/${item.name}` : item.name;
       if ((item as any).id === null) {
         await walk(full); // folder
       } else {
+        console.log(`[listImages] file: ${full}`);
         out.push({ name: full, url: publicUrl(full), updated_at: (item as any).updated_at });
       }
     }
   };
   await walk('');
+  console.log(`[listImages] total files: ${out.length}`);
   return out;
 }
 
