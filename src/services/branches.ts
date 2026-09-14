@@ -151,6 +151,29 @@ export function nearestBranchKey(lat: number, lng: number, catalog: BranchCatalo
   return bestKey;
 }
 
+/** Build a Google Maps directions URL to a store coordinate (turn-by-turn nav). */
+export function buildGoogleMapsUrl(lat: number, lng: number): string {
+  return `https://www.google.com/maps/dir/?api=1&destination=${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}&travelmode=driving`;
+}
+
+/** Nearest branch coordinate to a customer pin — or the first branch if the pin
+ *  is unknown. Returns null when NO branch has coordinates yet. Used for the
+ *  pickup store-link (the store is the destination regardless of where the
+ *  customer is). */
+export async function getNearestBranchCoords(customerLat?: number | null, customerLng?: number | null): Promise<{ lat: number; lng: number; key: string | null } | null> {
+  const coords = await getBranchCoords();
+  const catalog = await getBranchCatalog();
+  const entries = Object.entries(coords);
+  if (entries.length === 0) return null;
+  if (Number.isFinite(customerLat) && Number.isFinite(customerLng)) {
+    const key = nearestBranchKey(Number(customerLat), Number(customerLng), catalog);
+    if (key && coords[key]) return { lat: coords[key].lat, lng: coords[key].lng, key };
+  }
+  // Fallback: first branch with coordinates
+  const [firstKey, first] = entries[0];
+  return { lat: first.lat, lng: first.lng, key: firstKey };
+}
+
 // ---------- Delivery fee engine ----------
 // Tiered, distance-based from the store (branch origin) to the customer's pin.
 // The constants below are the DEFAULTS — Admin → Settings → 🛵 Delivery stores

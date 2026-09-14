@@ -15,7 +15,7 @@ import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, ge
 import { sendPushToAdmins } from '../services/push';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
-import { estimateDeliveryFee } from '../services/branches';
+import { estimateDeliveryFee, buildGoogleMapsUrl, getNearestBranchCoords } from '../services/branches';
 import { signWebviewPsid } from '../api/auth';
 import { getStoreInfo, StoreInfo } from '../services/store-info';
 
@@ -1147,6 +1147,19 @@ async function handlePayload(psid: string, payload: string): Promise<SendResult 
         // Explicit pending-status chat right after checkout: the order sits in
         // PENDING until an admin confirms it.
         await sendText(psid, `⏳ Your order (${order.orderNumber}) is pending and waiting for admin confirmation. We'll notify you as soon as it's confirmed!`);
+        // Pickup: send the store's Google Maps link so the customer can navigate
+        // there with one tap. The same link is also folded into order.address and
+        // shown in the receipt above — this is a dedicated, prominent reminder.
+        if ((st.ctx.delivery_type || 'delivery') === 'pickup') {
+          try {
+            const store = await getNearestBranchCoords();
+            if (store) {
+              const mapsUrl = buildGoogleMapsUrl(store.lat, store.lng);
+              await sendText(psid,
+                `🏬 Pickup at our store:\n${mapsUrl}\n\nTap the link for turn-by-turn directions. See you on ${st.ctx.fulfillment_date || 'your pickup date'}!`);
+            }
+          } catch { /* link already in receipt; this is a best-effort reminder */ }
+        }
         // Notify the owner about the new order (optional ADMIN_PSID in .env).
         if (ADMIN_PSID) {
           safeSend(sendText(ADMIN_PSID,

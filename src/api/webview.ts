@@ -14,7 +14,7 @@ import { sendPushToAdmins } from '../services/push';
 import { sendText } from '../messenger/send';
 import { packageDefaults } from '../services/pricing';
 import { getStoreInfo } from '../services/store-info';
-import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey, getDeliveryTiers, estimateDeliveryFee } from '../services/branches';
+import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey, getDeliveryTiers, estimateDeliveryFee, buildGoogleMapsUrl, getNearestBranchCoords } from '../services/branches';
 
 const r = Router();
 
@@ -446,6 +446,19 @@ r.post('/checkout', async (req, res) => {
     // ids) — skip those since they have no chat to message.
     if (/^\d+$/.test(sessionId)) {
       sendText(sessionId, `⏳ Your order (${order.orderNumber}) is pending and waiting for admin confirmation. We'll notify you as soon as it's confirmed!`).catch(() => { });
+      // Pickup: also send the store's Google Maps link so the customer can
+      // navigate there with one tap straight from Messenger.
+      if ((order_type || 'delivery') === 'pickup') {
+        getNearestBranchCoords(
+          Number.isFinite(Number(delivery_lat)) ? Number(delivery_lat) : null,
+          Number.isFinite(Number(delivery_lng)) ? Number(delivery_lng) : null
+        ).then((store) => {
+          if (store) {
+            const mapsUrl = buildGoogleMapsUrl(store.lat, store.lng);
+            sendText(sessionId, `🏬 Pickup at our store:\n${mapsUrl}\n\nTap for turn-by-turn directions. See you on ${fulfillment_date || 'your pickup date'}!`).catch(() => { });
+          }
+        }).catch(() => { });
+      }
     }
   } catch (e: any) {
     res.status(400).json({ error: e.message });

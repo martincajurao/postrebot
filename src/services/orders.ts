@@ -2,7 +2,7 @@
 import { computeCartTotals, choiceUpgrade, normalizeChoices, priceFoodPack, pricePackage, priceProduct } from './pricing';
 import { clearCart, getCart } from './cart';
 import { syncReservationFromOrder } from './reservations';
-import { buildWazeAppUrl, estimateDeliveryFee } from './branches';
+import { buildWazeAppUrl, estimateDeliveryFee, buildGoogleMapsUrl, getNearestBranchCoords } from './branches';
 
 /**
  * Resolve a webview client-side cart into priced order items.
@@ -141,6 +141,24 @@ export async function createOrderFromCart(
   }
   // (Without coordinates the legacy behavior applies: admin enters the actual
   // fare when confirming the order.)
+
+  // Pickup: attach a Google Maps link to the nearest store so the customer can
+  // navigate there with one tap. The store is the destination — branch chosen by
+  // proximity to the customer's saved pin, falling back to the first branch.
+  if (details.order_type === 'pickup') {
+    const store = await getNearestBranchCoords(
+      Number.isFinite(details.delivery_lat) ? Number(details.delivery_lat) : null,
+      Number.isFinite(details.delivery_lng) ? Number(details.delivery_lng) : null
+    );
+    if (store) {
+      const mapsUrl = buildGoogleMapsUrl(store.lat, store.lng);
+      const navLine = `📍 Navigate to store (Google Maps): ${mapsUrl}`;
+      const base = (details.address || '').trim();
+      addressWithWaze = base
+        ? (base.includes(mapsUrl) ? base : `${base}\n${navLine}`)
+        : navLine;
+    }
+  }
 
   // Two cart sources:
   //  - clientItems: the webview's local cart (items only; every line is re-priced
