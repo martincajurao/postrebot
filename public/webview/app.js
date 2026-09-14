@@ -1856,6 +1856,26 @@ function loadCustomerData() {
   } catch { return null; }
 }
 
+/** Reactive checkout address: when the customer picks a location (saved chip,
+ *  GPS fix, map pin, search result) the Delivery Address field follows along
+ *  — even if checkout is already open. Hand-edits win: once the customer types
+ *  in the field, auto-sync stops until the next EXPLICIT choice (gate confirm
+ *  / chip tap), which is authoritative and overwrites. */
+let coAddressDirty = false;
+function syncCheckoutAddress(addr, force) {
+  try {
+    const text = (addr && String(addr).trim()) || '';
+    if (!text) return;
+    const view = $id('view-checkout');
+    const field = $id('address');
+    if (!view || !field || !view.classList.contains('active')) return;
+    if (!force && coAddressDirty) return;
+    if (field.value.trim() === text) return;
+    field.value = text;
+    showToast('📍 Address updated to your chosen location');
+  } catch (e) { /* never block the gate flow */ }
+}
+
 function startCheckout() {
   if (cart.items.length === 0) return showToast('Your cart is empty');
   const container = $id('checkout-form');
@@ -1886,7 +1906,7 @@ function startCheckout() {
     </div>
     <div class="form-group" id="address-group">
       <label>Delivery Address</label>
-      <textarea id="address" placeholder="House #, street, barangay, city">${esc(remembered?.address || (savedLoc && savedLoc.address) || '')}</textarea>
+      <textarea id="address" placeholder="House #, street, barangay, city">${esc((savedLoc && savedLoc.address) || remembered?.address || '')}</textarea>
     </div>
     <div class="form-group">
       <label>Contact Number</label>
@@ -1924,6 +1944,11 @@ function startCheckout() {
     updateDeliveryFeeRow();
   });
   $id('fulfill-date').addEventListener('change', function () { loadTimeSlots(this.value); });
+
+  // Reactive address: track hand-edits so auto-sync never stomps them, and
+  // seed the field with whatever the customer chose at the gate right now.
+  coAddressDirty = false;
+  $id('address').addEventListener('input', function () { coAddressDirty = true; });
 
   const today = new Date().toISOString().split('T')[0];
   $id('fulfill-date').setAttribute('min', today);
@@ -2778,6 +2803,9 @@ async function useSavedLocation(id) {
   const loc = getSavedLocations().find((l) => l.id === id);
   if (!loc) return;
   saveLocation(loc); // bumps lastUsedAt + sets it as the in-use location
+  // Explicit choice → the checkout address follows immediately.
+  coAddressDirty = false;
+  syncCheckoutAddress(loc.address, true);
   pendingCoords = (Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) ? { lat: loc.lat, lng: loc.lng } : null;
   pinSource = pendingCoords ? (loc.source === 'gps' ? 'gps' : 'pin') : null;
   hideLocError();
@@ -3461,6 +3489,8 @@ function setPendingAddress(addr, fromUser) {
     }
   }
   updateLocConfirmState();
+  // Keep the checkout Delivery Address reactive to this resolved address.
+  syncCheckoutAddress(pendingAddress);
 }
 
 /** Drop/move the pin and remember the chosen point. */
@@ -3809,6 +3839,9 @@ async function confirmLocation() {
   hideLocationGate();
   updateLocationBar();
   showToast('📍 Location saved!');
+  // Explicit choice → the checkout address follows immediately.
+  coAddressDirty = false;
+  syncCheckoutAddress(address, true);
   
   // Detect branch AFTER user confirms location
   if (Number.isFinite(confirmedLat) && Number.isFinite(confirmedLng)) {
