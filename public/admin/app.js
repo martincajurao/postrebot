@@ -3017,7 +3017,7 @@ views.admins = async (main) => {
 /* ================= SERVICES VIEW ================= */
 views.services = async (main) => {
   const [content, uploads] = await Promise.all([
-    api('/service-content').catch(() => ({ catering_intro_text: '', catering_packages_text: '', catering_custom_text: '', catering_quote_text: '' })),
+    api('/service-content').catch(() => ({ catering_intro_text: '' })),
     api('/uploads-list').catch(() => []),
   ]);
   const activeTab = sessionStorage.getItem('servicesTab') || 'content';
@@ -3033,20 +3033,8 @@ views.services = async (main) => {
         <p class="muted" style="font-size:12px;margin-bottom:8px">Sent when customer asks about catering.</p>
         <textarea id="sc-intro" rows="8" style="width:100%;min-height:120px;font-family:inherit;padding:12px">${esc(content.catering_intro_text || '')}</textarea>
       </div>
-      <div class="card"><h3 style="margin-bottom:8px">📦 Packages Message</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:8px">Shown when customer replies "packages".</p>
-        <textarea id="sc-packages" rows="6" style="width:100%;min-height:100px;font-family:inherit;padding:12px">${esc(content.catering_packages_text || '')}</textarea>
-      </div>
-      <div class="card"><h3 style="margin-bottom:8px">🎯 Custom Order Message</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:8px">Shown when customer replies "custom".</p>
-        <textarea id="sc-custom" rows="6" style="width:100%;min-height:100px;font-family:inherit;padding:12px">${esc(content.catering_custom_text || '')}</textarea>
-      </div>
-      <div class="card"><h3 style="margin-bottom:8px">💰 Quote Request Message</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:8px">Shown when customer replies "quote".</p>
-        <textarea id="sc-quote" rows="6" style="width:100%;min-height:100px;font-family:inherit;padding:12px">${esc(content.catering_quote_text || '')}</textarea>
-      </div>
       <div style="margin-top:16px;display:flex;gap:8px">
-        <button class="btn" id="sc-save">Save All Changes</button>
+        <button class="btn" id="sc-save">Save Changes</button>
         <button class="btn ghost" id="sc-preview">Preview</button>
       </div>
       <p class="muted" style="font-size:12px;margin-top:8px">Changes go live immediately.</p>
@@ -3089,9 +3077,6 @@ views.services = async (main) => {
     try {
       await api('/service-content', { method: 'PUT', body: {
         catering_intro_text: document.getElementById('sc-intro').value,
-        catering_packages_text: document.getElementById('sc-packages').value,
-        catering_custom_text: document.getElementById('sc-custom').value,
-        catering_quote_text: document.getElementById('sc-quote').value,
       }});
       toast('Service content saved!');
       navigate('services');
