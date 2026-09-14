@@ -709,6 +709,9 @@ export async function sendCateringMenu(psid: string): Promise<void> {
   // Send catering text details first
   await sendText(psid, content.catering_intro_text);
 
+  // Small delay to prevent Messenger from dropping rapid consecutive messages
+  await new Promise(resolve => setTimeout(resolve, 500));
+
   // Fetch uploaded catering images from Supabase Storage bucket.
   // ONLY catering-tagged uploads (filenames prefixed "catering-") appear here.
   let cateringImages: string[] = [];
@@ -727,10 +730,6 @@ export async function sendCateringMenu(psid: string): Promise<void> {
     console.warn('[sendCateringMenu] Could not fetch uploaded images:', e);
   }
 
-  // If no uploaded images, fall back to admin icon
-  const baseUrl = ENV_BASE_URL || requestBaseUrl;
-  const defaultImageUrl = baseUrl ? `${baseUrl}/admin/icon-512.svg` : '';
-
   // Build carousel elements with images only (no buttons)
   const cateringElements = cateringImages.length > 0
     ? cateringImages.map((url, index) => ({
@@ -741,11 +740,12 @@ export async function sendCateringMenu(psid: string): Promise<void> {
     : [
         {
           title: '🧁 Catering Services',
-          subtitle: 'We offer delicious catering for your events!',
-          image_url: defaultImageUrl || undefined,
+          subtitle: 'We offer delicious catering for your events!\n\n📞 Message us to inquire!',
+          image_url: undefined,
         },
       ];
 
   console.log(`[sendCateringMenu] sending carousel with ${cateringElements.length} elements`);
+  console.log(`[sendCateringMenu] elements:`, JSON.stringify(cateringElements, null, 2));
   await sendCarousel(psid, cateringElements);
 }
