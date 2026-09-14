@@ -1411,7 +1411,10 @@ body {
   display: block;
   overflow: hidden;
   background: #f8f9fa;
-  min-height: 110px;
+  /* Matches .card-media img height (96px) so the wrapper never pokes out
+     below a loaded photo; larger images (220px packages, 200px detail)
+     stretch the wrapper beyond this — the strip only ever came from here. */
+  min-height: 96px;
 }
 
 /* Placeholder icon — shown only when a photo URL is missing or fails to load */
