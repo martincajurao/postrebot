@@ -2585,12 +2585,24 @@ function renameSavedLocation(id, label) {
   } catch { /* non-fatal */ }
 }
 
-/** Remove a saved address from the list (does not affect the in-use location). */
+/** Remove a saved address from the list. If the removed chip IS the server
+ *  pin (browser-captured / gate-confirmed), clear it server-side too —
+ *  otherwise the prefill refetch resurrects the chip on the next visit. */
 function removeSavedLocation(id) {
   try {
-    storageSet(LOCATIONS_KEY(), JSON.stringify(getSavedLocations().filter((l) => l.id !== id)));
+    const list = getSavedLocations();
+    const removed = list.find((l) => l.id === id);
+    storageSet(LOCATIONS_KEY(), JSON.stringify(list.filter((l) => l.id !== id)));
     renderSavedLocations();
     showToast('🗑️ Saved location removed');
+    try {
+      const c = removed ? locationCoords(removed) : null;
+      if (c && lastServerPin && coordsDistanceMeters(c, lastServerPin) <= DEDUPE_RADIUS_METERS) {
+        lastServerPin = null;
+        lastServerPinKey = null;
+        api('/location?session=' + encodeURIComponent(sessionId), { method: 'DELETE' }).catch(() => {});
+      }
+    } catch (e) { /* server sync is best-effort — the chip is already gone locally */ }
   } catch { /* non-fatal */ }
 }
 
@@ -3501,6 +3513,7 @@ function setMapPin(latlng, fromGps) {
  *  location decision. Refetched on every gate open and whenever the webview
  *  becomes visible again (returning from gps.html does NOT reload the page). */
 let lastServerPinKey = null;
+let lastServerPin = null; // raw coords of the applied server pin (for removal sync)
 async function loadChatLocationIntoGate() {
   try {
     const loc = await api('/location?session=' + encodeURIComponent(sessionId));
@@ -3513,6 +3526,7 @@ async function loadChatLocationIntoGate() {
     const pinKey = lat.toFixed(5) + ',' + lng.toFixed(5);
     if (pinKey === lastServerPinKey) return;
     lastServerPinKey = pinKey;
+    lastServerPin = { lat, lng };
     pendingCoords = { lat, lng };
     pinSource = 'pin';
     setMapPin({ lat, lng }, false);

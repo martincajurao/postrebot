@@ -585,6 +585,23 @@ r.put('/location', async (req, res) => {
   }
 });
 
+/** Customer removed their saved location chip in the webview → clear the
+ *  server-side pin too, so the gate prefill (refetched on every open / return
+ *  from the browser capture) can't resurrect the deleted location. Idempotent:
+ *  unknown sessions simply match zero rows. */
+r.delete('/location', async (req, res) => {
+  const sessionId = getSessionId(req);
+  if (!sessionId) return res.status(400).json({ error: 'No session' });
+  try {
+    await supa().from('customers')
+      .update({ delivery_lat: null, delivery_lng: null })
+      .eq('psid', sessionId);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- Check if webview is enabled ----
 
 r.get('/enabled', async (_req, res) => {

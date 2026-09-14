@@ -228,6 +228,15 @@ const server = app.listen(0, async () => {
     const noLoc = await req('/location?session=does_not_exist_xyz');
     assert('GET /location (unknown session → null)', noLoc.status === 200 && noLoc.data === null);
 
+    // Removing the saved chip must clear the server pin (no resurrection).
+    const delLoc = await req('/location?session=' + session, { method: 'DELETE' });
+    assert('DELETE /location (clear)', delLoc.status === 200 && delLoc.data.ok === true, String(delLoc.data?.error || ''));
+    const getCleared = await req('/location?session=' + session);
+    assert('GET /location (cleared → null)', getCleared.status === 200 && getCleared.data === null,
+      'got ' + JSON.stringify(getCleared.data));
+    const delAgain = await req('/location?session=' + session, { method: 'DELETE' });
+    assert('DELETE /location (idempotent)', delAgain.status === 200 && delAgain.data.ok === true, String(delAgain.data?.error || ''));
+
     // 7. Config, Enabled, Slots
     const cfg = await req('/config');
     assert('GET /config', cfg.status === 200 && cfg.data.payment && cfg.data.contact);
