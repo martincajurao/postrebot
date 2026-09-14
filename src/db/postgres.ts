@@ -255,6 +255,12 @@ async function seedDefaults(): Promise<void> {
     }
   }
 
+  // Exactly ONE active "build your own" package may exist — a duplicate
+  // made the Packages tab render identical BYOP cards twice.
+  await run(
+    'CREATE UNIQUE INDEX IF NOT EXISTS uq_packages_one_active_custom ON packages (is_custom) WHERE is_custom = 1 AND active = 1'
+  );
+
   // At least one ready-to-order fixed package.
   if ((await one<{ c: number }>('SELECT COUNT(*)::int AS c FROM packages WHERE is_fixed = 1 AND active = 1'))!.c === 0) {
     const candidates = await many<any>('SELECT * FROM packages WHERE active = 1 AND is_custom = 0 ORDER BY id');

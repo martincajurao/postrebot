@@ -989,7 +989,11 @@ function showPackages() {
   }
   // All packages sorted by net price ascending (Build-Your-Own custom package,
   // if present, is treated like any other package and also sorted by price).
-  const sorted = packages.slice().sort((a, b) => {
+  // Dedupe guard: exactly ONE custom BYOP package may exist — if dirty data
+  // ever contains duplicates, keep the first and hide the rest here.
+  const firstCustomIdx = packages.findIndex((pkg) => pkg.is_custom);
+  const dedupedPackages = packages.filter((pkg, i) => !pkg.is_custom || i === firstCustomIdx);
+  const sorted = dedupedPackages.slice().sort((a, b) => {
     const aCustom = !!(a && a.is_custom);
     const bCustom = !!(b && b.is_custom);
     const aPrice = netPackagePrice(a);
