@@ -520,11 +520,12 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
   });
 
   let result = await send(els);
-  console.log(`[sendCarousel] send result: ok=${result.ok} status=${result.status}`);
+  console.log(`[sendCarousel] send result: ok=${result.ok} status=${result.status} body=${result.body?.slice(0, 200) || ''}`);
   // Never lose the whole carousel because of a bad image - retry without images.
   if (!result.ok && els.some((e) => e.image_url)) {
     console.warn('[messenger] carousel with images failed - retrying without images');
-    await send(els.map((e) => ({ ...e, image_url: undefined })));
+    const retryResult = await send(els.map((e) => ({ ...e, image_url: undefined })));
+    console.log(`[sendCarousel] retry result: ok=${retryResult.ok} status=${retryResult.status}`);
   }
 }
 
