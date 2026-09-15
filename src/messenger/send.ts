@@ -594,14 +594,24 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
     );
   };
   
+  // Lifecycle copy per stage. Pickup vs delivery orders get different
+  // "what happens next" lines so every update reads naturally in the thread.
+  const isPickup = order ? String(order.order_type || '').toLowerCase() === 'pickup' : false;
+  const nextStep = isPickup
+    ? "We'll message you as soon as it's ready for pickup."
+    : "We'll update you once it's out for delivery.";
+
   const messages: Record<string, string> = {
-    CONFIRMED: `Good news! Your order${orderRef} has been confirmed and will be prepared on scheduled date.`,
-    PREPARING: `Your order${orderRef} is now being prepared. We'll let you know when it's ready!`,
-    READY: `Your order${orderRef} is ready! Our delivery rider will pick it up shortly.`,
-    CANCELLED: `Your order${orderRef} has been cancelled. Contact us if this is unexpected.`,
-    COMPLETED: `Your order${orderRef} has been completed. Thank you for ordering from Postre Food Products!`,
+    PENDING: `🧾 Your order${orderRef} is in! It's waiting for admin confirmation — we'll message you the moment it's confirmed.`,
+    CONFIRMED: `✅ Good news! Your order${orderRef} has been confirmed and will be prepared on your scheduled date. ${nextStep}`,
+    PREPARING: `👨‍🍳 Your order${orderRef} is now being prepared. ${nextStep}`,
+    READY: isPickup
+      ? `📦 Your order${orderRef} is now ready for pickup at our store! See you soon.`
+      : `📦 Your order${orderRef} is ready! Our delivery rider will pick it up shortly.`,
+    CANCELLED: `❌ Your order${orderRef} has been cancelled. If this is unexpected or you'd like to reorder, just send us a message.`,
+    COMPLETED: `🎉 Your order${orderRef} has been completed — we hope you enjoyed it! Thank you for ordering from Postre Food Products.`,
   };
-  
+
   let msg = messages[status];
   if (msg && status === 'CONFIRMED') {
     msg += await buildReservationForm();
@@ -609,10 +619,20 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
   if (msg) await sendText(psid, msg);
 }
 
-/** Rider has picked up the order - customer is informed it's on the way. */
-export function notifyOrderOnTheWay(psid: string, orderNumber?: string): void {
+/** Rider has (or is about to) pick the order up — customer is told it's on the
+ *  way, with a one-tap "Order Received" quick reply so THEY can complete the
+ *  order straight from the chat thread. Fired by the admin "🛵 Rider OTW"
+ *  button and by the PREPARING → READY status transition. */
+export async function notifyOrderOnTheWay(psid: string, orderId: number, orderNumber?: string): Promise<void> {
   const orderRef = orderNumber ? ` (${orderNumber})` : '';
-  sendText(psid, `🚚 Your order${orderRef} has been picked up by our delivery rider and is now on its way!`).catch(() => { });
+  await sendQuickReplies(
+    psid,
+    `🛵 Your order${orderRef} has been picked up by our delivery rider and is now on its way! Tap below once you receive it:`,
+    [
+      { title: '✅ Order Received', payload: `COMPLETE:${orderId}` },
+      { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
+    ],
+  );
 }
 
 /** Order-placed receipt: sent right after checkout while the order is still PENDING for admin confirmation. */

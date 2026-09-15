@@ -13,7 +13,7 @@ import { choiceUpgrade, computeCartTotals, packageDefaults, priceProduct } from 
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
 import { getServiceContent, SERVICE_CONTENT_KEYS, invalidateServiceCache } from '../services/service-content';
 import { getBranches, saveBranches, parseBranches, serializeBranches, getBranchCoords, saveBranchCoords, getDeliveryTiers, saveDeliveryTiers } from '../services/branches';
-import { notifyOrderStatus, sendRatingRequest, sendText, sendQuickReplies } from '../messenger/send';
+import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText } from '../messenger/send';
 
 const r = Router();
 
@@ -436,18 +436,34 @@ r.post('/orders/:id/status', async (req, res) => {
   if (order.customer_id) {
     const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
     if (customer?.data?.psid) {
-            if (status === 'READY') {
-        // Combine on-the-way message with quick replies for order completion (single message)
-        await sendQuickReplies(customer.data.psid, `Your order${order.order_number ? ` (${order.order_number})` : ''} has been picked up by our delivery rider and is now on its way! Tap below when you receive it:`, [
-          { title: '✅ Order Received', payload: `COMPLETE:${order.id}` },
-          { title: '🏠 Main Menu', payload: 'MAIN_MENU' },
-        ]);
+      if (status === 'READY' && String(order.order_type || '').toLowerCase() !== 'pickup') {
+        // Out for delivery — one quick-replies message carries the OTW notice
+        // AND the customer's one-tap "Order Received" completion button.
+        await notifyOrderOnTheWay(customer.data.psid, order.id, order.order_number);
       }
       else await notifyOrderStatus(customer.data.psid, status, order.order_number, order);
       // Send rating request when order is completed
       if (status === 'COMPLETED') {
         await sendRatingRequest(customer.data.psid, order.order_number, order.id);
       }
+    }
+  }
+  res.json({ ok: true });
+});
+// Rider is on the way — the admin's "🛵 Rider OTW" button (a READY delivery
+// order whose rider just departed). Tells the customer their order is en route
+// and hands them the one-tap "Order Received" completion button in the same
+// message, so the customer can close the loop themselves up to completion.
+r.post('/orders/:id/on-the-way', async (req, res) => {
+  const { data: order } = await supa().from('orders').select('*, customers(name, phone)').eq('id', req.params.id).maybeSingle();
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.status === 'CANCELLED' || order.status === 'COMPLETED') {
+    return res.status(400).json({ error: `A ${String(order.status).toLowerCase()} order can no longer be marked on the way` });
+  }
+  if (order.customer_id) {
+    const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
+    if (customer?.data?.psid) {
+      await notifyOrderOnTheWay(customer.data.psid, order.id, order.order_number);
     }
   }
   res.json({ ok: true });
@@ -490,7 +506,29 @@ r.post('/orders/:id/discount', async (req, res) => {
 });
 r.post('/orders/:id/payment-status', async (req, res) => {
   const { payment_status } = req.body;
+  if (!['UNPAID', 'PAYMENT_SUBMITTED', 'PAID'].includes(payment_status)) {
+    return res.status(400).json({ error: 'Invalid payment status' });
+  }
+  const { data: order } = await supa().from('orders').select('*').eq('id', req.params.id).maybeSingle();
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.payment_status === payment_status) return res.json({ ok: true, unchanged: true });
   await updatePaymentStatus(Number(req.params.id), payment_status);
+
+  // Keep the customer's chat thread in the loop about their payment too —
+  // admin updates cover the money side, not just the kitchen side.
+  if (order.customer_id) {
+    const customer = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
+    if (customer?.data?.psid) {
+      const ref = order.order_number ? ` (${order.order_number})` : '';
+      const paymentMessages: Record<string, string> = {
+        PAYMENT_SUBMITTED: `🧾 Payment proof received for your order${ref} — we'll verify it and confirm shortly.`,
+        PAID: `💳 Payment received for your order${ref}. Thank you!${order.fulfillment_date ? ` See you on ${order.fulfillment_date}${order.time_slot ? ' at ' + order.time_slot : ''}!` : ''}`,
+        UNPAID: `↩️ The payment status of your order${ref} was set back to Unpaid. If you have already paid, just reply here.`,
+      };
+      const paymentMsg = paymentMessages[payment_status];
+      if (paymentMsg) await sendText(customer.data.psid, paymentMsg);
+    }
+  }
   res.json({ ok: true });
 });
 
@@ -569,11 +607,17 @@ async function recalcOrderTotalsAfterItemEdit(orderId: number): Promise<{ subtot
 }
 
 /** Best-effort Messenger summary of what the admin changed for the customer. */
-async function notifyOrderEdited(order: any, changes: string[]): Promise<void> {
-  if (!changes.length) return;
+async function notifyOrderEdited(order: any, changes: string[], itemChanges: string[] = []): Promise<void> {
+  if (!changes.length && !itemChanges.length) return;
   try {
     const { data: cust } = await supa().from('customers').select('psid').eq('id', order.customer_id).maybeSingle();
-    if (cust?.psid) await sendText(cust.psid, `✏️ Update for your order (${order.order_number}):\n${changes.join('\n')}`);
+    if (!cust?.psid) return;
+    let body = changes.join('\n');
+    if (itemChanges.length) {
+      if (body) body += '\n';
+      body += '🛒 Items:\n' + itemChanges.map((c) => `• ${c}`).join('\n');
+    }
+    await sendText(cust.psid, `✏️ Update for your order (${order.order_number}):\n${body}`);
   } catch { /* notification is best effort */ }
 }
 
@@ -648,7 +692,13 @@ r.put('/orders/:id', async (req, res) => {
   if (upd.time_slot && upd.time_slot !== order.time_slot) changes.push(`⏰ Time: ${upd.time_slot}`);
   if (upd.address !== undefined && upd.address !== order.address) changes.push(`📍 Address: ${upd.address || '—'}`);
   if (upd.notes !== undefined && upd.notes !== order.notes) changes.push('📝 Notes updated');
-  await notifyOrderEdited(order, changes);
+  // Item-level edits (add / quantity / remove) run through the item endpoints
+  // BEFORE this PUT — the editor summarizes what it changed here so the
+  // customer gets ONE message covering the whole edit, never a burst of texts.
+  const itemChanges = Array.isArray(req.body?.item_changes)
+    ? (req.body.item_changes as unknown[]).map((c) => String(c).trim()).filter(Boolean)
+    : [];
+  await notifyOrderEdited(order, changes, itemChanges);
 
   res.json({ ok: true });
 });

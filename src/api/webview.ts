@@ -11,7 +11,7 @@ import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart } f
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, cancelOrder, updateOrderStatus } from '../services/orders';
 import { slotAvailability, isDateOpen } from '../services/reservations';
 import { sendPushToAdmins } from '../services/push';
-import { sendText } from '../messenger/send';
+import { sendText, sendOrderConfirmation } from '../messenger/send';
 import { packageDefaults } from '../services/pricing';
 import { getStoreInfo } from '../services/store-info';
 import { parseBranches, availableAtBranch, getBranchCatalog, nearestBranchKey, getDeliveryTiers, estimateDeliveryFee, buildGoogleMapsUrl, getNearestBranchCoords } from '../services/branches';
@@ -445,7 +445,12 @@ r.post('/checkout', async (req, res) => {
     // carry a real psid as the session id (pure-web sessions generate 'wv_'
     // ids) — skip those since they have no chat to message.
     if (/^\d+$/.test(sessionId)) {
-      sendText(sessionId, `⏳ Your order (${order.orderNumber}) is pending and waiting for admin confirmation. We'll notify you as soon as it's confirmed!`).catch(() => { });
+      // Full order-placed receipt — the same card the chat checkout sends — so
+      // the Messenger thread becomes the order's live status feed: placement →
+      // confirmation → preparing → out for delivery → completed.
+      getOrderItems(order.orderId)
+        .then((orderItems) => sendOrderConfirmation(sessionId, { ...order, order_number: order.orderNumber }, orderItems || []))
+        .catch(() => { });
       // Pickup: also send the store's Google Maps link so the customer can
       // navigate there with one tap straight from Messenger.
       if ((order_type || 'delivery') === 'pickup') {

@@ -613,14 +613,17 @@ function recalcCartTotals() {
       if (gross !== null && gross > unit + 0.001) discount += (gross - unit) * it.quantity;
     }
   }
-  // The delivery fee only applies to a non-empty delivery cart — with no items
-  // there is nothing to deliver (and no fare to show).
+  // The delivery fee only applies to a non-empty DELIVERY cart — with no items
+  // there is nothing to deliver (and no fare to show), and on the pickup flow
+  // there is no fare either: the fee reacts to the Delivery/Pickup choice, so
+  // switching tabs re-prices the cart and the checkout total instantly.
   const hasItems = cart.items.length > 0;
-  const delivery = (hasItems && deliveryEstimate) ? Number(deliveryEstimate.fee) || 0 : 0;
+  const isDelivery = effectiveOrderType() === 'delivery';
+  const delivery = (hasItems && isDelivery && deliveryEstimate) ? Number(deliveryEstimate.fee) || 0 : 0;
   cart.totals = {
     subtotal,
     delivery,
-    deliveryKnown: hasItems && !!deliveryEstimate,
+    deliveryKnown: hasItems && isDelivery && !!deliveryEstimate,
     discount,
     total: subtotal + delivery,
     breakdown,
@@ -1825,18 +1828,22 @@ function showCart() {
   lines += `<div class="total-row"><span>Subtotal${cart.items.length > 0 ? ` (${cart.items.reduce((s, i) => s + i.quantity, 0)} item${cart.items.reduce((s, i) => s + i.quantity, 0) === 1 ? '' : 's'})` : ''}</span><span>${formatMoney(t.subtotal)}</span></div>`;
   if (Number(t.discount) > 0) lines += `<div class="total-row discount"><span>Package Savings (already applied)</span><span>−${formatMoney(t.discount)}</span></div>`;
   // Delivery line — LIVE estimate for the current saved location; updates
-  // automatically when the customer changes their location (chip/GPS/pin/share).
-  const feeKnown = !!deliveryEstimate;
-  const feeKm = (deliveryEstimate && deliveryEstimate.km != null) ? ' (est. ' + deliveryEstimate.km + ' km)' : '';
-  let deliveryHtml;
-  if (Number(t.delivery) > 0) {
-    deliveryHtml = `${formatMoney(t.delivery)}${feeKm ? `<span class="total-note">est. ${deliveryEstimate.km} km</span>` : ''}`;
-  } else if (feeKnown) {
-    deliveryHtml = `<span class="total-free">FREE${feeKm}</span>`;
-  } else {
-    deliveryHtml = '<span class="total-note">Set location for exact fee</span>';
+  // automatically when the customer changes their location (chip/GPS/pin/share)
+  // AND with the order type: on the pickup flow there is no fare at all, so
+  // the row disappears and the grand total is just the menu total.
+  if (effectiveOrderType() === 'delivery') {
+    const feeKnown = !!deliveryEstimate;
+    const feeKm = (deliveryEstimate && deliveryEstimate.km != null) ? ' (est. ' + deliveryEstimate.km + ' km)' : '';
+    let deliveryHtml;
+    if (Number(t.delivery) > 0) {
+      deliveryHtml = `${formatMoney(t.delivery)}${feeKm ? `<span class="total-note">est. ${deliveryEstimate.km} km</span>` : ''}`;
+    } else if (feeKnown) {
+      deliveryHtml = `<span class="total-free">FREE${feeKm}</span>`;
+    } else {
+      deliveryHtml = '<span class="total-note">Set location for exact fee</span>';
+    }
+    lines += `<div class="total-row"><span>🛵 Delivery</span><span>${deliveryHtml}</span></div>`;
   }
-  lines += `<div class="total-row"><span>🛵 Delivery</span><span>${deliveryHtml}</span></div>`;
   lines += `<div class="total-row grand"><span>Total</span><span class="value">${formatMoney(t.total)}</span></div>`;
   totals.innerHTML = lines;
 
@@ -1902,8 +1909,32 @@ let coAddressDirty = false;
 // True while the customer is on the pickup flow ("I'll pick-up my order" →
 // branch chosen): checkout opens on the Pickup tab and the header bar shows
 // "Pickup · <branch>". Cleared by any explicit delivery choice (gate confirm,
-// saved-location chip, or tapping 🚚 Delivery in checkout).
+// saved-location chip, or tapping 🚚 Delivery in checkout); set again by a
+// branch choice in the gate or tapping 🏬 Pickup in checkout. Drives
+// effectiveOrderType() — i.e. whether a delivery fee is priced into totals.
 let pickupOrderFlow = false;
+
+/** Effective order type: 'pickup' while the customer is on the pickup flow
+ *  (branch chosen at the gate, or the Pickup tab tapped in checkout), else
+ *  'delivery'. Single source of truth for the fee-bearing display totals. */
+function effectiveOrderType() {
+  return pickupOrderFlow ? 'pickup' : 'delivery';
+}
+
+/** Flip the effective order type (pickup ↔ delivery) and re-price every
+ *  surface: the delivery fee leaves/returns the cart totals reactively, the
+ *  header chip switches between "Pickup · <branch>" and the delivery address,
+ *  and the persisted cart stays consistent with what checkout will submit.
+ *  No-op when the type didn't actually change. */
+function setOrderTypeFlow(type) {
+  const pickup = type === 'pickup';
+  if (pickupOrderFlow === pickup) return;
+  pickupOrderFlow = pickup;
+  // cart.totals are order-type aware (recalcCartTotals) — recompute, persist
+  // and re-render the cart. Checkout re-renders via updateDeliveryFeeRow().
+  saveCart();
+  updateLocationBar();
+}
 function syncCheckoutAddress(addr, force) {
   try {
     const text = (addr && String(addr).trim()) || '';
@@ -2042,12 +2073,15 @@ function startCheckout() {
       b.addEventListener('click', function () {
         seg.querySelectorAll('button').forEach((x) => x.classList.remove('active'));
         this.classList.add('active');
+        const value = this.dataset.value;
         const hidden = $id('order-type');
-        if (hidden) hidden.value = this.dataset.value;
-        // An explicit 🚚 Delivery tap overrides the pickup-flow default.
-        if (this.dataset.value === 'delivery') pickupOrderFlow = false;
+        if (hidden) hidden.value = value;
+        // The fee is order-type reactive: flipping the flow re-prices the cart
+        // totals (fee drops out for pickup, returns for delivery) and updates
+        // the header chip. 🚚 Delivery ends the pickup flow; 🏬 Pickup sets it.
+        setOrderTypeFlow(value);
         const addrGroup = $id('address-group');
-        if (addrGroup) addrGroup.style.display = this.dataset.value === 'delivery' ? 'block' : 'none';
+        if (addrGroup) addrGroup.style.display = value === 'delivery' ? 'block' : 'none';
         updateDeliveryFeeRow();
       });
     });
@@ -2480,6 +2514,15 @@ function isAndroidWebView() {
     if (!/Chrome\//i.test(ua) && /Safari\/|Mozilla\//i.test(ua)) return true;
     return false;
   } catch (e) { return false; }
+}
+
+/** True on ANY Android handset (Chrome, WebView, Messenger in-app — every
+ *  browser). Android phones never auto-GPS: a page-initiated geolocation
+ *  call pops the OS permission prompt with zero customer interaction, so
+ *  every fix there must come from an explicit tap. (Manual taps are
+ *  unaffected — full Chrome on Android answers them normally.) */
+function isAndroidPhone() {
+  try { return /Android/i.test(navigator.userAgent || ''); } catch (e) { return false; }
 }
 
 /** Probe whether this browser will EVER answer a geolocation request.
@@ -2994,7 +3037,7 @@ async function useSavedLocation(id) {
   saveLocation(loc); // bumps lastUsedAt + sets it as the in-use location
   // Explicit choice → the checkout address follows immediately.
   coAddressDirty = false;
-  pickupOrderFlow = false; // a delivery chip choice ends the pickup flow
+  setOrderTypeFlow('delivery'); // a delivery chip choice ends the pickup flow
   syncCheckoutAddress(loc.address, true);
   pendingCoords = (Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) ? { lat: loc.lat, lng: loc.lng } : null;
   pinSource = pendingCoords ? (loc.source === 'gps' ? 'gps' : 'pin') : null;
@@ -3148,13 +3191,18 @@ function showLocationGate() {
         setMapPin({ lat: saved.lat, lng: saved.lng }, false);
         locMap.setView([saved.lat, saved.lng], 15);
       }
-      // Auto-detect AFTER map is ready so we can pan to location
-      autoDetectLocation();
+      // Auto-detect AFTER map is ready so we can pan to location.
+      // ANDROID: never auto-locate — the automatic attempt pops the GPS
+      // permission prompt with no tap (or burns a doomed 2.5s probe inside
+      // in-app browsers). Android customers locate themselves explicitly:
+      // the GPS button (Chrome), "Set my location in phone browser", or a
+      // pin on the map below.
+      if (!isAndroidPhone()) autoDetectLocation();
     } else {
       if (wrap) wrap.style.display = 'none';
       showLocError('Map unavailable — please enter your address manually below.');
       // Still try auto-detect even without map (will just fill address)
-      autoDetectLocation();
+      if (!isAndroidPhone()) autoDetectLocation();
     }
   });
 
@@ -3733,7 +3781,7 @@ async function choosePickupBranch(key) {
   if (!branch) return;
   activeBranch = branch;
   try { storageSet('webview_branch_' + sessionId, branch); } catch (e) { /* non-fatal */ }
-  pickupOrderFlow = true; // checkout opens on the Pickup tab
+  setOrderTypeFlow('pickup'); // checkout opens on the Pickup tab; totals lose the fee
   coAddressDirty = false;
   hideLocationGate();
   updateLocationBar();
@@ -4148,7 +4196,7 @@ async function confirmLocation() {
   showToast('📍 Location saved!');
   // Explicit choice → the checkout address follows immediately.
   coAddressDirty = false;
-  pickupOrderFlow = false; // a delivery confirm ends the pickup flow
+  setOrderTypeFlow('delivery'); // a delivery confirm ends the pickup flow
   syncCheckoutAddress(address, true);
   
   // Detect branch AFTER user confirms location
@@ -4223,7 +4271,10 @@ async function init() {
 
   // Pre-warm the GPS provider while the catalog loads — by the time the
   // customer taps "Use my current location", the OS already has a fix warm.
-  try { warmUpGpsProvider(); } catch (e) {}
+  // ANDROID: skipped — a page-load geolocation call pops the OS permission
+  // prompt with zero customer interaction. Android never auto-GPSes; the
+  // customer locates themselves with an explicit tap instead.
+  try { if (!isAndroidPhone()) warmUpGpsProvider(); } catch (e) {}
 
   // Check if webview is enabled
   let enabled = true;

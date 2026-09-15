@@ -1056,23 +1056,25 @@ async function openOrderEditor(orderId) {
   document.getElementById('oe-save').addEventListener('click', (e) => withBtn(e.currentTarget, async () => {
     try {
       // Process each row: new items are created, existing items are updated or removed.
+      const itemNotes = []; // summarized into the customer's bot update message
       for (const row of document.querySelectorAll('#oe-items .oe-item-row')) {
         const itemId = row.dataset.itemId ? Number(row.dataset.itemId) : null;
         const origQty = Number(row.dataset.qty) || 0;
         const qty = Math.max(0, Math.min(99, Number(row.querySelector('.oe-qty').value) || 0));
         const isNew = !itemId;
+        const it = items.find((x) => x.key === row.dataset.key);
         if (isNew) {
           if (qty === 0) continue;
-          const it = items.find((x) => x.key === row.dataset.key);
           if (!it) continue;
           if (it.kind === 'product') await api(`/orders/${orderId}/items`, { method: 'POST', body: { product_id: it.product_id, variant_size: it.variant_size || undefined, quantity: qty } });
           else if (it.kind === 'package') await api(`/orders/${orderId}/items`, { method: 'POST', body: { package_id: it.package_id, variant_size: it.variant_size || undefined, quantity: qty } });
           else if (it.kind === 'foodpack') await api(`/orders/${orderId}/items`, { method: 'POST', body: { food_pack_id: it.food_pack_id, quantity: qty } });
+          itemNotes.push(`Added ${it.name} ×${qty}`);
           continue;
         }
         if (qty === origQty) continue;
-        if (qty === 0) await api(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
-        else await api(`/orders/${orderId}/items/${itemId}`, { method: 'PUT', body: { quantity: qty } });
+        if (qty === 0) { itemNotes.push(`Removed ${it ? it.name : 'an item'}`); await api(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' }); }
+        else { itemNotes.push(`${it ? it.name : 'Item'}: ×${origQty} → ×${qty}`); await api(`/orders/${orderId}/items/${itemId}`, { method: 'PUT', body: { quantity: qty } }); }
       }
       // Only include schedule fields if the date is filled — sending empty date
       // without a slot (or vice versa) would trip the backend's validation.
@@ -1088,6 +1090,7 @@ async function openOrderEditor(orderId) {
         putBody.fulfillment_date = dateVal;
         putBody.time_slot = slotVal;
       }
+      if (itemNotes.length) putBody.item_changes = itemNotes;
       await api('/orders/' + orderId, { method: 'PUT', body: putBody });
       closeModal();
       toast('Order updated — the customer was notified of the changes');
