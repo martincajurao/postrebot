@@ -183,22 +183,30 @@ ${orderLines.join('\n')}
 Df ${df}
 Total:${totalStr}`;
 
-  // The waze:// app link (appended to order.address at order time) is shown in
-  // the rider's copy text; it's ALSO extracted as modal-button metadata here.
-  // Old orders may carry an https waze fallback — that's kept out of the copy
-  // text and used ONLY to power the modal's "Open in Waze" button fallback.
+  // The waze:// app link (appended to order.address at order time) powers the
+  // modal's "Open in Waze" button. The rider's COPY TEXT instead carries the
+  // https UNIVERSAL link: a plain-text waze:// URL is not clickable wherever
+  // the details get pasted, while the https link is auto-linked by every app
+  // and opens the Waze app automatically on any phone.
   const addr = String(order.address || '');
   const appMatch = addr.match(/waze:\/\/[^\s]*/);
   const httpsMatch = addr.match(/https?:\/\/[^\s]*waze\.com[^\s]*/);
   const wazeApp = appMatch ? appMatch[0] : '';
   const wazeUrl = httpsMatch ? httpsMatch[0] : '';
+  // Derive the https universal link from the waze:// coordinates when the
+  // order only carries the custom scheme.
+  const httpsFromApp = (() => {
+    const m = wazeApp.match(/ll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+    return m ? `https://waze.com/ul?ll=${m[1]},${m[2]}&navigate=yes` : '';
+  })();
+  const wazeClickable = wazeUrl || httpsFromApp;
 
-  // Address block for the rider: plain address + single waze:// app link.
+  // Address block for the rider: plain address + ONE clickable waze link.
   const cleanAddr = cleanAddressForCard(order.address);
-  const riderAddr = wazeApp ? `${cleanAddr}\n📍 Navigate (opens Waze app): ${wazeApp}` : cleanAddr;
+  const riderAddr = wazeClickable ? `${cleanAddr}\n📍 Navigate (tap to open Waze app): ${wazeClickable}` : cleanAddr;
   const deliveryTo = order.order_type === 'delivery' ? `Delivery to;\n${riderAddr || 'Pickup'}` : 'Pickup order';
 
-  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo};;;WAZE=${encodeURIComponent(JSON.stringify({ app: wazeApp, https: wazeUrl }))}`;
+  return `pick up:\n${pickup}\n\nDrop off;\n${dropoff}\n\n${deliveryTo};;;WAZE=${encodeURIComponent(JSON.stringify({ app: wazeApp, https: wazeClickable }))}`;
 }
 
 function renderOrderItems(orderItems) {

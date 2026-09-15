@@ -13,7 +13,8 @@ import { choiceUpgrade, computeCartTotals, packageDefaults, priceProduct } from 
 import { getStoreInfo, STORE_INFO_KEYS, invalidateStoreInfoCache } from '../services/store-info';
 import { getServiceContent, SERVICE_CONTENT_KEYS, invalidateServiceCache } from '../services/service-content';
 import { getBranches, saveBranches, parseBranches, serializeBranches, getBranchCoords, saveBranchCoords, getDeliveryTiers, saveDeliveryTiers } from '../services/branches';
-import { notifyOrderStatus, notifyOrderOnTheWay, sendRatingRequest, sendText } from '../messenger/send';
+import { notifyOrderStatus, notifyOrderOnTheWay, customerAddress, sendRatingRequest, sendText } from '../messenger/send';
+import { sendOrderInvoice } from '../services/invoice';
 
 const r = Router();
 
@@ -442,8 +443,9 @@ r.post('/orders/:id/status', async (req, res) => {
         await notifyOrderOnTheWay(customer.data.psid, order.id, order.order_number);
       }
       else await notifyOrderStatus(customer.data.psid, status, order.order_number, order);
-      // Send rating request when order is completed
+      // Attach the JPEG invoice, then ask for a rating, when the order completes.
       if (status === 'COMPLETED') {
+        await sendOrderInvoice(customer.data.psid, order.id);
         await sendRatingRequest(customer.data.psid, order.order_number, order.id);
       }
     }
@@ -690,7 +692,7 @@ r.put('/orders/:id', async (req, res) => {
   if (upd.order_type && upd.order_type !== order.order_type) changes.push(`Type: ${upd.order_type === 'delivery' ? '🚚 Delivery' : '🏬 Pickup'}`);
   if (upd.fulfillment_date && upd.fulfillment_date !== order.fulfillment_date) changes.push(`📅 Date: ${upd.fulfillment_date}`);
   if (upd.time_slot && upd.time_slot !== order.time_slot) changes.push(`⏰ Time: ${upd.time_slot}`);
-  if (upd.address !== undefined && upd.address !== order.address) changes.push(`📍 Address: ${upd.address || '—'}`);
+  if (upd.address !== undefined && upd.address !== order.address) changes.push(`📍 Address: ${customerAddress(upd.address) || '—'}`);
   if (upd.notes !== undefined && upd.notes !== order.notes) changes.push('📝 Notes updated');
   // Item-level edits (add / quantity / remove) run through the item endpoints
   // BEFORE this PUT — the editor summarizes what it changed here so the
@@ -1051,7 +1053,11 @@ r.post('/reservations/:id/status', async (req, res) => {
       const { data: ord } = await supa().from('orders').select('order_number, customer_id').eq('id', Number(resv.order_id)).maybeSingle();
       if (ord?.customer_id) {
         const { data: cust } = await supa().from('customers').select('psid').eq('id', ord.customer_id).maybeSingle();
-        if (cust?.psid) await notifyOrderStatus(cust.psid, sync.status, ord.order_number);
+        if (cust?.psid) {
+          await notifyOrderStatus(cust.psid, sync.status, ord.order_number);
+          // A reservation marked COMPLETED also closes its order — attach the invoice.
+          if (sync.status === 'COMPLETED') await sendOrderInvoice(cust.psid, Number(resv.order_id));
+        }
       }
     }
     return res.json({ ok: true, order_status: sync.status ?? null });

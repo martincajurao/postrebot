@@ -1,6 +1,5 @@
 ﻿﻿import type { Request, Response } from 'express';
 import { supa } from '../db/supabase';
-import { getReservationByOrderId } from '../services/reservations';
 import { getOrderItems } from '../services/orders';
 import { getServiceContent } from '../services/service-content';
 import { listImages } from '../api/supabase-storage';
@@ -544,6 +543,24 @@ export async function sendCarousel(psid: string, elements: any[]): Promise<void>
 }
 
 // ---------- notification helpers (used by admin actions) ----------
+/** Rider-only navigation lines (the waze:// deep link appended to the stored
+ *  delivery address at order time, plus legacy https waze fallbacks) must never
+ *  reach the CUSTOMER — they are for the rider's booking card only. Strips them
+ *  from any address that goes into a customer-facing message. Google Maps
+ *  store links (pickup orders — FOR the customer) are kept untouched. */
+export function customerAddress(address?: string | null): string {
+  if (!address) return '';
+  return String(address)
+    // Drop the navigation labels (label + URL) wherever they sit — also covers
+    // the flattened one-line variant produced by the admin edit input.
+    .replace(/\s*📍\s*Navigate \(opens Waze app\):\s*\S*/gi, '')
+    .replace(/\s*Fallback \(browser\):\s*\S*/gi, '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !/^waze:\/\//i.test(l) && !/waze\.com/i.test(l))
+    .join('\n');
+}
+
 export async function notifyOrderStatus(psid: string, status: string, orderNumber?: string, order?: any): Promise<void> {
   const orderRef = orderNumber ? ` (${orderNumber})` : '';
   
@@ -556,16 +573,9 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
     const customerName = customer.name || order.customer_name || 'N/A';
     const contactNum = customer.phone || order.phone || 'N/A';
     const orderType = order.order_type === 'delivery' ? 'Delivery' : 'Pickup';
-    const location = order.address || 'N/A';
-    
-    // Fetch reservation reference number
-    let reservationRef = '';
-    if (order.id) {
-      const reservation = await getReservationByOrderId(order.id);
-      if (reservation) {
-        reservationRef = `\n📋 Reservation: RES-${reservation.id}`;
-      }
-    }
+    // Rider-only navigation lines (the waze deep link) never belong in the
+    // customer's copy of the form — they live in the rider's booking card.
+    const location = customerAddress(order.address) || 'N/A';
 
     // Ordered menu items (with package slot choices when present)
     let itemsBlock = '';
@@ -589,8 +599,7 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
       `\n𝑪𝒐𝒏𝒕𝒂𝒄𝒕#: ${contactNum}` +
       `\n𝑶𝒓𝒅𝒆𝒓: ${orderType}` +
       itemsBlock +
-      `\n𝑳𝒐𝒄𝒂𝒕𝒊𝒐𝒏,𝒍𝒂𝒏𝒅𝒎𝒂𝒓𝒌: ${location}}` +
-      reservationRef
+      `\n𝑳𝒐𝒄𝒂𝒕𝒊𝒐𝒏,𝒍𝒂𝒏𝒅𝒎𝒂𝒓𝒌: ${location}}`
     );
   };
   
@@ -609,7 +618,7 @@ export async function notifyOrderStatus(psid: string, status: string, orderNumbe
       ? `📦 Your order${orderRef} is now ready for pickup at our store! See you soon.`
       : `📦 Your order${orderRef} is ready! Our delivery rider will pick it up shortly.`,
     CANCELLED: `❌ Your order${orderRef} has been cancelled. If this is unexpected or you'd like to reorder, just send us a message.`,
-    COMPLETED: `🎉 Your order${orderRef} has been completed — we hope you enjoyed it! Thank you for ordering from Postre Food Products.`,
+    COMPLETED: `🎉 Your order${orderRef} has been completed — we hope you enjoyed it!\n🧾 Your official invoice is attached below. Thank you for ordering from Postre Food Products.`,
   };
 
   let msg = messages[status];
@@ -649,7 +658,7 @@ export async function sendOrderConfirmation(psid: string, order: any, items: any
     `📋 Order #: ${order.order_number}\n` +
     `${Number(order.discount) > 0 ? `🏷️ Discount: -₱${Number(order.discount).toLocaleString('en-PH')}\n` : ''}` +
     `💰 Total: ₱${Number(order.total).toLocaleString('en-PH')}\n` +
-    `📦 ${order.order_type === 'delivery' ? 'Delivery' : 'Pickup'}${order.address ? `\n📍 ${order.address}` : ''}\n` +
+    `📦 ${order.order_type === 'delivery' ? 'Delivery' : 'Pickup'}${customerAddress(order.address) ? `\n📍 ${customerAddress(order.address)}` : ''}\n` +
     `📅 ${order.fulfillment_date || 'ASAP'} at ${order.time_slot || 'ASAP'}\n` +
     `💳 ${order.payment_method ? order.payment_method.toUpperCase() : 'COD'}\n` +
     `\n📝 Items:\n${itemLines}\n` +

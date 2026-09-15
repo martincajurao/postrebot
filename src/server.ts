@@ -4,6 +4,7 @@ import { migrate } from './db/postgres';
 import adminRoutes from './api/admin';
 import uploadRoutes from './api/upload';
 import { logConfig } from './api/supabase-storage';
+import { sweepInvoices } from './services/invoice';
 import { loginHandler } from './api/auth';
 import messengerWebhook from './messenger/webhook';
 import webviewApi from './api/webview';
@@ -36,6 +37,13 @@ migrate()
     // The app must still boot so Messenger/webhook keep working.
     console.error('[db] migration warning (non-fatal):', err?.message || err);
   });
+
+// Reclaim invoice storage left behind by an earlier restart (the deferred
+// delete after a send does not survive a process exit). Best-effort: a failure
+// must never stop the server from booting.
+sweepInvoices()
+  .then((n) => { if (n) console.log(`[invoice] startup sweep reclaimed ${n} file(s)`); })
+  .catch((err) => console.warn('[invoice] startup sweep error (non-fatal):', err?.message || err));
 
 app.use('/webhook', messengerWebhook);
 app.post('/api/login', loginHandler);

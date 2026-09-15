@@ -13,6 +13,7 @@ import { getState, setState, sendText, sendQuickReplies, sendButtons, sendCarous
 import { getCart, addItem, removeItem, updateQuantity, cartTotals, clearCart, getOrCreateCart } from '../services/cart';
 import { createOrderFromCart, getCustomerOrders, getOrderById, getOrderItems, getOrderStatusHistory, cancelOrder, completeOrderByCustomer, rateOrder } from '../services/orders';
 import { sendPushToAdmins } from '../services/push';
+import { sendOrderInvoice } from '../services/invoice';
 import { slotAvailability, isDateOpen, createReservation } from '../services/reservations';
 import { pricePackage, packageDefaults, computeCartTotals, netPackagePrice } from '../services/pricing';
 import { estimateDeliveryFee, buildGoogleMapsUrl, getNearestBranchCoords } from '../services/branches';
@@ -1594,7 +1595,9 @@ export async function handleMessage(messaging: any) {
       const result = await completeOrderByCustomer(orderId, cust.id);
       if (result.ok) {
         const order = await getOrderById(orderId);
-        await sendText(psid, `🎉 Enjoy! Order ${order.order_number} is complete. Thank you for ordering!`);
+        await sendText(psid, `🎉 Enjoy! Order ${order.order_number} is complete. Thank you for ordering!\n🧾 Your official invoice is attached below.`);
+        // Attach the rendered JPEG invoice for the completed order (best-effort).
+        await sendOrderInvoice(psid, order.id);
         return sendRatingRequest(psid, order.order_number, order.id);
       }
       return sendText(psid, `ℹ️ ${result.message}`).then(() => mainMenu(psid));

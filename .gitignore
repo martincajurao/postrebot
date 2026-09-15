@@ -12,3 +12,6 @@ data/admin-test.db*
 data/verify.db*
 data/image-test.db*
 data/backups/
+
+# runtime-generated invoice JPEGs (Supabase Storage is the primary host)
+public/invoices/

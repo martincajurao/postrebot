@@ -186,7 +186,7 @@ export async function createOrderFromCart(
     time_slot: details.time_slot ?? null,
     payment_method: details.payment_method ?? null,
     notes: details.notes ?? null,
-  }).select('id').single();
+  }).select('*').single();
   if (orderErr) throw new Error(`Order creation failed: ${orderErr.message}`);
   const orderId = Number(orderRow!.id);
 
@@ -255,7 +255,18 @@ export async function createOrderFromCart(
   await clearCart(psid);
   // discount = package deductions at order time (subtotal − total), exposed so
   // confirmations and admin flows can show: subtotal − discount + fee = total.
-  return { orderId, orderNumber, total: totals.total, subtotal: totals.subtotal, discount: totals.discount };
+  // The FULL inserted row (order_type, fulfillment_date, time_slot, address,
+  // payment_method, …) is spread in so the chat receipts render the customer's
+  // ACTUAL choices — never the "Pickup / ASAP at ASAP" fallbacks for a delivery
+  // order. Legacy keys (orderId/orderNumber/total/…) stay for compatibility.
+  return {
+    ...orderRow,
+    orderId,
+    orderNumber,
+    total: totals.total,
+    subtotal: totals.subtotal,
+    discount: totals.discount,
+  };
 }
 
 export async function updateOrderStatus(orderId: number, status: string): Promise<void> {

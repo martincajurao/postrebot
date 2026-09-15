@@ -10,11 +10,13 @@
     "postinstall": "npm run build",
     "test": "tsx -r dotenv/config test-webview-crud.ts",
     "test:webview": "tsx -r dotenv/config test-webview-crud.ts",
+    "test:invoice": "tsx -r dotenv/config test-invoice.ts",
     "backup": "node scripts/backup-db.mjs",
     "test:branches": "tsx scripts/smoke-branches.ts",
     "gen:vapid": "tsx src/services/gen-vapid.ts"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.9",
     "@supabase/supabase-js": "^2.114.0",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",
